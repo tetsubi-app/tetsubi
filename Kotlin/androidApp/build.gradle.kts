@@ -28,7 +28,7 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         // In step with iOS: the same version and build number (project.yml MARKETING_VERSION /
         // CURRENT_PROJECT_VERSION). Raise both before each release.
-        versionCode = 1
+        versionCode = 2
         versionName = "1.0"
     }
 
