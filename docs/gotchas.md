@@ -52,6 +52,12 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 ### Audio and playback
 
+**A converted stream for AVPlayer must be HLS.** A plain HTTP transcode from `/Audio/{id}/universal` (`TranscodingProtocol=http`) comes back chunked, with no length and no byte ranges, and AVPlayer refuses it (AVFoundation -11850, CoreMedia -12939). The mobile-data stream in `StreamURLBuilder` therefore asks for `TranscodingProtocol=hls` with `TranscodingContainer=mp4`; this was checked with AVPlayer against the server directly and through a Cloudflare tunnel. The original file (`stream.<ext>?static=true`) supports byte ranges and is unaffected.
+
+**The equaliser and visualiser do not run on HLS streams.** The audio tap in `AudioEffects` needs the asset's audio track, and an HLS asset has none, so on the converted mobile-data stream the effects are silently skipped. They work for original streams and downloads.
+
+**The playback error message ends with the player's own reason.** `PlayerManager.failureDetail` adds the error codes, any HTTP status, the kind of stream (original, converted, HLS, file) and the kind of network, for example "(AVFoundation -11850 / -12939, converted, mobile data)". Ask for that text when someone reports a track that will not play.
+
 **Any `MTAudioProcessingTap` on an `AVQueuePlayer` item breaks gapless playback.** Measured on a direct-play ALAC album: no tap gave 0 ms between tracks, the app's tap 262 ms, and even a do-nothing tap 262 ms; setting the mix before queueing does not help, while an audio mix without a tap is fine. `AudioEffects.attach(to:)` therefore only registers items and adds the tap while the equaliser is on or a visualiser is showing.
 
 **Equaliser and gapless together would need a different player.** The real fix is an `AVAudioEngine` player with sample-accurate scheduling and `AVAudioUnitEQ`, which is a large rewrite. Android does not have this limit (see the Android section).

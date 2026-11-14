@@ -60,6 +60,9 @@ public final class PlayerManager {
     public private(set) var lastError: PlaybackError?
     /// Title of the track that failed (for `errorMessage`).
     private var failedTitle = ""
+    /// The player's own reason for the failure (error codes, network kind),
+    /// shown after the message so a report says what actually went wrong.
+    private var failedDetail = ""
     /// Whether playback was running when an interruption began.
     private var resumeAfterInterruption = false
 
@@ -69,6 +72,7 @@ public final class PlayerManager {
         case nil: nil
         case .trackFailed:
             "Couldn't play \u{201C}\(failedTitle)\u{201D}. Check the connection to your server, then press Play to try again."
+                + (failedDetail.isEmpty ? "" : " (\(failedDetail))")
         default:
             "Couldn't load this album from your server. Check the connection, then try again."
         }
@@ -1135,7 +1139,52 @@ private extension PlayerManager {
     func handleItemFailed(_ item: AVPlayerItem) {
         let index = currentIndex - enqueuedStartIndex
         guard enqueuedItems.indices.contains(index), enqueuedItems[index] === item else { return }
+        failedDetail = Self.failureDetail(of: item, expensive: NetworkMonitor.shared.isExpensive)
+        print("[PlayerManager] track failed: \(failedDetail)")
         trackFailed()
+    }
+
+    /// "AVFoundation -11850 / -12939, HTTP 403, HLS, mobile data": the item's
+    /// error and its cause, the last entry of its error log, the kind of
+    /// stream and the kind of network.
+    static func failureDetail(of item: AVPlayerItem, expensive: Bool) -> String {
+        var parts: [String] = []
+        if let error = item.error as NSError? {
+            var text = "\(shortDomain(error.domain)) \(error.code)"
+            if let cause = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+                text += " / \(cause.code)"
+            }
+            parts.append(text)
+        }
+        if let event = item.errorLog()?.events.last {
+            let status = event.errorStatusCode
+            if (400...599).contains(status) {
+                parts.append("HTTP \(status)")
+            } else if item.error == nil {
+                parts.append("\(shortDomain(event.errorDomain)) \(status)")
+            }
+        }
+        if let url = (item.asset as? AVURLAsset)?.url {
+            if url.isFileURL {
+                parts.append("file")
+            } else if url.path.hasSuffix("/universal") {
+                let hls = url.query?.contains("TranscodingProtocol=hls") == true
+                parts.append(hls ? "converted, HLS" : "converted")
+            } else {
+                parts.append("original")
+            }
+        }
+        parts.append(expensive ? "mobile data" : "Wi-Fi")
+        return parts.joined(separator: ", ")
+    }
+
+    private static func shortDomain(_ domain: String) -> String {
+        switch domain {
+        case AVFoundationErrorDomain: "AVFoundation"
+        case NSURLErrorDomain: "URL"
+        case "CoreMediaErrorDomain": "CoreMedia"
+        default: domain
+        }
     }
 
     private func handleItemDidPlayToEndTime() {

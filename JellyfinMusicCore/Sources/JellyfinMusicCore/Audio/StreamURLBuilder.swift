@@ -35,7 +35,9 @@ public struct StreamURLBuilder {
     ///     what `DeviceProfile.current` lists as a direct-play
     ///     container.
     ///   - maxBitrate: when set (bits/s), streams AAC transcoded to at most
-    ///     this bitrate — used on cellular. `nil` keeps the normal behaviour.
+    ///     this bitrate, as HLS — used on cellular. `nil` keeps the normal
+    ///     behaviour. The equaliser and visualiser don't run on HLS streams
+    ///     (no audio track for the tap).
     public func url(
         for track: JellyfinTrack,
         format: AudioFormat = .alac,
@@ -80,15 +82,18 @@ public struct StreamURLBuilder {
         return api.buildURL(path, queryItems: query)
     }
 
-    /// `/Audio/{id}/universal` forced to AAC in m4a at `bitrate` (checked
-    /// against the server: returns audio/mp4 AAC).
+    /// `/Audio/{id}/universal` forced to AAC at `bitrate`, as HLS with mp4
+    /// segments. It has to be HLS: a plain HTTP transcode comes back chunked,
+    /// with no length and no byte ranges, and AVPlayer refuses that
+    /// (CoreMedia error -12939). Checked against the server with AVPlayer,
+    /// directly and through a Cloudflare tunnel.
     private func cappedURL(for track: JellyfinTrack, bitrate: Int) -> URL? {
         var query = [
             URLQueryItem(name: "UserId", value: userId),
             URLQueryItem(name: "DeviceId", value: api.deviceId),
             URLQueryItem(name: "Container", value: "m4a"),
-            URLQueryItem(name: "TranscodingContainer", value: "m4a"),
-            URLQueryItem(name: "TranscodingProtocol", value: "http"),
+            URLQueryItem(name: "TranscodingContainer", value: "mp4"),
+            URLQueryItem(name: "TranscodingProtocol", value: "hls"),
             URLQueryItem(name: "AudioCodec", value: "aac"),
             URLQueryItem(name: "MaxStreamingBitrate", value: String(bitrate)),
             URLQueryItem(name: "AudioBitRate", value: String(bitrate)),
