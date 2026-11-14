@@ -1,0 +1,121 @@
+package gg.dekiru.musicplayer.playback
+
+import gg.dekiru.musicplayer.playback.effects.AudioEffects
+
+/** One queued item as the platform player sees it. */
+data class EngineItem(
+    val id: String,
+    val url: String,
+    val title: String,
+    val artist: String,
+    val album: String,
+    /** Album art for the lock screen / notification (fetched with the auth header). */
+    val artworkUrl: String,
+    val durationMillis: Long,
+    /**
+     * What a Google Cast device plays: the server's stream with the token in
+     * the URL (the receiver can't send headers), in a format it plays. Also
+     * for downloaded tracks (the receiver can't reach this device's files).
+     * Null where there's no Cast.
+     */
+    val castUrl: String? = null,
+    /** The cover for the TV, with the token. */
+    val castArtworkUrl: String? = null,
+) {
+    /** Converted on the fly by the server: seeking restarts the stream at the new point. */
+    val seeksByRestart: Boolean get() = StreamUrls.isConverted(url)
+
+    /** The stream for this device's player, or for a Cast device when `casting`. */
+    fun url(casting: Boolean): String = if (casting) castUrl ?: url else url
+
+    /** [seeksByRestart] for the stream that's played, here or on a Cast device. */
+    fun seeksByRestart(casting: Boolean): Boolean = StreamUrls.isConverted(url(casting))
+}
+
+/** What the player tells [PlayerController]. Called on the main thread. */
+interface EngineListener {
+    /** The playing item changed. `automatic`: the previous one played to its end (or repeated). */
+    fun onIndexChanged(index: Int, automatic: Boolean)
+    fun onIsPlayingChanged(isPlaying: Boolean)
+    /** The last item finished (Repeat off). */
+    fun onEnded()
+    fun onError(message: String)
+}
+
+/**
+ * The platform player: Media3 ExoPlayer on Android (gapless through its
+ * playlist), libmpv on Linux later. It holds the whole queue; skips, repeat
+ * and moving to the next item happen inside it, and the lock screen and
+ * headset buttons reach it directly, so it reports changes back through
+ * [listener]. Main thread only.
+ */
+interface PlayerEngine {
+    /** False where there's no player yet (the desktop until the Linux phase). */
+    val isSupported: Boolean
+
+    /** Formats it plays as they are; others are transcoded by the server. */
+    val directPlayFormats: Set<AudioFormat>
+
+    var listener: EngineListener?
+
+    /** The `Authorization` header sent with streams and artwork. */
+    fun setAuthorization(header: String?)
+
+    fun setQueue(items: List<EngineItem>, startIndex: Int)
+
+    /** Replaces the items after the playing one without interrupting it. */
+    fun replaceAfterCurrent(items: List<EngineItem>)
+
+    fun play()
+    fun pause()
+    fun seekTo(millis: Long)
+
+    /** Plays item `index` from its start. */
+    fun skipTo(index: Int)
+    fun setRepeatMode(mode: RepeatMode)
+
+    /** 0…1, for normalisation. */
+    fun setVolume(volume: Float)
+
+    /** Whether the lock screen, notification and headset may skip and seek (off in Maniac Mode). */
+    fun setSkipControlsEnabled(enabled: Boolean)
+    fun stop()
+
+    val positionMillis: Long
+
+    /** The playing item's length, once known (0 before). */
+    val durationMillis: Long
+
+    /** The equaliser and visualiser, where this player has them (Android); null hides them. */
+    val audioEffects: AudioEffects? get() = null
+
+    /** Google Cast, where this player has it (Android with Play services); null hides the Cast button. */
+    val cast: CastRoute? get() = null
+
+    /**
+     * Better Cast streams for queued items, by track ID, found after the
+     * queue was loaded (a downloaded album's server formats). Items that
+     * aren't queued are ignored, and so is the whole call while casting.
+     */
+    fun updateCastUrls(urls: Map<String, String>) = Unit
+}
+
+/** No player on this platform yet: Play stays off. */
+class UnsupportedPlayerEngine : PlayerEngine {
+    override val isSupported = false
+    override val directPlayFormats = emptySet<AudioFormat>()
+    override var listener: EngineListener? = null
+    override fun setAuthorization(header: String?) = Unit
+    override fun setQueue(items: List<EngineItem>, startIndex: Int) = Unit
+    override fun replaceAfterCurrent(items: List<EngineItem>) = Unit
+    override fun play() = Unit
+    override fun pause() = Unit
+    override fun seekTo(millis: Long) = Unit
+    override fun skipTo(index: Int) = Unit
+    override fun setRepeatMode(mode: RepeatMode) = Unit
+    override fun setVolume(volume: Float) = Unit
+    override fun setSkipControlsEnabled(enabled: Boolean) = Unit
+    override fun stop() = Unit
+    override val positionMillis = 0L
+    override val durationMillis = 0L
+}

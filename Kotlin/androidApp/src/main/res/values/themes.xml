@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Main theme: navy window behind the Compose content. -->
+    <style name="Theme.Tetsubi" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/tetsubi_navy</item>
+    </style>
+
+    <!-- Launch: navy with the disc, then Theme.Tetsubi. -->
+    <style name="Theme.Tetsubi.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/tetsubi_navy</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_disc</item>
+        <item name="postSplashScreenTheme">@style/Theme.Tetsubi</item>
+    </style>
+</resources>

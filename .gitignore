@@ -1,0 +1,14 @@
+.DS_Store
+*.xcworkspace
+# The Xcode project is generated: run `xcodegen generate` after cloning.
+*.xcodeproj/
+xcuserdata/
+.swiftpm/
+build/
+.build/
+DerivedData/
+*.swp
+*.swo
+
+# Qwen agent / session tooling
+.qwen/

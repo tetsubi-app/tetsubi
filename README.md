@@ -1,0 +1,61 @@
+# Tetsubi
+
+A music player for [Jellyfin](https://jellyfin.org/) servers, built around playing whole albums. For iPhone, iPad, CarPlay and Mac (Swift), and Android and Linux (Kotlin).
+
+Website, support and privacy: [tetsubi.app](https://tetsubi.app)
+
+Tetsubi is made by DEKIRU Ltd. It isn't affiliated with Jellyfin. Made with AI.
+
+## What it does
+
+- Signs in with Quick Connect or a password, and finds servers on the local network.
+- Home: On This Day (albums released on today's date), Favourites, Recently Played, Recently Added, Random Albums.
+- Library, artist pages, search, favourites, and Jellyfin playlists (browse, play, make, edit).
+- Gapless album playback with lock-screen and media-key controls, an equaliser and a visualiser.
+- Downloads for offline listening, in the original format or converted.
+- Home-screen widgets; CarPlay and Siri on iOS; Android Auto, voice and Google Cast on Android.
+- Maniac Mode: albums play start to finish, with no skipping, shuffle or scrubbing.
+
+## Status
+
+| Platform | State |
+|---|---|
+| iOS, iPadOS | In testing (TestFlight) |
+| macOS | Runs; not yet distributed |
+| Android | In testing (signed APK) |
+| Linux | Shares the Android code; only a starter window so far |
+
+## Layout
+
+| Path | What |
+|---|---|
+| `JellyfinMusicCore/` | Swift package shared by the iOS and Mac apps: models, Jellyfin API, player, downloads, views, tests |
+| `Tetsubi-iOS/`, `Tetsubi-macOS/`, `Tetsubi-Widget/` | The app targets and the iOS widget extension |
+| `project.yml` | The Xcode project definition (XcodeGen) |
+| `Kotlin/` | Kotlin Multiplatform build: `shared`, `androidApp`, `desktopApp` ([details](Kotlin/README.md)) |
+| `docs/` | [Gotchas](docs/gotchas.md), [icons](docs/icons.md) |
+
+## Build
+
+**iOS and Mac** need Xcode (iOS 17 / macOS 14 or later) and [XcodeGen](https://github.com/yonaskolb/XcodeGen). The Xcode project is generated, not committed:
+
+```bash
+xcodegen generate
+open Tetsubi.xcodeproj
+```
+
+Tests: `cd JellyfinMusicCore && swift test`
+
+To sign your own builds, change `DEVELOPMENT_TEAM` and the bundle and App Group IDs in `project.yml` and the entitlements files; these IDs are unique across all Apple teams.
+
+**Android and Linux**: see [`Kotlin/README.md`](Kotlin/README.md).
+
+```bash
+cd Kotlin
+./gradlew :shared:allTests :androidApp:assembleDebug
+./gradlew :desktopApp:run
+```
+
+## Licence
+
+[Mozilla Public License 2.0](LICENSE). The bundled typeface, DEKIRU Sans, is a modified IBM Plex Sans under the SIL Open Font License; its licence is beside the font files.

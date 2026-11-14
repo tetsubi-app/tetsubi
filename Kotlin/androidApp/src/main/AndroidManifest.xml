@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Mobile data or Wi-Fi: streams are capped on metered networks. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Playback with the screen off and the app closed. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Downloads: foreground work with a progress notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- usesCleartextTraffic: Jellyfin servers are often plain http:// at home,
+         as on iOS (NSAllowsArbitraryLoads).
+         allowBackup="false": the login is encrypted with a key that stays on
+         this device, so a backup restored elsewhere couldn't be read anyway. -->
+    <application
+        android:name=".TetsubiApplication"
+        android:allowBackup="false"
+        android:label="Tetsubi"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.Tetsubi.Starting"
+        android:usesCleartextTraffic="true"
+        android:supportsRtl="true">
+
+        <!-- configChanges: rotating the tablet or resizing a window doesn't
+             restart the activity (which would drop a Quick Connect code mid-login);
+             Compose lays the screen out again by itself. -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Google Cast: the options (Default Media Receiver, no Cast SDK notification). -->
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="gg.dekiru.musicplayer.android.cast.CastOptionsProvider" />
+
+        <!-- Android Auto: Tetsubi shows up as a media app. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!-- "Play <album> on Tetsubi" said to Google Assistant on the phone. No screen of its own. -->
+        <activity
+            android:name=".auto.VoiceSearchActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Playback: notification, lock screen, Bluetooth and headset buttons;
+             and the media library Android Auto and Assistant browse and play from. -->
+        <service
+            android:name=".PlaybackService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+
+        <!-- Album and playlist pictures for Android Auto's lists (it loads them itself). -->
+        <provider
+            android:name=".auto.ArtworkProvider"
+            android:authorities="${applicationId}.artwork"
+            android:exported="true" />
+
+        <!-- Downloads run as WorkManager foreground work of type dataSync. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
+        <!-- The home-screen widget, small (2×2) and medium (4×2). -->
+        <receiver
+            android:name=".widget.SmallWidgetReceiver"
+            android:label="@string/widget_small_label"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/tetsubi_widget_small" />
+        </receiver>
+        <receiver
+            android:name=".widget.MediumWidgetReceiver"
+            android:label="@string/widget_medium_label"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/tetsubi_widget_medium" />
+        </receiver>
+
+        <!-- Pause and Cancel on the download notification. -->
+        <receiver
+            android:name="gg.dekiru.musicplayer.downloads.DownloadActionReceiver"
+            android:exported="false" />
+    </application>
+</manifest>

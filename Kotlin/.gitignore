@@ -1,0 +1,13 @@
+# Gradle and build output
+.gradle/
+.kotlin/
+build/
+# Machine-specific
+local.properties
+# IDE
+.idea/
+*.iml
+# Signing keys never go in git
+*.jks
+*.keystore
+keystore.properties

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same as the iOS app's appBackground. -->
+    <color name="tetsubi_navy">#000B25</color>
+</resources>

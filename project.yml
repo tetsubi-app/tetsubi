@@ -1,0 +1,195 @@
+name: Tetsubi
+
+settings:
+  # Signing lives here so `xcodegen generate` keeps it (it used to be set
+  # by hand in Xcode and was lost on every regenerate).
+  DEVELOPMENT_TEAM: Z5K52MAC6X
+  CODE_SIGN_STYLE: Automatic
+  # The iPhone app's version and build number, shared with its widget
+  # (Apple requires them to match). Raise the build before each upload.
+  # The Mac app keeps its own in its Info.plist properties below.
+  MARKETING_VERSION: "1.0"
+  CURRENT_PROJECT_VERSION: "1"
+
+options:
+  bundleIdPrefix: gg.dekiru
+  developmentLanguage: en
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+  groupSortPosition: top
+  createIntermediateGroups: true
+
+packages:
+  JellyfinMusicCore:
+    path: JellyfinMusicCore
+
+targets:
+  # ── iOS App ─────────────────────────────────────────────────────────────────
+  Tetsubi-iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Tetsubi-iOS
+      # The widget's button intents run in the app (AudioPlaybackIntent),
+      # so the app compiles them too.
+      - path: Tetsubi-Widget/PlaybackIntents.swift
+    dependencies:
+      - package: JellyfinMusicCore
+      - package: JellyfinMusicCore
+        product: TetsubiWidgetData
+      - target: Tetsubi-Widget
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: gg.dekiru.musicplayer.ios
+      INFOPLIST_FILE: Tetsubi-iOS/Info.plist
+      CODE_SIGN_ENTITLEMENTS: Tetsubi-iOS/Tetsubi-iOS.entitlements
+      # CarPlay (carplay-audio) was granted 2026-11-12 and is in
+      # Tetsubi-iOS.entitlements. Finding servers on the network
+      # (networking.multicast) still needs Apple's say-so, so only
+      # simulator builds carry it (device builds would fail to sign).
+      "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": Tetsubi-iOS/Tetsubi-iOS-CarPlay.entitlements
+    info:
+      path: Tetsubi-iOS/Info.plist
+      properties:
+        # Name under the icon and the name Siri listens for.
+        CFBundleDisplayName: Tetsubi
+        # Set once for the app and its widget at the top of this file.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # Shown in Settings ▸ About.
+        NSHumanReadableCopyright: "© 2026 DEKIRU Ltd. All rights reserved."
+        INAlternativeAppNames:
+          - INAlternativeAppName: Jellyfin
+        UIBackgroundModes:
+          - audio
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # The App Store requires all four on iPad (for multitasking).
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default Configuration
+                UISceneDelegateClassName: "$(PRODUCT_MODULE_NAME).SceneDelegate"
+            CPTemplateApplicationSceneSessionRoleApplication:
+              - UISceneConfigurationName: CarPlay Configuration
+                UISceneClassName: CPTemplateApplicationScene
+                UISceneDelegateClassName: "$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate"
+        # Storyboard so the background picture can fill the screen
+        # (UILaunchScreen only allows a colour and one centred image).
+        UILaunchStoryboardName: LaunchScreen
+        # Jellyfin servers are often plain http:// (home servers, reverse
+        # proxies without TLS), so any address is allowed. App Review note:
+        # users connect to their own media servers.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: "Used to find your Jellyfin server and connect to it on your home network."
+        # Only Apple's built-in encryption (HTTPS, Keychain), so exempt;
+        # saves answering the export question on every upload.
+        ITSAppUsesNonExemptEncryption: false
+        NSBluetoothAlwaysUsageDescription: "Used for Bluetooth audio output routing when listening to music."
+
+  # ── iOS home-screen widget ──────────────────────────────────────────────────
+  # Small and medium Now Playing widgets. Links only TetsubiWidgetData (the
+  # snapshot the app writes to the App Group), not the player or network code.
+  Tetsubi-Widget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Tetsubi-Widget
+      # The app's typeface (DEKIRU Sans), so the widget matches it.
+      - path: JellyfinMusicCore/Sources/JellyfinMusicCore/Resources/Fonts
+        buildPhase: resources
+    dependencies:
+      - package: JellyfinMusicCore
+        product: TetsubiWidgetData
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: gg.dekiru.musicplayer.ios.widget
+      INFOPLIST_FILE: Tetsubi-Widget/Info.plist
+      CODE_SIGN_ENTITLEMENTS: Tetsubi-Widget/Tetsubi-Widget.entitlements
+    info:
+      path: Tetsubi-Widget/Info.plist
+      properties:
+        CFBundleDisplayName: Tetsubi
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSHumanReadableCopyright: "© 2026 DEKIRU Ltd. All rights reserved."
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        UIAppFonts:
+          - DekiruSans-Regular.ttf
+          - DekiruSans-Medium.ttf
+          - DekiruSans-SemiBold.ttf
+          - DekiruSans-Bold.ttf
+
+  # ── macOS App ───────────────────────────────────────────────────────────────
+  Tetsubi-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - path: Tetsubi-macOS
+    dependencies:
+      - package: JellyfinMusicCore
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: gg.dekiru.musicplayer.macos
+      INFOPLIST_FILE: Tetsubi-macOS/Info.plist
+      CODE_SIGN_ENTITLEMENTS: Tetsubi-macOS/Tetsubi-macOS.entitlements
+    info:
+      path: Tetsubi-macOS/Info.plist
+      properties:
+        LSMinimumSystemVersion: "14.0"
+        # Name in the menu bar, Dock and Finder (the build name is Tetsubi-macOS).
+        CFBundleName: Tetsubi
+        CFBundleDisplayName: Tetsubi
+        # Shown in the Mac About window and Settings ▸ About.
+        NSHumanReadableCopyright: "© 2026 DEKIRU Ltd. All rights reserved."
+        # Jellyfin servers are often plain http:// (home servers, reverse
+        # proxies without TLS), so any address is allowed. App Review note:
+        # users connect to their own media servers.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: "Used to find your Jellyfin server and connect to it on your home network."
+        # Only Apple's built-in encryption (HTTPS, Keychain), so exempt;
+        # saves answering the export question on every upload.
+        ITSAppUsesNonExemptEncryption: false
+        NSHighResolutionCapable: true
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+
+  # ── Unit Tests ──────────────────────────────────────────────────────────────
+  JellyfinMusicCoreTests:
+    type: bundle.unit-test
+    platform: [iOS, macOS]
+    sources:
+      - path: JellyfinMusicCore/Tests/JellyfinMusicCoreTests
+    dependencies:
+      - package: JellyfinMusicCore
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: gg.dekiru.musicplayer.coretests
+
+schemes:
+  Tetsubi-iOS:
+    build:
+      targets:
+        Tetsubi-iOS: all
+    run:
+      config: Debug
+    test:
+      targets:
+        - JellyfinMusicCoreTests_iOS
+  Tetsubi-macOS:
+    build:
+      targets:
+        Tetsubi-macOS: all
+    run:
+      config: Debug
+    test:
+      targets:
+        - JellyfinMusicCoreTests_macOS

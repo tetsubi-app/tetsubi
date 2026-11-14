@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The home-screen widget, as the widget picker lists it. -->
+    <string name="widget_small_label">Now Playing</string>
+    <string name="widget_medium_label">Now Playing and controls</string>
+    <string name="widget_small_description">What\'s playing in Tetsubi, with play and pause.</string>
+    <string name="widget_medium_description">What\'s playing in Tetsubi, with previous, play/pause and next.</string>
+</resources>
