@@ -49,6 +49,10 @@ object SettingsText {
     const val ARTIST_SOURCES = "MusicBrainz, Wikipedia"
     const val COPYRIGHT = "© 2026 DEKIRU Ltd. All rights reserved."
 
+    /** Shown above the copyright in About: the header, then one name per line (as iOS). */
+    const val QA_TEAM = "QA team"
+    val QA_TEAM_NAMES = listOf("Matt Evans")
+
     // "Made with AI": Jellyfin's community rules ask apps built mainly with an AI to say so clearly.
     val ABOUT_FOOTER = """
         $COPYRIGHT

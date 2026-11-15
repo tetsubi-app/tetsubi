@@ -36,6 +36,9 @@ public struct SettingsView: View {
         return build.map { "\(version) (\($0))" } ?? version
     }
 
+    /// The people who test the app, listed under "QA team" in About.
+    static let qaTeam = ["Matt Evans"]
+
     /// Copyright line from the app's Info.plist (`NSHumanReadableCopyright`).
     private var copyright: String {
         Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String
@@ -189,9 +192,12 @@ public struct SettingsView: View {
             } header: {
                 Text("About")
             } footer: {
+                // The QA team, then the copyright and credits.
                 // "Made with AI": Jellyfin's community rules ask apps
                 // built mainly with an AI to say so clearly.
-                Text("""
+                Text("QA team").fontWeight(.semibold)
+                + Text("\n" + Self.qaTeam.joined(separator: "\n") + "\n\n")
+                + Text("""
                 \(copyright)
                 Made with AI.
 

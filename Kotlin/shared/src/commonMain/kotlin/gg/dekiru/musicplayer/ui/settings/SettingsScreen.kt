@@ -54,6 +54,10 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -232,7 +236,11 @@ private fun AboutSection() {
         Divider()
         ValueRow(SettingsText.ARTIST_INFORMATION, SettingsText.ARTIST_SOURCES)
     }
-    Footer(SettingsText.ABOUT_FOOTER)
+    Footer(buildAnnotatedString {
+        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(SettingsText.QA_TEAM) }
+        append("\n" + SettingsText.QA_TEAM_NAMES.joinToString("\n") + "\n\n")
+        append(SettingsText.ABOUT_FOOTER)
+    })
 }
 
 @Composable
@@ -244,7 +252,10 @@ internal fun Header(title: String) {
 }
 
 @Composable
-internal fun Footer(text: String) {
+internal fun Footer(text: String) = Footer(AnnotatedString(text))
+
+@Composable
+internal fun Footer(text: AnnotatedString) {
     Text(text, color = secondary, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.fillMaxWidth().padding(start = 32.dp, end = 32.dp, top = 6.dp))
 }
 

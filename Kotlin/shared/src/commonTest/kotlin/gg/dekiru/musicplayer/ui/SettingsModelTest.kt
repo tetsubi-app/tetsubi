@@ -145,4 +145,10 @@ class SettingsModelTest {
         assertTrue("DEKIRU Sans — based on IBM Plex Sans by IBM Corp., SIL Open Font License 1.1." in footer)
         assertTrue("MusicBrainz and Wikidata (CC0)" in footer)
     }
+
+    @Test
+    fun aboutListsTheQaTeam() {
+        assertEquals("QA team", SettingsText.QA_TEAM)
+        assertEquals(listOf("Matt Evans"), SettingsText.QA_TEAM_NAMES)
+    }
 }

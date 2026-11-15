@@ -146,7 +146,11 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **The CarPlay scene must be declared and multiple scenes enabled.** `CPTemplateApplicationSceneSessionRoleApplication` is in the scene manifest in `project.yml` and `UIApplicationSupportsMultipleScenes` is true. Scene delegate class names use `$(PRODUCT_MODULE_NAME)`, so renaming the target needs no change there.
 
-**Test CarPlay in the simulator through I/O, External Displays, CarPlay.** CarPlay had only run in the simulator when this was written; nothing had been checked in a real car.
+**Test CarPlay in the simulator, where it is offered.** In the older Simulator app it is under I/O, External Displays, CarPlay. Xcode 27 replaces that app with Device Hub, whose Device menu has a CarPlay Simulator item; on the development Mac it was disabled for iOS 26 and iOS 27 simulators and for a real iPhone, for a reason not yet found. CarPlay has since been used in a real car.
+
+**CarPlay's light or dark appearance is the car's choice, not the phone's.** The templates are drawn by the system and follow CarPlay's own Appearance setting (Automatic or Always Dark), whatever the iPhone is set to. `UIUserInterfaceStyle: Dark` is set for the whole iOS app in `project.yml`; whether CarPlay's templates follow it is unverified.
+
+**CarPlay's Now Playing screen cannot show extra text.** `CPNowPlayingTemplate` shows only the title, artist, album and artwork from `MPNowPlayingInfoCenter`. Anything else, such as the album's duration or finish time, would have to be folded into one of those fields, which also changes the lock screen.
 
 ### SwiftUI layout and navigation
 

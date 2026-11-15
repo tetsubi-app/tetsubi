@@ -9,7 +9,7 @@ settings:
   # (Apple requires them to match). Raise the build before each upload.
   # The Mac app keeps its own in its Info.plist properties below.
   MARKETING_VERSION: "1.0"
-  CURRENT_PROJECT_VERSION: "3"
+  CURRENT_PROJECT_VERSION: "4"
 
 options:
   bundleIdPrefix: gg.dekiru
@@ -58,6 +58,10 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # Shown in Settings ▸ About.
         NSHumanReadableCopyright: "© 2026 DEKIRU Ltd. All rights reserved."
+        # The app is always dark (the navy design). The phone screens already
+        # force it in SwiftUI; this is app-wide, to see whether CarPlay's
+        # templates follow it too (being tried in a car, build 4).
+        UIUserInterfaceStyle: Dark
         INAlternativeAppNames:
           - INAlternativeAppName: Jellyfin
         UIBackgroundModes:
