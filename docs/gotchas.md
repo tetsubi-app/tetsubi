@@ -322,7 +322,7 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 
 **Cast and MediaRouter bring in an old Fragment.** Release lint flags it because permission requests need Fragment 1.3 or later; a newer Fragment is pinned in the version catalog.
 
-**The release signing key lives outside the repo.** `Kotlin/androidApp/build.gradle.kts` looks for `~/.android-keys/segue-release.jks` (alias `segue`) and reads the password from the macOS Keychain item "Segue Android release key" or from `TETSUBI_KEYSTORE_PASSWORD`; these key names are historical and were kept through the rename. Without them a release build is left unsigned. A lost key means no more updates, so back up both the file and the password.
+**The release signing key lives outside the repo.** `Kotlin/androidApp/build.gradle.kts` looks for `~/.android-keys/tetsubi-release.jks` (alias `tetsubi`) and reads the password from the macOS Keychain item "Tetsubi Android release key" (account `tetsubi-release`) or from `TETSUBI_KEYSTORE_PASSWORD`. Without them a release build is left unsigned. A lost key means no more updates, so back up both the file and the password.
 
 **A debug install must be removed before installing a release build.** The signatures differ, and uninstalling wipes the app's downloads.
 
