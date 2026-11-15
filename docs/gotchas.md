@@ -400,7 +400,9 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 
 **The desktop app shares the Kotlin code but not every feature.** Playback uses `UnsupportedPlayerEngine` until a libmpv engine is written, so Play stays off; the equaliser, visualiser, shake, Cast and output switcher are hidden or do nothing, `NetworkMonitor` always reports online, and reading format details from a downloaded file returns nothing.
 
-**The login is a plain file for now.** `FileSecretStore` writes `$XDG_DATA_HOME/tetsubi/login.properties` with mode 600; Secret Service support is planned. Settings are in `$XDG_CONFIG_HOME/tetsubi/settings.properties` and caches under `$XDG_CACHE_HOME/tetsubi`.
+**Storage names carry the app ID, never the app's name.** Android's SharedPreferences files (`secrets`, `settings`, `app`), the Keystore alias (`secrets`), the WorkManager work name (`downloads`) and the desktop folders (`gg.dekiru.musicplayer` under each XDG directory) are name-free on purpose, like the bundle IDs. Changing any of them after a release would need code that moves the old data across.
+
+**The login is a plain file for now.** `FileSecretStore` writes `$XDG_DATA_HOME/gg.dekiru.musicplayer/login.properties` with mode 600; Secret Service support is planned. Settings are in `$XDG_CONFIG_HOME/gg.dekiru.musicplayer/settings.properties` and caches under `$XDG_CACHE_HOME/gg.dekiru.musicplayer`.
 
 **`:desktopApp` needs `components-resources` as a direct dependency.** Without it the desktop app cannot load images from the shared module.
 

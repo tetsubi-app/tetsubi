@@ -48,7 +48,7 @@ Live checks against a real server (skipped unless set):
 TETSUBI_LIVE_ADDRESS=192.168.1.50 TETSUBI_LIVE_DISCOVERY=1 ./gradlew :shared:desktopTest --tests '*LiveServerTest*' --rerun -i
 ```
 
-The desktop app keeps its login in `$XDG_DATA_HOME/tetsubi/login.properties` (else `~/.local/share/tetsubi/`); delete it to sign out by hand.
+The desktop app keeps its login in `$XDG_DATA_HOME/gg.dekiru.musicplayer/login.properties` (else `~/.local/share/gg.dekiru.musicplayer/`); delete it to sign out by hand.
 
 `local.properties` (not in git) holds `sdk.dir=<Android SDK path>`; Android Studio writes it, or create it by hand.
 

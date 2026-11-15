@@ -68,7 +68,7 @@ class MainActivity : ComponentActivity() {
     /** Android 13+: asks once, the first time a download starts (as the progress notification needs it). */
     private fun askForNotificationsOnFirstDownload() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val prefs = getSharedPreferences("tetsubi.android", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("app", Context.MODE_PRIVATE)
         if (prefs.getBoolean(ASKED_NOTIFICATIONS, false)) return
         val session = (application as TetsubiApplication).session
         lifecycleScope.launch {

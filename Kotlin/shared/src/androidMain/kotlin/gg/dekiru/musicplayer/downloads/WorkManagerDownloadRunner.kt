@@ -39,7 +39,7 @@ interface DownloadsHost {
 }
 
 /**
- * Runs downloads as WorkManager foreground work (unique work "tetsubi-downloads"),
+ * Runs downloads as WorkManager foreground work (unique work "downloads"),
  * so they go on with the app closed and carry on after the process is killed.
  */
 class WorkManagerDownloadRunner(context: Context) : DownloadRunner {
@@ -70,7 +70,7 @@ class WorkManagerDownloadRunner(context: Context) : DownloadRunner {
     override fun stop() {}
 
     companion object {
-        const val WORK_NAME = "tetsubi-downloads"
+        const val WORK_NAME = "downloads"
 
         /** A worker is between its start and its last look at the queue (main thread only). */
         internal var workerActive = false

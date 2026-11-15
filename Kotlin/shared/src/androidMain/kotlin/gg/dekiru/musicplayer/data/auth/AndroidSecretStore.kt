@@ -20,7 +20,7 @@ import javax.crypto.spec.GCMParameterSpec
  */
 class AndroidSecretStore(context: Context) : SecretStore {
 
-    private val prefs = context.applicationContext.getSharedPreferences("tetsubi.secrets", Context.MODE_PRIVATE)
+    private val prefs = context.applicationContext.getSharedPreferences("secrets", Context.MODE_PRIVATE)
 
     @Synchronized
     override fun get(key: String): String? {
@@ -70,7 +70,7 @@ class AndroidSecretStore(context: Context) : SecretStore {
 
     private companion object {
         const val KEYSTORE = "AndroidKeyStore"
-        const val ALIAS = "tetsubi.secrets"
+        const val ALIAS = "secrets"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val IV_LENGTH = 12
     }

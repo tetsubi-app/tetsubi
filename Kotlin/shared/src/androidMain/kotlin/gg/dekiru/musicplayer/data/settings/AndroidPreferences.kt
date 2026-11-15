@@ -7,7 +7,7 @@ import gg.dekiru.musicplayer.playback.PlayerEngine
 
 /** Plain settings in a private SharedPreferences file. */
 class AndroidPreferences(context: Context) : Preferences {
-    private val prefs = context.applicationContext.getSharedPreferences("tetsubi.settings", Context.MODE_PRIVATE)
+    private val prefs = context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
     override fun getString(key: String): String? = prefs.getString(key, null)
     override fun putString(key: String, value: String?) {
         prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply()

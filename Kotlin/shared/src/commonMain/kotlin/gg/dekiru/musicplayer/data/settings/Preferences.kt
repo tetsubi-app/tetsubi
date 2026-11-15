@@ -7,7 +7,7 @@ import gg.dekiru.musicplayer.playback.UnsupportedPlayerEngine
 
 /**
  * Small plain settings (the iOS app's UserDefaults). Android:
- * SharedPreferences; desktop: `$XDG_CONFIG_HOME/tetsubi/settings.properties`.
+ * SharedPreferences; desktop: `$XDG_CONFIG_HOME/gg.dekiru.musicplayer/settings.properties`.
  * (DataStore may replace this when Settings arrives in A5.)
  */
 interface Preferences {
@@ -29,7 +29,7 @@ class InMemoryPreferences : Preferences {
 class AppEnvironment(
     /** A folder for caches the system may clear (album art, artist info). */
     val cacheDir: String,
-    /** Downloaded albums: Android `filesDir/Downloads`, Linux `$XDG_DATA_HOME/tetsubi/Downloads`. */
+    /** Downloaded albums: Android `filesDir/Downloads`, Linux `$XDG_DATA_HOME/gg.dekiru.musicplayer/Downloads`. */
     val downloadsDir: String,
     val preferences: Preferences,
     /** The app's one player (Media3 on Android; none yet on Linux). */

@@ -1,5 +1,6 @@
 package gg.dekiru.musicplayer.data.auth
 
+import gg.dekiru.musicplayer.data.settings.xdg
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -9,7 +10,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The login in a file only this user can read
- * (`$XDG_DATA_HOME/tetsubi/login.properties`, else `~/.local/share/tetsubi/`).
+ * (`$XDG_DATA_HOME/gg.dekiru.musicplayer/login.properties`, else `~/.local/share/gg.dekiru.musicplayer/`).
  *
  * A stand-in until the Linux phase moves it into the system keyring
  * (Secret Service), with this as the fallback when no keyring runs.
@@ -59,11 +60,9 @@ class FileSecretStore(private val file: File) : SecretStore {
     }
 
     companion object {
-        fun default(): FileSecretStore {
-            val dataHome = System.getenv("XDG_DATA_HOME")?.takeIf { it.isNotBlank() }
-                ?: (System.getProperty("user.home") + "/.local/share")
-            return FileSecretStore(File(dataHome, "tetsubi/login.properties"))
-        }
+        fun default(): FileSecretStore = FileSecretStore(defaultFile())
+
+        internal fun defaultFile(): File = File(xdg("XDG_DATA_HOME", ".local/share"), "login.properties")
     }
 }
 
