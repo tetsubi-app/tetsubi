@@ -208,6 +208,18 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **The first network lookup from a new Mac binary can fail.** The macOS local network privacy check can make the very first address lookup fail.
 
+**A sheet on the Mac keeps a narrow default width unless it is told to fit its content.** The Now Playing sheet stayed about 470 pt wide whatever `.frame(idealWidth:)` said. Adding `.presentationSizing(.fitted)` (macOS 15 and later) makes the sheet take the ideal size; `NowPlayingView.nowPlayingSheetFrame()` does this, opening wide only when the main window has room (`macSheetIdealWidth`, `macSheetIdealHeight`, fed by `UIScale.windowWidth` and `windowHeight`).
+
+**Now Playing has two columns when it is wide.** From 640 pt wide and 520 pt tall (before the Mac's window scaling) the cover, title, progress and buttons go on the left and "Up next" on the right (`NowPlayingView.isWide`). The cover is sized from the height that is left (`wideArtSize`), so the buttons are not cropped. The height rule keeps an iPhone on its side on one column. An unfolded iPhone Duo is about 670 pt wide by my estimate and is meant to get two columns; the simulated Duo started folded and could not be unfolded, so only the iPad was checked on screen.
+
+**Space plays and pauses on the Mac through a key monitor, not a menu shortcut.** A bare Space menu shortcut would also take the spaces typed in Search and the playlist name field. `SpaceKeyMonitor` watches `keyDown` and acts only when no text field or focused button has the keyboard (`SpaceKeyRule`, which is tested). ⌘P in the Playback menu still works.
+
+**Interactive glass makes a Mac button bar appear to move.** `.glassEffect(.regular.interactive())` squashes the whole capsule under the pointer on every click. The Mac's playback bar uses plain `.regular`. Its progress line also keeps its space when the track length is unknown, so the bar never changes height while skipping.
+
+**The Mac playback bar is limited to Settings' content width** (`readableWidthOnMac`, 720 pt, growing with the window) and has a 16 pt gap under it; the window has no safe area to provide one.
+
+**Mac builds can be installed by copying the app to Applications, but a running copy may refuse to quit** (an open sheet can cancel the quit request). Quit it by hand or end the process first, then relaunch; the signed-in session lives in the Keychain and is kept.
+
 ## Jellyfin server and API
 
 Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server rather than from memory: Jellyfin answers plausible-looking but wrong paths with a quiet 404 or 401.

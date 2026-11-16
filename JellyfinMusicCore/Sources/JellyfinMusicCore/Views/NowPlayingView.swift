@@ -42,29 +42,14 @@ public struct NowPlayingView: View {
     // MARK: Body
 
     public var body: some View {
-        ScrollView {
-            VStack(spacing: 16.scaled) {
-                artSection
-
-                if showVisualiser {
-                    SpectrumView(isPlaying: manager.isPlaying, tint: seekTint)
-                        .frame(height: 64.scaled)
-                        .padding(.horizontal, 8.scaled)
-                }
-
-                titleSection
-
-                seekSection
-
-                controlsSection
-
-                togglesSection
-
-                upNextSection
+        // Wide (an unfolded Duo, an iPad, a wide Mac window): cover and info on the
+        // left, the track list on the right. Otherwise one scrolling column.
+        GeometryReader { geo in
+            if Self.isWide(width: geo.size.width, height: geo.size.height) {
+                wideLayout(size: geo.size)
+            } else {
+                narrowLayout
             }
-            .padding(20.scaled)
-            .padding(.top, 8.scaled)
-            .padding(.bottom, 24.scaled)
         }
         .background(AppBackgroundView())
         .foregroundStyle(.white)
@@ -113,17 +98,112 @@ public struct NowPlayingView: View {
         #endif
     }
 
+    // MARK: - Layouts
+
+    /// Size (before the Mac's window scaling) from which the two-column layout is
+    /// used. The width takes in an unfolded Duo (about 670 pt across), an iPad and a
+    /// Mac window; the height keeps an iPhone on its side (about 400 pt tall) on one
+    /// column, where two would leave the controls off screen.
+    static let wideMinimum: CGFloat = 640
+    static let wideMinimumHeight: CGFloat = 520
+
+    static func isWide(width: CGFloat, height: CGFloat) -> Bool {
+        let factor = UIScale.shared.factor
+        return width >= wideMinimum * factor && height >= wideMinimumHeight * factor
+    }
+
+    /// Mac sheet: how wide it opens. The two columns when the window has room
+    /// (leaving a margin each side), else the narrow card it always was.
+    static func macSheetIdealWidth(windowWidth: CGFloat) -> CGFloat {
+        let factor = UIScale.shared.factor
+        let room = min(windowWidth - 160, 980 * factor)
+        return room >= wideMinimum * factor ? room : 460
+    }
+
+    /// The cover in the two-column layout: as big as fits, so the title, progress
+    /// and buttons below it are all on screen without scrolling. The rest of that
+    /// column is about 430 pt (500 with the visualiser) at normal scale.
+    static func wideArtSize(columnWidth: CGFloat, height: CGFloat, visualiser: Bool) -> CGFloat {
+        let others = (visualiser ? 510 : 430).scaled
+        let byWidth = min(columnWidth - 56.scaled, 360.scaled)
+        return max(140.scaled, min(byWidth, height - others))
+    }
+
+    /// Mac sheet: how tall it opens. Most of the window, up to 880 pt at normal scale.
+    static func macSheetIdealHeight(windowHeight: CGFloat) -> CGFloat {
+        let factor = UIScale.shared.factor
+        let room = min(windowHeight - 80, 880 * factor)
+        return max(room, 700)
+    }
+
+    /// The single column: everything in one scroll, the track list last.
+    private var narrowLayout: some View {
+        ScrollView {
+            VStack(spacing: 16.scaled) {
+                artSection(size: 220.scaled)
+                visualiserSection
+                titleSection
+                seekSection
+                controlsSection
+                togglesSection
+                upNextSection
+            }
+            .padding(20.scaled)
+            .padding(.top, 8.scaled)
+            .padding(.bottom, 24.scaled)
+        }
+    }
+
+    /// Two columns, each scrolling on its own. The top padding keeps both
+    /// clear of the More and dismiss buttons in the corners.
+    private func wideLayout(size: CGSize) -> some View {
+        let left = min(max(size.width * 0.46, 320.scaled), 520.scaled)
+        let art = Self.wideArtSize(columnWidth: left, height: size.height, visualiser: showVisualiser)
+        return HStack(alignment: .top, spacing: 0) {
+            ScrollView {
+                VStack(spacing: 16.scaled) {
+                    artSection(size: art)
+                    visualiserSection
+                    titleSection
+                    seekSection
+                    controlsSection
+                    togglesSection
+                }
+                .padding(.horizontal, 28.scaled)
+                .padding(.top, 56.scaled)
+                .padding(.bottom, 24.scaled)
+            }
+            .frame(width: left)
+
+            ScrollView {
+                upNextSection
+                    .padding(.horizontal, 20.scaled)
+                    .padding(.top, 44.scaled)
+                    .padding(.bottom, 24.scaled)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var visualiserSection: some View {
+        if showVisualiser {
+            SpectrumView(isPlaying: manager.isPlaying, tint: seekTint)
+                .frame(height: 64.scaled)
+                .padding(.horizontal, 8.scaled)
+        }
+    }
+
     // MARK: - Sections
 
     @ViewBuilder
-    private var artSection: some View {
+    private func artSection(size: CGFloat) -> some View {
         if let track = manager.currentTrack {
             AlbumArtView(
                 request: manager.artRequest(for: track, size: 600),
-                size: 220.scaled, cornerRadius: 16.scaled
+                size: size, cornerRadius: 16.scaled
             )
         } else {
-            AlbumArtView(request: nil, size: 220.scaled, cornerRadius: 16.scaled)
+            AlbumArtView(request: nil, size: size, cornerRadius: 16.scaled)
         }
     }
 
@@ -508,3 +588,26 @@ private struct QualityToggleStyle: ButtonStyle {
         }
     }
 }
+
+#if os(macOS)
+extension View {
+    /// The Mac's Now Playing sheet: opens wide enough for two columns when the
+    /// window allows, and can be resized.
+    @ViewBuilder
+    func nowPlayingSheetFrame() -> some View {
+        let sized = frame(minWidth: 460,
+                          idealWidth: NowPlayingView.macSheetIdealWidth(windowWidth: UIScale.shared.windowWidth),
+                          maxWidth: .infinity,
+                          minHeight: 560,
+                          idealHeight: NowPlayingView.macSheetIdealHeight(windowHeight: UIScale.shared.windowHeight),
+                          maxHeight: .infinity)
+        // The default sheet sizing kept the width at about 470 whatever the
+        // frame said; "fitted" takes the content's ideal size.
+        if #available(macOS 15.0, *) {
+            sized.presentationSizing(.fitted)
+        } else {
+            sized
+        }
+    }
+}
+#endif

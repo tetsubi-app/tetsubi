@@ -18,6 +18,11 @@ public final class UIScale: @unchecked Sendable {
     /// Multiplier for point sizes. Only changed on the main thread.
     public internal(set) var factor: CGFloat = 1.0
 
+    /// The Mac window's width, for views that size themselves from it (the Now
+    /// Playing sheet). 0 until measured; iOS never sets it.
+    public internal(set) var windowWidth: CGFloat = 0
+    public internal(set) var windowHeight: CGFloat = 0
+
     init() {}
 
     // MARK: Formula
@@ -53,6 +58,8 @@ public final class UIScale: @unchecked Sendable {
     public func update(for size: CGSize) {
         let new = Self.factor(for: size)
         if abs(new - factor) > 0.001 { factor = new }
+        if abs(size.width - windowWidth) >= 1 { windowWidth = size.width }
+        if abs(size.height - windowHeight) >= 1 { windowHeight = size.height }
     }
 }
 

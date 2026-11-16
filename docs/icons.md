@@ -1,8 +1,14 @@
 # Icons
 
-The app icon is a disc on navy (`#000B25`). The disc is drawn from an SVG that
-is kept outside the repo, with `tools/render-disc.swift` (NSImage renders the
-SVG's gradient; ImageMagick drops it). The SVG's disc is 880 of its 1000
+The app icon is a disc on navy (`#000B25`). The disc's SVG is
+`Tetsubi-iOS/Assets.xcassets/DiscLogo.imageset/DiscLogo.svg` (the same file is in
+the Mac and widget catalogs). The icons are drawn from it with
+`tools/render-disc.swift` (NSImage renders the SVG's gradient; ImageMagick drops
+it). The logo inside the apps is the SVG itself, so it stays sharp at any size:
+`DiscLogo` in the iOS, Mac and widget asset catalogs (vector, "preserve vector
+data"), and `Kotlin/shared/src/commonMain/composeResources/drawable/disc.xml`, a
+hand-converted Android vector drawable of the same artwork (the Settings and
+sign-in screens, and the desktop window icon). The SVG's disc is 880 of its 1000
 viewBox, so the SVG is drawn at disc size ÷ 0.88, centred.
 
 The disc is the same size as the Jellyfin logo in Jellyfin's own icons, so the

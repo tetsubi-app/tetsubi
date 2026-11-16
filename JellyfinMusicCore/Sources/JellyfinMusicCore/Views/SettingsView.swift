@@ -37,7 +37,9 @@ public struct SettingsView: View {
     }
 
     /// The people who test the app, listed under "QA team" in About.
-    static let qaTeam = ["Matt Evans"]
+    static let qaTeam = ["Matt Evans", "Eloy Smith Rodriguez"]
+    /// The names on one line, as shown under "QA team".
+    static var qaTeamLine: String { qaTeam.joined(separator: " \u{2022} ") }
 
     /// Copyright line from the app's Info.plist (`NSHumanReadableCopyright`).
     private var copyright: String {
@@ -55,7 +57,7 @@ public struct SettingsView: View {
                 Toggle(isOn: $maniacMode) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Maniac Mode")
-                        Text("A front-to-back listen. No skips.")
+                        Text("No skips or shuffles, a front to back listen. Tettō tetsubi.")
                             .font(.plex(.caption))
                             .foregroundStyle(.secondary)
                     }
@@ -196,7 +198,7 @@ public struct SettingsView: View {
                 // "Made with AI": Jellyfin's community rules ask apps
                 // built mainly with an AI to say so clearly.
                 Text("QA team").fontWeight(.semibold)
-                + Text("\n" + Self.qaTeam.joined(separator: "\n") + "\n\n")
+                + Text("\n" + Self.qaTeamLine + "\n\n")
                 + Text("""
                 \(copyright)
                 Made with AI.

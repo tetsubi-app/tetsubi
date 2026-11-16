@@ -238,7 +238,7 @@ private fun AboutSection() {
     }
     Footer(buildAnnotatedString {
         withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(SettingsText.QA_TEAM) }
-        append("\n" + SettingsText.QA_TEAM_NAMES.joinToString("\n") + "\n\n")
+        append("\n" + SettingsText.QA_TEAM_LINE + "\n\n")
         append(SettingsText.ABOUT_FOOTER)
     })
 }

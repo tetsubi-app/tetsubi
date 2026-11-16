@@ -14,7 +14,7 @@ import gg.dekiru.musicplayer.playback.StreamingQuality
 /** The Settings tab's texts, worded as iOS `SettingsView`. */
 object SettingsText {
     const val MANIAC_TITLE = "Maniac Mode"
-    const val MANIAC_CAPTION = "A front-to-back listen. No skips."
+    const val MANIAC_CAPTION = "No skips or shuffles, a front to back listen. Tettō tetsubi."
 
     const val SERVER = "Server"
     const val NO_SERVER = "No server configured."
@@ -49,9 +49,11 @@ object SettingsText {
     const val ARTIST_SOURCES = "MusicBrainz, Wikipedia"
     const val COPYRIGHT = "© 2026 DEKIRU Ltd. All rights reserved."
 
-    /** Shown above the copyright in About: the header, then one name per line (as iOS). */
+    /** Shown above the copyright in About: the header, then the names on one line (as iOS). */
     const val QA_TEAM = "QA team"
-    val QA_TEAM_NAMES = listOf("Matt Evans")
+    val QA_TEAM_NAMES = listOf("Matt Evans", "Eloy Smith Rodriguez")
+    /** The names on one line, separated by bullets (as iOS). */
+    val QA_TEAM_LINE: String get() = QA_TEAM_NAMES.joinToString(" \u2022 ")
 
     // "Made with AI": Jellyfin's community rules ask apps built mainly with an AI to say so clearly.
     val ABOUT_FOOTER = """

@@ -35,6 +35,9 @@ public struct NowPlayingBarView: View {
         Group {
             barContent
         }
+        // Mac: no wider than Settings' boxes and centred; across a big window the
+        // controls were a long way apart to reach. No change on iPhone.
+        .readableWidthOnMac()
         .frame(maxWidth: .infinity)
     }
 
@@ -102,12 +105,19 @@ public struct NowPlayingBarView: View {
                 .padding(.horizontal, 20.scaled)
                 .padding(.vertical, 12.scaled)
 
-                if style == .floating, manager.duration > 0 {
-                    ProgressView(value: manager.position, total: manager.duration)
+                if style == .floating {
+                    // Always there, empty and invisible while the length is unknown:
+                    // taking the line away shortened the bar, and the buttons above
+                    // it jumped when a skip landed on a track with no length yet.
+                    let known = manager.duration > 0
+                    ProgressView(value: known ? min(manager.position, manager.duration) : 0,
+                                 total: known ? manager.duration : 1)
                         .progressViewStyle(.linear)
                         .tint(artAccent ?? Color.appBlue)
+                        .opacity(known ? 1 : 0)
                         .padding(.horizontal, 28.scaled)
                         .padding(.bottom, 12.scaled)
+                        .accessibilityHidden(!known)
                 }
             }
             .modifier(LozengeBackground(enabled: style == .floating))
@@ -146,18 +156,43 @@ public struct NowPlayingBarView: View {
 private struct LozengeBackground: ViewModifier {
     let enabled: Bool
 
+    /// The Mac's glass is not "interactive": that makes the whole capsule squash
+    /// and shift under the pointer on every click, so the buttons in it appeared
+    /// to move when pressed.
+    @available(iOS 26.0, macOS 26.0, *)
+    private static var glass: Glass {
+        #if os(macOS)
+        .regular
+        #else
+        .regular.interactive()
+        #endif
+    }
+
+    /// Space under the capsule. On the iPhone the tab bar or the safe area
+    /// provides it; the Mac window has neither, so the bar sat flush against the
+    /// bottom edge. Matches the 16 pt at its sides.
+    private static var bottomGap: CGFloat {
+        #if os(macOS)
+        16
+        #else
+        0
+        #endif
+    }
+
     func body(content: Content) -> some View {
         if !enabled {
             content
         } else if #available(iOS 26.0, macOS 26.0, *) {
             content
-                .glassEffect(.regular.interactive(), in: .capsule)
+                .glassEffect(Self.glass, in: .capsule)
                 .padding(.horizontal, 16)
+                .padding(.bottom, Self.bottomGap)
         } else {
             content
                 .background(.thinMaterial, in: Capsule())
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.12)))
                 .padding(.horizontal, 16)
+                .padding(.bottom, Self.bottomGap)
         }
     }
 }

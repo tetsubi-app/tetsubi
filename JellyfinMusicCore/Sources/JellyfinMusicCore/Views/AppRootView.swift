@@ -153,6 +153,8 @@ public struct AppRootView: View {
         .focusedSceneValue(\.playerManager, player)
         .focusedSceneValue(\.selectedAppTab, $selectedTab)
         .focusedSceneValue(\.libraryTabRequest, $libraryTabRequest)
+        // Mac: Space plays or pauses (not while typing).
+        .spaceTogglesPlayback(player)
         // Tapping the home-screen widget with nothing playing opens Home.
         .onReceive(NotificationCenter.default.publisher(for: AppSession.showHome)) { _ in
             selectedTab = .home
@@ -207,6 +209,9 @@ private extension View {
                     player.isNowPlayingPresented = false
                 }
                 .presentationCornerRadius(20)
+                #if os(macOS)
+                .nowPlayingSheetFrame()
+                #endif
             }
         }
     }

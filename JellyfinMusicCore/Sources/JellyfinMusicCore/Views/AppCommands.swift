@@ -83,8 +83,8 @@ public struct AppCommands: Commands {
 
         CommandMenu("Playback") {
             let hasTrack = player?.currentTrack != nil
-            // ⌘P rather than Space: a bare Space shortcut would stop
-            // spaces being typed in the Search box.
+            // ⌘P here; the Space bar also works, through `SpaceKeyMonitor`. A bare
+            // Space menu shortcut would stop spaces being typed in the Search box.
             Button(player?.isPlaying == true ? "Pause" : "Play") { player?.togglePlayPause() }
                 .keyboardShortcut("p", modifiers: .command)
                 .disabled(!hasTrack)

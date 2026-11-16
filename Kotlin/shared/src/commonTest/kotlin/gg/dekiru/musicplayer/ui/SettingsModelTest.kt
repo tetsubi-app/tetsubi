@@ -149,6 +149,7 @@ class SettingsModelTest {
     @Test
     fun aboutListsTheQaTeam() {
         assertEquals("QA team", SettingsText.QA_TEAM)
-        assertEquals(listOf("Matt Evans"), SettingsText.QA_TEAM_NAMES)
+        assertEquals(listOf("Matt Evans", "Eloy Smith Rodriguez"), SettingsText.QA_TEAM_NAMES)
+        assertEquals("Matt Evans \u2022 Eloy Smith Rodriguez", SettingsText.QA_TEAM_LINE)
     }
 }

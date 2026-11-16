@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app's disc: a gradient disc with a centre hole, and three rings in the app navy. Same artwork as the iOS and Mac DiscLogo.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="1000"
+    android:viewportHeight="1000">
+    <path android:pathData="M940,500C940,743.005 743.005,940 500,940C256.995,940 60,743.005 60,500C60,256.995 256.995,60 500,60C743.005,60 940,256.995 940,500ZM500,441.088C467.464,441.088 441.088,467.464 441.088,500C441.088,532.536 467.464,558.912 500,558.912C532.536,558.912 558.912,532.536 558.912,500C558.912,467.464 532.536,441.088 500,441.088Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="224.415"
+                android:startY="419.266"
+                android:endX="954.071"
+                android:endY="840.512"
+                android:startColor="#AA5CC3"
+                android:endColor="#00A4DC" />
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M401,500a99,99 0 1,0 198,0a99,99 0 1,0 -198,0"
+        android:strokeColor="#000B25"
+        android:strokeWidth="6" />
+    <path
+        android:pathData="M358.384,500a141.616,141.616 0 1,0 283.232,0a141.616,141.616 0 1,0 -283.232,0"
+        android:strokeColor="#000B25"
+        android:strokeWidth="20" />
+    <path
+        android:pathData="M85.892,500a414.108,414.108 0 1,0 828.216,0a414.108,414.108 0 1,0 -828.216,0"
+        android:strokeColor="#000B25"
+        android:strokeWidth="6" />
+</vector>
