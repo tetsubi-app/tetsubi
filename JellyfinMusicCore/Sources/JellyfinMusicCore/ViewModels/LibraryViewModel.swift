@@ -256,8 +256,16 @@ public final class LibraryViewModel {
         case .artist:
             return albums.sorted { indexOrder($0.artistName, $1.artistName) }
         case .year:
-            // Descending — newest first.
-            return albums.sorted { ($0.productionYear ?? 0) > ($1.productionYear ?? 0) }
+            // Newest release first, by full release date (`PremiereDate`),
+            // else Jan 1 of the year; no date at all goes last. Ties keep
+            // the incoming order (newest added first). Dates are read once
+            // per album, not per comparison.
+            let keyed = albums.enumerated().map {
+                (album: $0.element, index: $0.offset,
+                 date: $0.element.releaseDate?.timeIntervalSince1970 ?? -.infinity)
+            }
+            return keyed.sorted { $0.date != $1.date ? $0.date > $1.date : $0.index < $1.index }
+                .map(\.album)
         case .dateAdded:
             // The server returns items sorted by DateAdded desc; keep that order.
             return albums

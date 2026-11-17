@@ -699,7 +699,8 @@ final class LibraryViewModelTests: XCTestCase {
         name: String,
         artist: String,
         year: Int? = nil,
-        id: String? = nil
+        id: String? = nil,
+        date: String? = nil
     ) -> JellyfinAlbum {
         // `name` can't appear in a default-parameter value, so derive the
         // unique id inside the body when the caller didn't supply one.
@@ -707,7 +708,7 @@ final class LibraryViewModelTests: XCTestCase {
             id: id ?? "id-\(name)",
             name: name,
             serverId: "srv",
-            premiereDate: nil,
+            premiereDate: date,
             productionYear: year,
             albumArtists: [JellyfinPerson(id: nil, name: artist, serverId: nil)],
             album: nil,
@@ -746,6 +747,20 @@ final class LibraryViewModelTests: XCTestCase {
         ]
         let sorted = LibraryViewModel.sort(albums, by: .year)
         XCTAssertEqual(sorted.map(\.productionYear), [2025, 2015, 2000])
+    }
+
+    /// Year sorts by the full release date, else Jan 1 of the year; ties
+    /// keep the incoming (date added) order.
+    func testSortByYearUsesFullReleaseDateThenJan1() {
+        let albums = [
+            makeAlbum(name: "Spring", artist: "X", year: 2026, date: "2026-03-01T00:00:00.0000000Z"),
+            makeAlbum(name: "YearOnly", artist: "X", year: 2026),
+            makeAlbum(name: "Autumn", artist: "X", year: 2026, date: "2026-10-16T00:00:00.0000000Z"),
+            makeAlbum(name: "Late2025", artist: "X", year: 2025, date: "2025-12-31T00:00:00.0000000Z"),
+            makeAlbum(name: "SameDayAddedLater", artist: "X", year: 2026, date: "2026-03-01T00:00:00.0000000Z"),
+        ]
+        let sorted = LibraryViewModel.sort(albums, by: .year)
+        XCTAssertEqual(sorted.map(\.displayName), ["Autumn", "Spring", "SameDayAddedLater", "YearOnly", "Late2025"])
     }
 
     /// A nil year should sort to the end (treated as 0).

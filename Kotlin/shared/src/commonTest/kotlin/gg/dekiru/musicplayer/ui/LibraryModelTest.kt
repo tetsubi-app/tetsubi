@@ -31,8 +31,8 @@ import kotlin.test.assertTrue
 /** Library: sorting, filtering, the A–Z index, Random's pages, offline, remembered choices. */
 class LibraryModelTest {
 
-    private fun album(name: String, artist: String = "X", year: Int? = null, id: String = "id-$name") =
-        JellyfinAlbum(id = id, name = name, productionYear = year, albumArtists = listOf(JellyfinPerson(name = artist)))
+    private fun album(name: String, artist: String = "X", year: Int? = null, id: String = "id-$name", date: String? = null) =
+        JellyfinAlbum(id = id, name = name, premiereDate = date, productionYear = year, albumArtists = listOf(JellyfinPerson(name = artist)))
 
     private fun albums(count: Int) = (0 until count).map { album("Album $it", id = "a$it") }
 
@@ -99,6 +99,19 @@ class LibraryModelTest {
     fun sortByYearNewestFirstNoYearLast() {
         val list = listOf(album("NoYear"), album("Old", year = 2000), album("New", year = 2025), album("Mid", year = 2015))
         assertEquals(listOf(2025, 2015, 2000, null), LibraryModel.sort(list, LibrarySort.YEAR).map { it.productionYear })
+    }
+
+    @Test
+    fun sortByYearUsesTheFullReleaseDateThenJan1OfTheYear() {
+        val list = listOf(
+            album("Spring", year = 2026, date = "2026-03-01T00:00:00.0000000Z"),
+            album("YearOnly", year = 2026),
+            album("Autumn", year = 2026, date = "2026-10-16T00:00:00.0000000Z"),
+            album("Late2025", year = 2025, date = "2025-12-31T00:00:00.0000000Z"),
+            album("SameDayAddedLater", year = 2026, date = "2026-03-01T00:00:00.0000000Z"),
+        )
+        assertEquals(listOf("Autumn", "Spring", "SameDayAddedLater", "YearOnly", "Late2025"),
+            LibraryModel.sort(list, LibrarySort.YEAR).map { it.displayName })
     }
 
     @Test

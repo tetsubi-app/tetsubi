@@ -9,6 +9,7 @@ import gg.dekiru.musicplayer.data.models.DiscGrouping
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.models.JellyfinArtist
 import gg.dekiru.musicplayer.data.models.allDiscs
+import gg.dekiru.musicplayer.data.models.releaseDate
 import gg.dekiru.musicplayer.data.settings.FavoritesStore
 import gg.dekiru.musicplayer.data.settings.Preferences
 import gg.dekiru.musicplayer.downloads.DownloadedAlbum
@@ -16,6 +17,7 @@ import gg.dekiru.musicplayer.ui.home.HomeModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDate
 import kotlin.random.Random
 
 /** The three Library sections (as `LibraryTab` on iOS). */
@@ -313,11 +315,11 @@ class LibraryModel(
             return GridLayout(comfortable, 12f)
         }
 
-        /** Albums in the chosen order. Name and Artist follow the A–Z strip; Year is newest first; Date Added keeps the server's order. */
+        /** Albums in the chosen order. Name and Artist follow the A–Z strip; Year is newest release first (full date, else Jan 1 of the year; none last); Date Added keeps the server's order. */
         fun sort(albums: List<JellyfinAlbum>, by: LibrarySort, random: Random = Random.Default): List<JellyfinAlbum> = when (by) {
             LibrarySort.NAME -> albums.sortedWith(AlphaIndex.comparator { it.displayName })
             LibrarySort.ARTIST -> albums.sortedWith(AlphaIndex.comparator { it.artistName })
-            LibrarySort.YEAR -> albums.sortedByDescending { it.productionYear ?: 0 }
+            LibrarySort.YEAR -> albums.sortedWith(compareByDescending(nullsFirst<LocalDate>()) { it.releaseDate })
             LibrarySort.DATE_ADDED -> albums
             LibrarySort.RANDOM -> albums.shuffled(random)
         }
