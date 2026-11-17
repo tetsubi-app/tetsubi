@@ -217,11 +217,11 @@ public struct NowPlayingView: View {
                     .multilineTextAlignment(.center)
                 Text(track.artist)
                     .font(.plex(.headline))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(Color.albumArtistText)
                     .lineLimit(1)
                 Text(track.album)
                     .font(.plex(.subheadline))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(Color.albumYearText)
                     .lineLimit(1)
                 if manager.albumLength > 0 {
                     // One line: album duration, then the finish time.

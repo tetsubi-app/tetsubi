@@ -487,12 +487,12 @@ public struct AlbumDetailView: View {
                 if !viewModel.album.artistName.isEmpty {
                     Text(viewModel.album.artistName)
                         .font(.plex(.headline))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.albumArtistText)
                 }
                 if let year = viewModel.album.productionYear {
                     Text(String(year))
                         .font(.plex(.caption))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color.albumYearText)
                 }
                 Spacer()
             }

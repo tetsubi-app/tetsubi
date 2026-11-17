@@ -11,7 +11,7 @@ public extension Color {
     /// Content boxes over the background picture (Settings, Downloads,
     /// Equaliser groups, status banners): 50% black.
     static let appGroupBackground = Color.black.opacity(0.5)
-    /// Artist name under album titles (Home, Library): bright but a step
+    /// Artist name under album titles (Home, Library, Album, Now Playing): bright but a step
     /// below the title. The system's secondary grey was too faint.
     static let albumArtistText = Color.white.opacity(0.85)
     /// Release year under the artist: one step dimmer than the artist.

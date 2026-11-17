@@ -208,8 +208,8 @@ fun NowPlayingScreen(
 private fun Titles(player: PlayerController, track: PlaybackTrack, castName: String?, accent: Color?, qualityDetail: QualityDetailSetting) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(track.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
-        Text(track.artist, color = Color.White.copy(alpha = 0.7f), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(track.album, color = Color.White.copy(alpha = 0.5f), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(track.artist, color = TetsubiColors.albumArtistText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(track.album, color = TetsubiColors.albumYearText, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (castName != null) {
             Text(
                 CastRoute.playingOn(castName), color = accent ?: TetsubiColors.blue, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
