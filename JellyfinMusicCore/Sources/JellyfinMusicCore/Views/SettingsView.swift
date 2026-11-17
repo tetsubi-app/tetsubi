@@ -37,7 +37,7 @@ public struct SettingsView: View {
     }
 
     /// The people who test the app, listed under "QA team" in About.
-    static let qaTeam = ["Matt Evans", "Eloy Smith Rodriguez"]
+    static let qaTeam = ["Matt Evans", "Eloy Smith Rodriguez", "Adam Buchanan"]
     /// The names on one line, as shown under "QA team".
     static var qaTeamLine: String { qaTeam.joined(separator: " \u{2022} ") }
 

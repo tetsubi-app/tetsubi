@@ -51,7 +51,7 @@ object SettingsText {
 
     /** Shown above the copyright in About: the header, then the names on one line (as iOS). */
     const val QA_TEAM = "QA team"
-    val QA_TEAM_NAMES = listOf("Matt Evans", "Eloy Smith Rodriguez")
+    val QA_TEAM_NAMES = listOf("Matt Evans", "Eloy Smith Rodriguez", "Adam Buchanan")
     /** The names on one line, separated by bullets (as iOS). */
     val QA_TEAM_LINE: String get() = QA_TEAM_NAMES.joinToString(" \u2022 ")
 
