@@ -136,9 +136,15 @@ private fun <T> CardGridView(
     }
 }
 
-/** One album card; on wide layouts the cover fills the column and the text, gaps, tick and corners scale with it. */
+/**
+ * One album card; on wide layouts the cover fills the column and the text,
+ * gaps, tick and corners scale with it. [titleLines]: 1 on the Random page.
+ */
 @Composable
-private fun GridCell(api: JellyfinApi, album: JellyfinAlbum, grid: CardGrid, downloaded: Boolean, localArt: String?, onClick: () -> Unit) {
+internal fun GridCell(
+    api: JellyfinApi, album: JellyfinAlbum, grid: CardGrid, downloaded: Boolean, localArt: String?,
+    titleLines: Int = 2, onClick: () -> Unit,
+) {
     val t = grid.textScale
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape((8 * t).dp)).clickable(role = Role.Button, onClick = onClick),
@@ -150,7 +156,7 @@ private fun GridCell(api: JellyfinApi, album: JellyfinAlbum, grid: CardGrid, dow
             if (downloaded) DownloadedTick((16 * t).dp, Modifier.align(Alignment.BottomEnd).padding((4 * t).dp))
         }
         Text(
-            album.displayName, color = Color.White, fontSize = (12 * t).sp, fontWeight = FontWeight.Bold, maxLines = 2,
+            album.displayName, color = Color.White, fontSize = (12 * t).sp, fontWeight = FontWeight.Bold, maxLines = titleLines,
             overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
         )
         Text(

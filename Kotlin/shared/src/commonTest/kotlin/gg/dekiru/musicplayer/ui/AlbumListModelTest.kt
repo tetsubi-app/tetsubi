@@ -63,9 +63,13 @@ class AlbumListModelTest {
         assertEquals(12, AlbumListModel.randomCount(1280f, 924f, card))
         assertEquals(9, AlbumListModel.randomCount(1280f, 923f, card))
         assertEquals(12, AlbumListModel.randomCount(1280f, 884f, card, footer = 0f), "no \"Shake it\" on desktop")
-        // A narrow phone gets two across; twelve would need six rows.
-        assertEquals(2, AlbumListModel.columns(411f))
-        assertEquals(9, AlbumListModel.randomCount(411f, 800f, card))
+        // Phones get three across too (the Library's 120 dp covers, as iOS).
+        assertEquals(3, AlbumListModel.columns(411f))
+        assertEquals(3, AlbumListModel.columns(393f))
+        assertEquals(3, AlbumListModel.columns(375f))
+        // 360 dp is too narrow for three 120 dp covers, as in the Library.
+        assertEquals(2, AlbumListModel.columns(360f))
+        assertEquals(12, AlbumListModel.randomCount(393f, 924f, card))
     }
 
     @Test

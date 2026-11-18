@@ -61,7 +61,10 @@ import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.downloads.rememberIsDownloaded
 import gg.dekiru.musicplayer.ui.components.AlbumCard
 import gg.dekiru.musicplayer.ui.components.ShakeEffect
+import gg.dekiru.musicplayer.ui.library.CardGrid
 import gg.dekiru.musicplayer.ui.library.FavouriteAlbums
+import gg.dekiru.musicplayer.ui.library.GridCell
+import gg.dekiru.musicplayer.ui.library.LibraryModel
 import gg.dekiru.musicplayer.ui.library.FavouritesOptions
 import gg.dekiru.musicplayer.ui.library.GridZoom
 import gg.dekiru.musicplayer.ui.library.GridZoomButtons
@@ -123,19 +126,26 @@ class AlbumListModel(
         /** Random albums fetched each time; 9 or 12 of them are shown. */
         const val RANDOM_FETCH = 12
 
-        /** The grid: cards at least 152 dp wide, 8 dp apart, 10 dp in from the edges. */
-        const val MIN_COLUMN = 152f
-        const val COLUMN_GAP = 8f
+        /**
+         * The Random grid is the Library's (as iOS `RandomAlbumsView`, which
+         * uses `AlbumGridView`): 120 dp covers, three across on a phone, at
+         * most three, centred on wider screens.
+         */
         const val ROW_GAP = 12f
-        const val SIDE_PADDING = 10f
         const val TOP_PADDING = 8f
 
         /** "Shake it" and the space around it. */
         const val FOOTER = 40f
 
-        /** Random's grid: three across like the iPhone (two on a narrow phone), centred. */
-        fun columns(width: Float): Int = ((width - 2 * SIDE_PADDING + COLUMN_GAP) / (MIN_COLUMN + COLUMN_GAP)).toInt().coerceIn(1, 3)
-        const val RANDOM_MAX_WIDTH = 3 * MIN_COLUMN + 2 * COLUMN_GAP + 2 * SIDE_PADDING
+        /** The Library grid's layout for the page's width, at most three across. */
+        fun grid(width: Float): CardGrid {
+            val layout = LibraryModel.gridLayout(width - 2 * LibraryModel.GRID_EDGE)
+            val columns = layout.columns.coerceIn(1, 3)
+            return CardGrid(columns, layout.spacing, LibraryModel.GRID_ART, 1f, LibraryModel.IMAGE_SIZES.first())
+        }
+
+        fun columns(width: Float): Int = grid(width).columns
+        const val RANDOM_MAX_WIDTH = 3 * LibraryModel.GRID_ART + 2 * 12f + 2 * LibraryModel.GRID_EDGE
 
         /**
          * The Random page (as on iOS): 12 albums when all their rows, and
@@ -188,7 +198,8 @@ fun AlbumListScreen(
     val cardHeight = with(density) {
         val title = measurer.measure("Ag", style.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold))).size.height
         val line = measurer.measure("Ag", style.merge(TextStyle(fontSize = 11.sp))).size.height
-        (title + 2 * line).toDp().value + 12 + 140 + 12
+        // The Library card: cover, then a one-line title and the artist, 4 dp apart.
+        (title + line).toDp().value + LibraryModel.GRID_ART + 2 * 4
     }
     val bottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues()
     // Random keeps its fixed cards (its 9 or 12 depends on their size); Favourites' list has no zoom.
@@ -227,19 +238,25 @@ fun AlbumListScreen(
                         val height = maxHeight.value - bottom.calculateBottomPadding().value
                         model.albums.take(AlbumListModel.randomCount(maxWidth.value, height, cardHeight, if (canShake) AlbumListModel.FOOTER else 0f))
                     } else model.albums
+                    val grid = AlbumListModel.grid(maxWidth.value)
                     LazyVerticalGrid(
-                        columns = if (isRandom) GridCells.Fixed(AlbumListModel.columns(maxWidth.value)) else GridCells.Adaptive(152.dp),
+                        columns = if (isRandom) GridCells.Fixed(grid.columns) else GridCells.Adaptive(152.dp),
                         state = rememberLazyGridState(),
-                        contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 24.dp + bottom.calculateBottomPadding()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                        contentPadding = PaddingValues(
+                            start = LibraryModel.GRID_EDGE.dp, end = LibraryModel.GRID_EDGE.dp,
+                            top = AlbumListModel.TOP_PADDING.dp, bottom = 24.dp + bottom.calculateBottomPadding(),
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(grid.spacing.dp, Alignment.CenterHorizontally),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = if (isRandom) {
                             Modifier.fillMaxHeight().widthIn(max = AlbumListModel.RANDOM_MAX_WIDTH.dp).align(Alignment.TopCenter)
                         } else Modifier.fillMaxSize(),
                     ) {
                         items(shown, key = { it.id }) { album ->
-                            Box(contentAlignment = Alignment.TopCenter) {
-                                AlbumCard(api, album, onClick = { onOpen(album) }, titleLines = if (isRandom) 1 else 2, isDownloaded = isDownloaded(album))
+                            if (isRandom) {
+                                GridCell(api, album, grid, isDownloaded(album), localArt = null, titleLines = 1) { onOpen(album) }
+                            } else Box(contentAlignment = Alignment.TopCenter) {
+                                AlbumCard(api, album, onClick = { onOpen(album) }, isDownloaded = isDownloaded(album))
                             }
                         }
                         if (canShake) item(span = { GridItemSpan(maxLineSpan) }) {
