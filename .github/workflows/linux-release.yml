@@ -1,0 +1,81 @@
+# Linux packages for a GitHub release: .deb, .rpm and an AppImage, built on
+# Ubuntu 22.04 so they run on that and newer (a newer build machine would tie
+# them to its newer system libraries), then attached to the release.
+#
+# Runs when a v<name>.<build> tag is pushed (the release should exist by
+# then; see docs/gotchas.md), or by hand (Actions > Linux release > Run
+# workflow) with the tag to attach to, building the chosen branch.
+name: Linux release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the packages to, e.g. v1.0.6"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 21: jpackage, and the jmods ProGuard reads (JDK 24+ builds may
+      # leave them out, and ProGuard 7.8 can't read Java 26+ classes).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm fakeroot xvfb
+          curl -sSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+
+      - name: Build .deb, .rpm and the AppImage folder
+        working-directory: Kotlin
+        run: ./gradlew --no-daemon :desktopApp:packageReleaseDeb :desktopApp:packageReleaseRpm :desktopApp:packageReleaseAppImage
+
+      - name: Make the AppImage file
+        run: |
+          set -euo pipefail
+          OUT=Kotlin/desktopApp/build/compose/binaries/main-release
+          VERSION=$(grep '^tetsubi.versionName=' Kotlin/gradle.properties | cut -d= -f2).$(grep '^tetsubi.versionCode=' Kotlin/gradle.properties | cut -d= -f2)
+          APPDIR=Tetsubi.AppDir
+          cp -a "$OUT/app/tetsubi" "$APPDIR"
+          cp Kotlin/desktopApp/icons/tetsubi.png "$APPDIR/tetsubi.png"
+          cp Kotlin/desktopApp/icons/tetsubi.png "$APPDIR/.DirIcon"
+          printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "$0")")"\nexec "$HERE/bin/tetsubi" "$@"\n' > "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+          printf '[Desktop Entry]\nType=Application\nName=Tetsubi\nComment=A music player for Jellyfin\nExec=tetsubi\nIcon=tetsubi\nCategories=AudioVideo;Audio;Player;\nTerminal=false\n' > "$APPDIR/tetsubi.desktop"
+          mkdir -p dist
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool "$APPDIR" "dist/Tetsubi-$VERSION-x86_64.AppImage"
+          cp "$OUT"/deb/*.deb "$OUT"/rpm/*.rpm dist/
+          ls -la dist
+          (cd dist && sha256sum *) | tee dist/SHA256SUMS-linux.txt
+
+      # The release build is shrunk by ProGuard, so make sure it still starts:
+      # it should still be running after 20 seconds (timeout's exit code 124).
+      - name: Start the app once
+        run: |
+          set +e
+          xvfb-run -a timeout 20 Kotlin/desktopApp/build/compose/binaries/main-release/app/tetsubi/bin/tetsubi
+          code=$?
+          echo "exit code $code"
+          test "$code" -eq 124
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/* --clobber

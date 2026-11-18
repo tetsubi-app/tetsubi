@@ -9,14 +9,19 @@ plugins {
  * Release signing. The key lives outside the repo (~/.android-keys/tetsubi-release.jks)
  * and its password in the macOS Keychain ("Tetsubi Android release key"), or in
  * TETSUBI_KEYSTORE_PASSWORD. Without them a release build is left unsigned.
+ * The Keychain is only asked on a Mac that has the key: `security` doesn't
+ * exist elsewhere, and this runs whenever the project is configured, so on
+ * Linux (and CI) it would stop every build, the desktop ones included.
  * Never commit the key or its password; a lost key means no more updates.
  */
 val releaseKeystore = file(System.getProperty("user.home") + "/.android-keys/tetsubi-release.jks")
 val releaseKeyPassword: String? = providers.environmentVariable("TETSUBI_KEYSTORE_PASSWORD").orNull
-    ?: providers.exec {
-        commandLine("security", "find-generic-password", "-a", "tetsubi-release", "-s", "Tetsubi Android release key", "-w")
-        isIgnoreExitValue = true
-    }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
+    ?: if (System.getProperty("os.name").startsWith("Mac") && releaseKeystore.exists()) {
+        providers.exec {
+            commandLine("security", "find-generic-password", "-a", "tetsubi-release", "-s", "Tetsubi Android release key", "-w")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
+    } else null
 
 android {
     namespace = "gg.dekiru.musicplayer.android"

@@ -8,6 +8,12 @@ plugins {
     alias(libs.plugins.compose.multiplatform)
 }
 
+// Java 17 bytecode whatever JDK builds it (as :shared and Android).
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+}
+tasks.withType<JavaCompile>().configureEach { options.release.set(17) }
+
 dependencies {
     implementation(project(":shared"))
     implementation(compose.desktop.currentOs)
@@ -17,6 +23,12 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "gg.dekiru.musicplayer.desktop.MainKt"
+        // Skia (skiko) loads its native library through JNI; newer JDKs warn
+        // about that, and later ones will refuse, unless it's allowed.
+        jvmArgs += "--enable-native-access=ALL-UNNAMED"
+        buildTypes.release.proguard {
+            configurationFiles.from(project.file("proguard-rules.pro"))
+        }
         nativeDistributions {
             targetFormats(TargetFormat.AppImage, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "tetsubi"

@@ -350,7 +350,11 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 
 **A Google Play build must switch the check off.** Play updates its own installs, and its policies restrict apps that update outside it. Set `UpdateCheck.ENABLED_IN_THIS_BUILD` to false for such a build: no request is made, no banner shows and the Settings rows are hidden.
 
-**A GitHub release needs the files attached.** Attach the signed release APK (`./gradlew :androidApp:assembleRelease`, see the signing item below) to the release; the banner only links to the release page. Linux packages (AppImage, deb, rpm) must be built on Linux, as jpackage only builds for the system it runs on.
+**A GitHub release needs the files attached.** Attach the signed release APK (`./gradlew :androidApp:assembleRelease`, see the signing item below) to the release; the banner only links to the release page. Linux packages (AppImage, deb, rpm) must be built on Linux, as jpackage only builds for the system it runs on: the `Linux release` GitHub workflow (`.github/workflows/linux-release.yml`) does it on Ubuntu 22.04 when a `v*` tag is pushed (create the release first, or the upload fails; it can be rerun by hand with the tag), starts the app once under a virtual display, and attaches the `.deb`, `.rpm`, `.AppImage` and `SHA256SUMS-linux.txt`. Built on a newer, rolling distro the packages would carry that system's newer libraries and might not start on Ubuntu or Debian.
+
+**The desktop release build (ProGuard) needs a JDK from 17 to 25 that includes `jmods`.** ProGuard reads the Java library from the JDK's `jmods` folder, which JDK 24 and later builds may leave out (Temurin 25 and Android Studio's bundled JDK have none: every class, even `java.lang.Object`, comes out "can't find"), and ProGuard 7.8 can't read Java 26+ classes ("Unsupported version number [71.0]"). CI uses Temurin 21. The desktop code is compiled for Java 17 whatever JDK builds it (`jvmTarget` in `shared` and `desktopApp`), so the JDK only changes what runs the build. `desktopApp/proguard-rules.pro` lists OkHttp's optional TLS and native-image classes, whose absence otherwise stops ProGuard.
+
+**The Android build only asks the macOS Keychain on a Mac that has the release key.** `androidApp/build.gradle.kts` runs while the project is configured, so a `security` call on Linux or CI would stop every build, the desktop ones included.
 
 **A debug install must be removed before installing a release build.** The signatures differ, and uninstalling wipes the app's downloads.
 

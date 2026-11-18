@@ -57,7 +57,11 @@ kotlin {
         // Run the shared tests (commonTest) on the JVM for Android too.
         withHostTest {}
     }
-    jvm("desktop")
+    // Java 17 bytecode whatever JDK builds it (as Android), so the desktop
+    // build doesn't depend on which JDK is installed.
+    jvm("desktop") {
+        compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+    }
 
     // jvmSharedMain: code both JVM platforms share (Android and desktop).
     @OptIn(ExperimentalKotlinGradlePluginApi::class)
