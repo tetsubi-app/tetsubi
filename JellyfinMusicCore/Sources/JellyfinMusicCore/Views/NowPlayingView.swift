@@ -44,53 +44,25 @@ public struct NowPlayingView: View {
     public var body: some View {
         // Wide (an unfolded Duo, an iPad, a wide Mac window): cover and info on the
         // left, the track list on the right. Otherwise one scrolling column.
+        // Everything here is sized by `s`, Now Playing's own scale (never the
+        // Mac's `UIScale`): 1 on one column, bigger on a big wide screen.
         GeometryReader { geo in
-            if Self.isWide(width: geo.size.width, height: geo.size.height) {
-                wideLayout(size: geo.size)
-            } else {
-                narrowLayout
+            let wide = Self.isWide(width: geo.size.width, height: geo.size.height)
+            let s = Self.scale(width: geo.size.width, height: geo.size.height, wide: wide)
+            Group {
+                if wide {
+                    wideLayout(size: geo.size, s)
+                } else {
+                    narrowLayout(s)
+                }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .overlay(alignment: .topTrailing) { dismissButton(s) }
+            .overlay(alignment: .topLeading) { moreMenu(s) }
         }
         .background(AppBackgroundView())
         .foregroundStyle(.white)
         .task(id: manager.currentTrack?.artKey) { await loadArtAccent() }
-        .overlay(alignment: .topTrailing) {
-            Button(action: onDismiss) {
-                Image(systemName: "chevron.down")
-                    .imageScale(.large)
-                    .padding(8.scaled)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 20.scaled)
-            .padding(.trailing, 20.scaled)
-            .accessibilityIdentifier("NowPlayingView.dismiss")
-        }
-        .overlay(alignment: .topLeading) {
-            // A song played from a download has no server ID to add.
-            if let track = manager.currentTrack, track.localURL == nil {
-                Menu {
-                    Button {
-                        PlaylistEvents.shared.add(trackIds: [track.id])
-                    } label: {
-                        Label("Add to Playlist…", systemImage: "text.badge.plus")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .imageScale(.large)
-                        .frame(width: 20.scaled, height: 20.scaled)
-                        .padding(8.scaled)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .padding(.top, 20.scaled)
-                .padding(.leading, 20.scaled)
-                .accessibilityLabel("More")
-                .accessibilityIdentifier("NowPlayingView.moreMenu")
-            }
-        }
         // The sheet and its notice show here while Now Playing is in front.
         .playlistEventsHost(isActive: true)
         #if os(iOS)
@@ -98,129 +70,199 @@ public struct NowPlayingView: View {
         #endif
     }
 
+    // MARK: - Corner buttons
+
+    private func dismissButton(_ s: CGFloat) -> some View {
+        Button(action: onDismiss) {
+            Image(systemName: "chevron.down")
+                .font(.plex(.body, scale: s))
+                .imageScale(.large)
+                .padding(8 * s)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 20 * s)
+        .padding(.trailing, 20 * s)
+        .accessibilityIdentifier("NowPlayingView.dismiss")
+    }
+
+    @ViewBuilder
+    private func moreMenu(_ s: CGFloat) -> some View {
+        // A song played from a download has no server ID to add.
+        if let track = manager.currentTrack, track.localURL == nil {
+            Menu {
+                Button {
+                    PlaylistEvents.shared.add(trackIds: [track.id])
+                } label: {
+                    Label("Add to Playlist…", systemImage: "text.badge.plus")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.plex(.body, scale: s))
+                    .imageScale(.large)
+                    .frame(width: 20 * s, height: 20 * s)
+                    .padding(8 * s)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .padding(.top, 20 * s)
+            .padding(.leading, 20 * s)
+            .accessibilityLabel("More")
+            .accessibilityIdentifier("NowPlayingView.moreMenu")
+        }
+    }
+
+    // MARK: - Scale
+
+    /// Now Playing's own size factor `s`. Two columns on a big screen get bigger
+    /// type, buttons, spacing and cover; one column (phones, narrow windows) is
+    /// always 1. Kotlin's `NowPlayingLayout.scale(width, height)` is the same (it works out "wide" itself).
+    ///
+    /// `s = min(width / 800, height / 600)`, clamped to 1.0…1.6 and rounded down
+    /// to 0.05 so small resizes don't re-lay out. On the Mac it takes the place of
+    /// `UIScale` here (never both), and is measured from the sheet (the Now Playing
+    /// area), not the window.
+    static let scaleBaseWidth: CGFloat = 800
+    static let scaleBaseHeight: CGFloat = 600
+    static let scaleMax: CGFloat = 1.6
+    static let scaleStep: CGFloat = 0.05
+
+    static func scale(width: CGFloat, height: CGFloat, wide: Bool) -> CGFloat {
+        guard wide, width > 0, height > 0 else { return 1.0 }
+        let raw = min(width / scaleBaseWidth, height / scaleBaseHeight)
+        let clamped = min(max(raw, 1.0), scaleMax)
+        return (clamped / scaleStep + 1e-6).rounded(.down) * scaleStep
+    }
+
     // MARK: - Layouts
 
-    /// Size (before the Mac's window scaling) from which the two-column layout is
-    /// used. The width takes in an unfolded Duo (about 670 pt across), an iPad and a
-    /// Mac window; the height keeps an iPhone on its side (about 400 pt tall) on one
-    /// column, where two would leave the controls off screen.
+    /// Size from which the two-column layout is used, in points (on the Mac too:
+    /// Now Playing doesn't use `UIScale`). The width takes in an unfolded Duo
+    /// (about 670 pt across), an iPad and a Mac window; the height keeps an iPhone
+    /// on its side (about 400 pt tall) on one column, where two would leave the
+    /// controls off screen.
     static let wideMinimum: CGFloat = 640
     static let wideMinimumHeight: CGFloat = 520
 
     static func isWide(width: CGFloat, height: CGFloat) -> Bool {
-        let factor = UIScale.shared.factor
-        return width >= wideMinimum * factor && height >= wideMinimumHeight * factor
+        width >= wideMinimum && height >= wideMinimumHeight
     }
 
     /// Mac sheet: how wide it opens. The two columns when the window has room
     /// (leaving a margin each side), else the narrow card it always was.
-    static func macSheetIdealWidth(windowWidth: CGFloat) -> CGFloat {
-        let factor = UIScale.shared.factor
-        let room = min(windowWidth - 160, 980 * factor)
-        return room >= wideMinimum * factor ? room : 460
+    /// `s` is Now Playing's scale for that window.
+    static func macSheetIdealWidth(windowWidth: CGFloat, s: CGFloat) -> CGFloat {
+        let room = min(windowWidth - 160, 980 * s)
+        return room >= wideMinimum ? room : 460
     }
 
     /// The cover in the two-column layout: as big as fits, so the title, progress
     /// and buttons below it are all on screen without scrolling. The rest of that
-    /// column is about 430 pt (500 with the visualiser) at normal scale.
-    static func wideArtSize(columnWidth: CGFloat, height: CGFloat, visualiser: Bool) -> CGFloat {
-        let others = (visualiser ? 510 : 430).scaled
-        let byWidth = min(columnWidth - 56.scaled, 360.scaled)
-        return max(140.scaled, min(byWidth, height - others))
+    /// column is about 430 pt (510 with the visualiser) at scale 1.
+    static func wideArtSize(columnWidth: CGFloat, height: CGFloat, visualiser: Bool, s: CGFloat) -> CGFloat {
+        let others = (visualiser ? 510 : 430) * s
+        let byWidth = min(columnWidth - 56 * s, 360 * s)
+        return max(140 * s, min(byWidth, height - others))
     }
 
-    /// Mac sheet: how tall it opens. Most of the window, up to 880 pt at normal scale.
-    static func macSheetIdealHeight(windowHeight: CGFloat) -> CGFloat {
-        let factor = UIScale.shared.factor
-        let room = min(windowHeight - 80, 880 * factor)
+    /// The left column's width in the two-column layout.
+    static func wideLeftColumn(width: CGFloat, s: CGFloat) -> CGFloat {
+        min(max(width * 0.46, 320 * s), 520 * s)
+    }
+
+    /// Mac sheet: how tall it opens. Most of the window, up to 880 pt at scale 1.
+    static func macSheetIdealHeight(windowHeight: CGFloat, s: CGFloat) -> CGFloat {
+        let room = min(windowHeight - 80, 880 * s)
         return max(room, 700)
     }
 
     /// The single column: everything in one scroll, the track list last.
-    private var narrowLayout: some View {
+    private func narrowLayout(_ s: CGFloat) -> some View {
         ScrollView {
-            VStack(spacing: 16.scaled) {
-                artSection(size: 220.scaled)
-                visualiserSection
-                titleSection
-                seekSection
-                controlsSection
-                togglesSection
-                upNextSection
+            VStack(spacing: 16 * s) {
+                artSection(size: 220 * s, s)
+                visualiserSection(s)
+                titleSection(s)
+                seekSection(s)
+                controlsSection(s)
+                togglesSection(s)
+                upNextSection(s)
             }
-            .padding(20.scaled)
-            .padding(.top, 8.scaled)
-            .padding(.bottom, 24.scaled)
+            .padding(20 * s)
+            .padding(.top, 8 * s)
+            .padding(.bottom, 24 * s)
         }
     }
 
     /// Two columns, each scrolling on its own. The top padding keeps both
     /// clear of the More and dismiss buttons in the corners.
-    private func wideLayout(size: CGSize) -> some View {
-        let left = min(max(size.width * 0.46, 320.scaled), 520.scaled)
-        let art = Self.wideArtSize(columnWidth: left, height: size.height, visualiser: showVisualiser)
+    private func wideLayout(size: CGSize, _ s: CGFloat) -> some View {
+        let left = Self.wideLeftColumn(width: size.width, s: s)
+        let art = Self.wideArtSize(columnWidth: left, height: size.height, visualiser: showVisualiser, s: s)
         return HStack(alignment: .top, spacing: 0) {
             ScrollView {
-                VStack(spacing: 16.scaled) {
-                    artSection(size: art)
-                    visualiserSection
-                    titleSection
-                    seekSection
-                    controlsSection
-                    togglesSection
+                VStack(spacing: 16 * s) {
+                    artSection(size: art, s)
+                    visualiserSection(s)
+                    titleSection(s)
+                    seekSection(s)
+                    controlsSection(s)
+                    togglesSection(s)
                 }
-                .padding(.horizontal, 28.scaled)
-                .padding(.top, 56.scaled)
-                .padding(.bottom, 24.scaled)
+                .padding(.horizontal, 28 * s)
+                .padding(.top, 56 * s)
+                .padding(.bottom, 24 * s)
             }
             .frame(width: left)
 
             ScrollView {
-                upNextSection
-                    .padding(.horizontal, 20.scaled)
-                    .padding(.top, 44.scaled)
-                    .padding(.bottom, 24.scaled)
+                upNextSection(s)
+                    .padding(.horizontal, 20 * s)
+                    .padding(.top, 44 * s)
+                    .padding(.bottom, 24 * s)
             }
         }
     }
 
     @ViewBuilder
-    private var visualiserSection: some View {
+    private func visualiserSection(_ s: CGFloat) -> some View {
         if showVisualiser {
             SpectrumView(isPlaying: manager.isPlaying, tint: seekTint)
-                .frame(height: 64.scaled)
-                .padding(.horizontal, 8.scaled)
+                .frame(height: 64 * s)
+                .padding(.horizontal, 8 * s)
         }
     }
 
     // MARK: - Sections
 
     @ViewBuilder
-    private func artSection(size: CGFloat) -> some View {
+    private func artSection(size: CGFloat, _ s: CGFloat) -> some View {
         if let track = manager.currentTrack {
             AlbumArtView(
                 request: manager.artRequest(for: track, size: 600),
-                size: size, cornerRadius: 16.scaled
+                size: size, cornerRadius: 16 * s
             )
         } else {
-            AlbumArtView(request: nil, size: size, cornerRadius: 16.scaled)
+            AlbumArtView(request: nil, size: size, cornerRadius: 16 * s)
         }
     }
 
-    private var titleSection: some View {
-        VStack(spacing: 6.scaled) {
+    private func titleSection(_ s: CGFloat) -> some View {
+        VStack(spacing: 6 * s) {
             if let track = manager.currentTrack {
                 Text(track.title)
-                    .font(.plex(.title2).bold())
+                    .font(.plex(.title2, scale: s).bold())
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                 Text(track.artist)
-                    .font(.plex(.headline))
+                    .font(.plex(.headline, scale: s))
                     .foregroundStyle(Color.albumArtistText)
                     .lineLimit(1)
                 Text(track.album)
-                    .font(.plex(.subheadline))
+                    .font(.plex(.subheadline, scale: s))
                     .foregroundStyle(Color.albumYearText)
                     .lineLimit(1)
                 if manager.albumLength > 0 {
@@ -228,31 +270,31 @@ public struct NowPlayingView: View {
                     // Re-evaluated periodically so the estimate keeps up while paused.
                     TimelineView(.periodic(from: .now, by: 15)) { context in
                         let end = context.date.addingTimeInterval(manager.albumRemaining)
-                        HStack(spacing: 16.scaled) {
+                        HStack(spacing: 16 * s) {
                             qualityText(for: track)
                             Text("Duration: \(Self.formatAlbumDuration(manager.albumLength))")
                             Text("Ends: \(end.formatted(date: .omitted, time: .shortened))")
                         }
-                        .font(.plex(.caption))
+                        .font(.plex(.caption, scale: s))
                         .foregroundStyle(.white.opacity(0.5))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                     }
                 }
                 if let message = manager.errorMessage {
-                    PlaybackErrorText(message: message)
+                    PlaybackErrorText(message: message, scale: s)
                 }
             } else if manager.isLoading {
                 // Album Play opens the sheet before a streamed album's tracks arrive.
                 ProgressView()
                 Text("Loading…")
-                    .font(.plex(.title3))
+                    .font(.plex(.title3, scale: s))
                     .foregroundStyle(.secondary)
             } else if let message = manager.errorMessage {
-                PlaybackErrorText(message: message)
+                PlaybackErrorText(message: message, scale: s)
             } else {
                 Text("Nothing playing")
-                    .font(.plex(.title3))
+                    .font(.plex(.title3, scale: s))
                     .foregroundStyle(.secondary)
             }
         }
@@ -308,14 +350,14 @@ public struct NowPlayingView: View {
         return rgb.map { Color(.sRGB, red: $0.red, green: $0.green, blue: $0.blue) }
     }
 
-    private var seekSection: some View {
-        VStack(spacing: 4) {
+    private func seekSection(_ s: CGFloat) -> some View {
+        VStack(spacing: 4 * s) {
             if manager.maniacMode {
                 // No scrubbing: a plain progress bar.
                 ProgressView(value: min(manager.position / max(manager.duration, 1), 1.0))
                     .progressViewStyle(.linear)
                     .tint(seekTint ?? Color.accentColor)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 10 * s)
             } else {
             Slider(
                 value: Binding(
@@ -333,24 +375,24 @@ public struct NowPlayingView: View {
             }
             HStack {
                 Text(Self.format(manager.position))
-                    .font(.plex(.caption2))
+                    .font(.plex(.caption2, scale: s))
                     .foregroundStyle(.white.opacity(0.7))
                 Spacer()
                 Text(Self.format(manager.duration))
-                    .font(.plex(.caption2))
+                    .font(.plex(.caption2, scale: s))
                     .foregroundStyle(.white.opacity(0.7))
             }
         }
     }
 
-    private var controlsSection: some View {
-        HStack(spacing: 28.scaled) {
+    private func controlsSection(_ s: CGFloat) -> some View {
+        HStack(spacing: 28 * s) {
             if !manager.maniacMode {
             Button {
                 manager.skipToPrevious()
             } label: {
                 Image(systemName: "backward.fill")
-                    .font(.plex(.title))
+                    .font(.plex(.title, scale: s))
                     .foregroundStyle(.white)
             }
             .accessibilityIdentifier("NowPlayingView.previous")
@@ -360,11 +402,11 @@ public struct NowPlayingView: View {
                 manager.togglePlayPause()
             } label: {
                 Image(systemName: manager.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.plex(.largeTitle))
+                    .font(.plex(.largeTitle, scale: s))
                     .foregroundStyle(.white)
                     // A fixed box: the play and pause symbols differ in size, and the
                     // row (and everything below it) shifted when they swapped.
-                    .frame(width: 52.scaled, height: 52.scaled)
+                    .frame(width: 52 * s, height: 52 * s)
                     .contentShape(Rectangle())
             }
             .accessibilityIdentifier("NowPlayingView.playPause")
@@ -374,29 +416,29 @@ public struct NowPlayingView: View {
                 manager.skipToNext()
             } label: {
                 Image(systemName: "forward.fill")
-                    .font(.plex(.title))
+                    .font(.plex(.title, scale: s))
                     .foregroundStyle(.white)
             }
             .accessibilityIdentifier("NowPlayingView.next")
             }
         }
         .buttonStyle(.plain)
-        .padding(.vertical, 12.scaled)
+        .padding(.vertical, 12 * s)
         .frame(maxWidth: .infinity)
     }
 
-    private var togglesSection: some View {
-        HStack(spacing: 32.scaled) {
+    private func togglesSection(_ s: CGFloat) -> some View {
+        HStack(spacing: 32 * s) {
             if !manager.maniacMode {
             Button {
                 manager.toggleShuffle()
             } label: {
-                VStack(spacing: 2) {
+                VStack(spacing: 2 * s) {
                     Image(systemName: "shuffle")
-                        .font(.plex(.title3))
+                        .font(.plex(.title3, scale: s))
                         .foregroundStyle(manager.shuffle ? (seekTint ?? Color.accentColor) : .white.opacity(0.6))
                     Text("Shuffle")
-                        .font(.plex(.caption2))
+                        .font(.plex(.caption2, scale: s))
                         .foregroundStyle(.white.opacity(0.7))
                 }
             }
@@ -406,12 +448,12 @@ public struct NowPlayingView: View {
             Button {
                 manager.cycleRepeatMode()
             } label: {
-                VStack(spacing: 2) {
+                VStack(spacing: 2 * s) {
                     Image(systemName: nowRepeatIcon)
-                        .font(.plex(.title3))
+                        .font(.plex(.title3, scale: s))
                         .foregroundStyle(repeatActive ? (seekTint ?? Color.accentColor) : .white.opacity(0.6))
                     Text(nowRepeatLabel)
-                        .font(.plex(.caption2))
+                        .font(.plex(.caption2, scale: s))
                         .foregroundStyle(.white.opacity(0.7))
                 }
             }
@@ -422,62 +464,62 @@ public struct NowPlayingView: View {
             Button {
                 showVisualiser.toggle()
             } label: {
-                VStack(spacing: 2) {
+                VStack(spacing: 2 * s) {
                     Image(systemName: "waveform")
-                        .font(.plex(.title3))
+                        .font(.plex(.title3, scale: s))
                         .foregroundStyle(showVisualiser ? (seekTint ?? Color.accentColor) : .white.opacity(0.6))
                     Text("Visualiser")
-                        .font(.plex(.caption2))
+                        .font(.plex(.caption2, scale: s))
                         .foregroundStyle(.white.opacity(0.7))
                 }
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("NowPlayingView.visualiser")
 
-            VStack(spacing: 2) {
+            VStack(spacing: 2 * s) {
                 AirPlayButton(player: manager.outputPlayer, activeTint: seekTint ?? .accentColor)
-                    .frame(width: 30.scaled, height: 24.scaled)
+                    .frame(width: 30 * s, height: 24 * s)
                 Text("AirPlay")
-                    .font(.plex(.caption2))
+                    .font(.plex(.caption2, scale: s))
                     .foregroundStyle(.white.opacity(0.7))
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("NowPlayingView.airPlay")
         }
-        .padding(.top, 4)
+        .padding(.top, 4 * s)
     }
 
     // MARK: - Up next
 
     @ViewBuilder
-    private var upNextSection: some View {
+    private func upNextSection(_ s: CGFloat) -> some View {
         let upcoming = manager.upNext
         if manager.currentTrack != nil {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Up next")
-                        .font(.plex(.headline))
+                        .font(.plex(.headline, scale: s))
                     Spacer()
                     if manager.repeatMode == .one {
                         Text("Repeating this track")
-                            .font(.plex(.caption))
+                            .font(.plex(.caption, scale: s))
                             .foregroundStyle(.white.opacity(0.5))
                     } else if manager.repeatMode == .all, !upcoming.isEmpty {
                         Text("Then repeats")
-                            .font(.plex(.caption))
+                            .font(.plex(.caption, scale: s))
                             .foregroundStyle(.white.opacity(0.5))
                     }
                 }
-                .padding(.bottom, 8)
+                .padding(.bottom, 8 * s)
 
                 if upcoming.isEmpty {
                     Text("Last track")
-                        .font(.plex(.subheadline))
+                        .font(.plex(.subheadline, scale: s))
                         .foregroundStyle(.white.opacity(0.5))
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 6 * s)
                 } else {
                     ForEach(upcoming, id: \.index) { item in
-                        upNextRow(item.track, onTap: manager.maniacMode ? nil : {
+                        upNextRow(item.track, s, onTap: manager.maniacMode ? nil : {
                             manager.skip(toQueueIndex: item.index)
                         })
                         if item.index != upcoming.last?.index {
@@ -486,37 +528,37 @@ public struct NowPlayingView: View {
                     }
                 }
             }
-            .padding(.top, 12)
+            .padding(.top, 12 * s)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier("NowPlayingView.upNext")
         }
     }
 
     /// `onTap` nil (Maniac Mode): the row isn't a button.
-    private func upNextRow(_ track: PlaybackTrack, onTap: (() -> Void)?) -> some View {
+    private func upNextRow(_ track: PlaybackTrack, _ s: CGFloat, onTap: (() -> Void)?) -> some View {
         Button { onTap?() } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 12 * s) {
+                VStack(alignment: .leading, spacing: 2 * s) {
                     Text(track.title)
-                        .font(.plex(.subheadline))
+                        .font(.plex(.subheadline, scale: s))
                         .foregroundStyle(.white)
                         .lineLimit(1)
                     // Artist only when it differs (compilations, mixed queues).
                     if track.artist != manager.currentTrack?.artist, !track.artist.isEmpty {
                         Text(track.artist)
-                            .font(.plex(.caption))
+                            .font(.plex(.caption, scale: s))
                             .foregroundStyle(.white.opacity(0.6))
                             .lineLimit(1)
                     }
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 8 * s)
                 if track.duration > 0 {
                     Text(Self.format(track.duration))
-                        .font(.plex(.caption).monospacedDigit())
+                        .font(.plex(.caption, scale: s).monospacedDigit())
                         .foregroundStyle(.white.opacity(0.5))
                 }
             }
-            .padding(.vertical, 8.scaled)
+            .padding(.vertical, 8 * s)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -554,14 +596,16 @@ public struct NowPlayingView: View {
 /// A playback failure: what went wrong and what to do (in Now Playing).
 struct PlaybackErrorText: View {
     let message: String
+    /// Now Playing's scale (`NowPlayingView.scale`).
+    var scale: CGFloat = 1
 
     var body: some View {
         Label(message, systemImage: "exclamationmark.triangle.fill")
-            .font(.plex(.footnote))
+            .font(.plex(.footnote, scale: scale))
             .foregroundStyle(Color(red: 1, green: 0.55, blue: 0.55))
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 4)
+            .padding(.top, 4 * scale)
     }
 }
 
@@ -595,11 +639,17 @@ extension View {
     /// window allows, and can be resized.
     @ViewBuilder
     func nowPlayingSheetFrame() -> some View {
+        let window = CGSize(width: UIScale.shared.windowWidth, height: UIScale.shared.windowHeight)
+        // The window's scale sets how big the sheet may open (no loop: it comes
+        // from the window, not the sheet). The content then works out its own
+        // `s` from the sheet's actual size, e.g. 1100 × 760 window → 940 × 700
+        // sheet → s 1.15.
+        let s = NowPlayingView.scale(width: window.width, height: window.height, wide: true)
         let sized = frame(minWidth: 460,
-                          idealWidth: NowPlayingView.macSheetIdealWidth(windowWidth: UIScale.shared.windowWidth),
+                          idealWidth: NowPlayingView.macSheetIdealWidth(windowWidth: window.width, s: s),
                           maxWidth: .infinity,
                           minHeight: 560,
-                          idealHeight: NowPlayingView.macSheetIdealHeight(windowHeight: UIScale.shared.windowHeight),
+                          idealHeight: NowPlayingView.macSheetIdealHeight(windowHeight: window.height, s: s),
                           maxHeight: .infinity)
         // The default sheet sizing kept the width at about 470 whatever the
         // frame said; "fitted" takes the content's ideal size.

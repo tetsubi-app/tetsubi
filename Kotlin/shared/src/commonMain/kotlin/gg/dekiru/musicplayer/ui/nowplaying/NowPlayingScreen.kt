@@ -1,7 +1,7 @@
 package gg.dekiru.musicplayer.ui.nowplaying
 
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -9,17 +9,20 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -34,6 +37,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -54,6 +59,8 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
@@ -62,10 +69,10 @@ import gg.dekiru.musicplayer.playback.CastRoute
 import gg.dekiru.musicplayer.playback.PlaybackTrack
 import gg.dekiru.musicplayer.playback.PlayerController
 import gg.dekiru.musicplayer.playback.RepeatMode
-import gg.dekiru.musicplayer.playback.formatAlbumDuration
-import gg.dekiru.musicplayer.playback.formatTrackTime
 import gg.dekiru.musicplayer.playback.effects.AudioEffects
 import gg.dekiru.musicplayer.playback.effects.EffectsSettings
+import gg.dekiru.musicplayer.playback.formatAlbumDuration
+import gg.dekiru.musicplayer.playback.formatTrackTime
 import gg.dekiru.musicplayer.ui.AppBackground
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
@@ -75,13 +82,13 @@ import gg.dekiru.musicplayer.ui.components.PauseIcon
 import gg.dekiru.musicplayer.ui.components.PlayIcon
 import gg.dekiru.musicplayer.ui.components.SkipIcon
 import gg.dekiru.musicplayer.ui.components.SpeakerIcon
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.ExperimentalTime
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlin.time.Clock
-import kotlin.time.Duration.Companion.seconds
-import kotlin.time.ExperimentalTime
 
 /**
  * Full-screen Now Playing (as `NowPlayingView` on iOS): art, title / artist /
@@ -94,6 +101,10 @@ import kotlin.time.ExperimentalTime
  * "Playing on <device>" shows under the album and the Visualiser is hidden.
  * The info line's quality text shows the sample rate and bit depth; a tap
  * switches it to the format and bitrate and back (remembered).
+ * Wide (a tablet on its side, a Linux window; see [NowPlayingLayout]): two
+ * columns as iOS, the art, titles and controls on the left and Up next on
+ * the right, everything drawn bigger by [NowPlayingLayout.scale]. Phones keep
+ * the single column at the normal size.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -128,22 +139,21 @@ fun NowPlayingScreen(
     )
     AppBackground {
         AlbumBackdrop(api, player.currentTrack?.artItemId, localPath = player.currentTrack?.localArtPath)
-        BoxWithConstraints(
-            Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
-            contentAlignment = Alignment.TopCenter,
-        ) {
-            val artSize = minOf(maxWidth - 40.dp, 340.dp, maxHeight * 0.42f)
-            Column(
-                Modifier.widthIn(max = 560.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Spacer(Modifier.height(28.dp))
+        BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+            // Wide (a tablet on its side, a Linux window): two columns, everything
+            // grown by the scale. Otherwise one column at the normal size.
+            val wide = NowPlayingLayout.isWide(maxWidth.value, maxHeight.value)
+            val scale = NowPlayingLayout.scale(maxWidth.value, maxHeight.value)
+            val density = LocalDensity.current
+            val showBars = effects != null && visualiser?.isOn == true && !casting
+            // Art, titles, progress and buttons: the single column's top and the
+            // wide layout's left column.
+            val details: @Composable (Dp) -> Unit = { artSize ->
                 val track = player.currentTrack
                 if (track != null) {
                     AlbumArt(api, track.artItemId, size = artSize, cornerRadius = 16.dp, maxWidth = 600, localPath = track.localArtPath)
                     // While casting the audio isn't decoded here: no bars.
-                    if (effects != null && visualiser?.isOn == true && !casting) {
+                    if (effects != null && showBars) {
                         SpectrumBars(effects, player.isPlaying, accent, Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(64.dp))
                     }
                     Titles(player, track, castName, accent, qualityDetail)
@@ -151,7 +161,6 @@ fun NowPlayingScreen(
                     Seek(player, accent)
                     Controls(player)
                     Toggles(player, visualiser.takeUnless { casting }, castButton, accent)
-                    UpNext(player)
                 } else {
                     Box(Modifier.size(artSize).clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = 0.06f)))
                     when {
@@ -164,40 +173,84 @@ fun NowPlayingScreen(
                     }
                 }
             }
+            // Drawn at the scale: dp and sp inside are `scale` times bigger, so
+            // the sizes below are the normal ones (as iOS's `.scaled` values).
+            CompositionLocalProvider(
+                LocalDensity provides if (wide) Density(density.density * scale, density.fontScale) else density,
+            ) {
+                // The area's size in the scaled dp.
+                val width = maxWidth / scale
+                val height = maxHeight / scale
+                if (wide) {
+                    val left = NowPlayingLayout.leftColumnWidth(width.value)
+                    val art = NowPlayingLayout.wideArtSize(left, height.value, showBars).dp
+                    // Two columns, each scrolling on its own. The top padding keeps both
+                    // clear of the More and close buttons in the corners.
+                    Row(Modifier.fillMaxSize()) {
+                        Column(
+                            Modifier.width(left.dp).fillMaxHeight().verticalScroll(rememberScrollState())
+                                .padding(start = 28.dp, end = 28.dp, top = 56.dp, bottom = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                        ) { details(art) }
+                        Column(
+                            Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())
+                                .padding(start = 20.dp, end = 20.dp, top = 44.dp, bottom = 24.dp),
+                        ) { if (player.currentTrack != null) UpNext(player) }
+                    }
+                } else {
+                    val artSize = minOf(width - 40.dp, 340.dp, height * 0.42f)
+                    Column(
+                        Modifier.align(Alignment.TopCenter).widthIn(max = 560.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Spacer(Modifier.height(28.dp))
+                        details(artSize)
+                        if (player.currentTrack != null) UpNext(player)
+                    }
+                }
+                CornerButtons(player, onAddToPlaylist)
+            }
+        }
+    }
+}
+
+/** ⋯ (Add to Playlist…) top left and ⌄ (close) top right. */
+@Composable
+private fun BoxScope.CornerButtons(player: PlayerController, onAddToPlaylist: ((String) -> Unit)?) {
+    Box(
+        Modifier
+            .align(Alignment.TopEnd)
+            .padding(top = 12.dp, end = 16.dp)
+            .size(40.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color.White.copy(alpha = 0.12f))
+            .clickable(role = Role.Button) { player.isNowPlayingOpen = false }
+            .semantics { contentDescription = "Close Now Playing" },
+        contentAlignment = Alignment.Center,
+    ) { ChevronDownIcon(24.dp) }
+    val current = player.currentTrack
+    if (onAddToPlaylist != null && current != null) {
+        var menuOpen by remember { mutableStateOf(false) }
+        Box(Modifier.align(Alignment.TopStart).padding(top = 12.dp, start = 16.dp)) {
             Box(
                 Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 12.dp, end = 16.dp)
                     .size(40.dp)
                     .clip(RoundedCornerShape(50))
                     .background(Color.White.copy(alpha = 0.12f))
-                    .clickable(role = Role.Button) { player.isNowPlayingOpen = false }
-                    .semantics { contentDescription = "Close Now Playing" },
+                    .clickable(role = Role.Button) { menuOpen = true }
+                    .semantics { contentDescription = "More" },
                 contentAlignment = Alignment.Center,
-            ) { ChevronDownIcon(24.dp) }
-            val current = player.currentTrack
-            if (onAddToPlaylist != null && current != null) {
-                var menuOpen by remember { mutableStateOf(false) }
-                Box(Modifier.align(Alignment.TopStart).padding(top = 12.dp, start = 16.dp)) {
-                    Box(
-                        Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.White.copy(alpha = 0.12f))
-                            .clickable(role = Role.Button) { menuOpen = true }
-                            .semantics { contentDescription = "More" },
-                        contentAlignment = Alignment.Center,
-                    ) { Text("⋯", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Add to Playlist…", color = Color.White) },
-                            onClick = {
-                                menuOpen = false
-                                onAddToPlaylist(current.id)
-                            },
-                        )
-                    }
-                }
+            ) { Text("⋯", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Add to Playlist…", color = Color.White) },
+                    onClick = {
+                        menuOpen = false
+                        onAddToPlaylist(current.id)
+                    },
+                )
             }
         }
     }

@@ -70,6 +70,15 @@ public extension Font {
         return style == .headline ? font.weight(.semibold) : font
     }
 
+    /// IBM Plex Sans at a text style's size times `scale`, ignoring `UIScale`
+    /// (Now Playing, which has its own scale on wide layouts). Scale 1 is the
+    /// plain text style, as on a phone.
+    static func plex(_ style: Font.TextStyle, scale: CGFloat) -> Font {
+        PlexFont.register()
+        let font = Font.custom(PlexFont.family, size: PlexFont.size(for: style) * scale, relativeTo: style)
+        return style == .headline ? font.weight(.semibold) : font
+    }
+
     /// IBM Plex Sans at a fixed size (for `.system(size:weight:design:)` uses),
     /// scaled on the Mac by `UIScale`.
     static func plex(size: CGFloat, weight: Font.Weight = .regular) -> Font {
