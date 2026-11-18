@@ -10,11 +10,13 @@ Tetsubi is made by DEKIRU Ltd. It isn't affiliated with Jellyfin. Made with AI.
 
 - Signs in with Quick Connect or a password, and finds servers on the local network.
 - Home: On This Day (albums released on today's date), Favourites, Recently Played, Recently Added, Random Albums.
-- Library, artist pages, search, favourites, and Jellyfin playlists (browse, play, make, edit).
+- Library, artist pages, search, favourites, and Jellyfin playlists (browse, play, make, edit). Albums and favourites sort by name, artist, release date or date added/favourited.
+- On wider screens (Mac, iPad, Android tablets, Linux), zoom buttons choose 3 to 10 album cards per row; covers and text grow with them.
 - Gapless album playback with lock-screen and media-key controls, an equaliser and a visualiser.
 - Downloads for offline listening, in the original format or converted.
 - Home-screen widgets; CarPlay and Siri on iOS; Android Auto, voice and Google Cast on Android.
 - Maniac Mode: albums play start to finish, with no skipping, shuffle or scrubbing.
+- Android and Linux check GitHub once a day for a newer release and say so (nothing is downloaded; it can be switched off). iOS and Mac update through the App Store.
 
 ## Status
 
@@ -22,7 +24,7 @@ Tetsubi is made by DEKIRU Ltd. It isn't affiliated with Jellyfin. Made with AI.
 |---|---|
 | iOS, iPadOS | In testing (TestFlight) |
 | macOS | Runs; not yet distributed |
-| Android | In testing (signed APK) |
+| Android | In testing (signed APK on the [releases page](https://github.com/tetsubi-app/tetsubi/releases)) |
 | Linux | Shares the Android code; only a starter window so far |
 
 ## Layout
