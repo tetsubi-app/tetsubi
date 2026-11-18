@@ -61,7 +61,10 @@ fun NowPlayingBar(api: JellyfinApi, player: PlayerController, modifier: Modifier
                 .background(Color(0xE6101A33), lozenge)
                 .border(1.dp, Color.White.copy(alpha = 0.12f), lozenge),
         ) {
-            Row(Modifier.padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            // The row has the same space above and below it, so the art, title and buttons sit in
+            // the middle of the lozenge; the progress line runs along the bottom, in that space.
+            Box {
+            Row(Modifier.padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     Modifier
                         .weight(1f)
@@ -91,8 +94,9 @@ fun NowPlayingBar(api: JellyfinApi, player: PlayerController, modifier: Modifier
                     trackColor = Color.White.copy(alpha = 0.15f),
                     drawStopIndicator = {},
                     gapSize = 0.dp,
-                    modifier = Modifier.fillMaxWidth().padding(start = 28.dp, end = 28.dp, bottom = 10.dp).height(3.dp),
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(start = 28.dp, end = 28.dp, bottom = 7.dp).height(3.dp),
                 )
+            }
             }
         }
     }

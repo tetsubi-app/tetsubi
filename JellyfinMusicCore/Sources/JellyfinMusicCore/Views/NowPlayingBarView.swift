@@ -103,8 +103,12 @@ public struct NowPlayingBarView: View {
                     }
                 }
                 .padding(.horizontal, 20.scaled)
-                .padding(.vertical, 12.scaled)
-
+                // Floating: the same space above and below, so the art, title and
+                // buttons sit in the middle of the lozenge; the progress line runs
+                // along the bottom, in that space (overlay below).
+                .padding(.vertical, style == .floating ? 20.scaled : 12.scaled)
+            }
+            .overlay(alignment: .bottom) {
                 if style == .floating {
                     // Always there, empty and invisible while the length is unknown:
                     // taking the line away shortened the bar, and the buttons above
@@ -116,7 +120,7 @@ public struct NowPlayingBarView: View {
                         .tint(artAccent ?? Color.appBlue)
                         .opacity(known ? 1 : 0)
                         .padding(.horizontal, 28.scaled)
-                        .padding(.bottom, 12.scaled)
+                        .padding(.bottom, 8.scaled)
                         .accessibilityHidden(!known)
                 }
             }
