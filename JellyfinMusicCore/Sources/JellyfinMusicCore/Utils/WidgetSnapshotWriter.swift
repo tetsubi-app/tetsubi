@@ -157,7 +157,7 @@ public final class WidgetSnapshotWriter {
             current.playingUntil = nil
         }
         // The queue's length and what's left of it now (Now Playing's
-        // Duration and End time). No track: nothing to finish.
+        // Duration and Ends). No track: nothing to finish.
         if let player, player.currentTrack != nil {
             let times = Self.queueTimes(length: player.albumLength, remaining: player.albumRemaining)
             current.queueSeconds = times.queue

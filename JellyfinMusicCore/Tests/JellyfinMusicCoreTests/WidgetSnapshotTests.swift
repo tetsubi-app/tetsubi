@@ -207,9 +207,9 @@ final class WidgetSnapshotTests: XCTestCase {
         // 1_800_000_000 is 08:00:00 UTC; + 19900 s = 13:31:40.
         let shown = track(playing(until: now.addingTimeInterval(100), remaining: 19_900), at: now)
         let british = shown?.finishText(locale: Locale(identifier: "en_GB"), timeZone: utc)
-        XCTAssertEqual(british, "End time: 13:31")
+        XCTAssertEqual(british, "Ends: 13:31")
         let american = shown?.finishText(locale: Locale(identifier: "en_US"), timeZone: utc)
-        XCTAssertTrue(american?.hasPrefix("End time: 1:31") == true, american ?? "nil")
+        XCTAssertTrue(american?.hasPrefix("Ends: 1:31") == true, american ?? "nil")
         XCTAssertTrue(american?.contains("PM") == true, american ?? "nil")
     }
 
@@ -218,7 +218,7 @@ final class WidgetSnapshotTests: XCTestCase {
         let gb = Locale(identifier: "en_GB")
         // 08:00:00 UTC + 20_520 s = 13:42:00.
         let shown = track(playing(until: now.addingTimeInterval(100), remaining: 20_520), at: now)
-        XCTAssertEqual(shown?.timesLine(locale: gb, timeZone: utc), "Duration: 51m 06s   End time: 13:42")
+        XCTAssertEqual(shown?.timesLine(locale: gb, timeZone: utc), "Duration: 51m 06s   Ends: 13:42")
         let stale = track(playing(until: now.addingTimeInterval(-1)), at: now)
         XCTAssertEqual(stale?.timesLine(locale: gb, timeZone: utc), "Duration: 51m 06s")
         XCTAssertNil(track(playing(queue: 0, remaining: 0), at: now)?.timesLine())

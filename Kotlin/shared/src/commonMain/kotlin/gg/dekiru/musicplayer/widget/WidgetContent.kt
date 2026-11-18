@@ -34,21 +34,21 @@ sealed interface WidgetContent {
         /**
          * The line of times, in Now Playing's words, with the finish time
          * written by `clock` (the device's 12/24-hour format). Medium:
-         * "Duration: 51m 06s   End time: 13:42"; small: only "End
-         * time: 13:42". Without a finish time, the duration alone; null when
+         * "Duration: 51m 06s   Ends: 13:42"; small: only
+         * "Ends: 13:42". Without a finish time, the duration alone; null when
          * the length isn't known.
          */
         fun times(medium: Boolean, clock: (Long) -> String): String? {
             if (queueSeconds <= 0) return null
             val duration = "Duration: ${formatAlbumDuration(queueSeconds)}"
-            val finish = finishAt?.let { "End time: ${clock(it)}" } ?: return duration
+            val finish = finishAt?.let { "Ends: ${clock(it)}" } ?: return duration
             return if (medium) "$duration   $finish" else finish
         }
 
         /** The small widget's two lines, when it has room: "Duration: …" (null when the length isn't known) and the finish time (null when out of date or unknown). */
         fun timeLines(clock: (Long) -> String): Pair<String?, String?> {
             if (queueSeconds <= 0) return null to null
-            return "Duration: ${formatAlbumDuration(queueSeconds)}" to finishAt?.let { "End time: ${clock(it)}" }
+            return "Duration: ${formatAlbumDuration(queueSeconds)}" to finishAt?.let { "Ends: ${clock(it)}" }
         }
     }
 

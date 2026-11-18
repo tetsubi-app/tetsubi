@@ -230,7 +230,7 @@ private fun Titles(player: PlayerController, track: PlaybackTrack, castName: Str
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (quality != null) QualityLabel(quality, qualityDetail, accent)
                 Text(
-                    "${if (quality != null) "      " else ""}Duration: ${formatAlbumDuration(player.albumLength)}      End time: $finish",
+                    "${if (quality != null) "      " else ""}Duration: ${formatAlbumDuration(player.albumLength)}      Ends: $finish",
                     color = infoColor, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )

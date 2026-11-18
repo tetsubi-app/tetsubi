@@ -170,8 +170,8 @@ class WidgetTest {
         val snapshot = WidgetSnapshot.next(null, timed, accentRGB = null, artFile = null, now = 100_000)
         val shown = WidgetContent.of(snapshot, playerAlive = true, now = 160_000) as WidgetContent.Track
         assertEquals(100_000L + 600_000, shown.finishAt)
-        assertEquals("Duration: 51m 06s   End time: T700000", shown.times(medium = true) { "T$it" })
-        assertEquals("End time: T700000", shown.times(medium = false) { "T$it" })
+        assertEquals("Duration: 51m 06s   Ends: T700000", shown.times(medium = true) { "T$it" })
+        assertEquals("Ends: T700000", shown.times(medium = false) { "T$it" })
     }
 
     @Test

@@ -128,7 +128,7 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **Widget buttons are `AudioPlaybackIntent`s that run in the app.** `Tetsubi-Widget/PlaybackIntents.swift` is therefore compiled into both the widget and the app target (see `project.yml`). With the app killed, Play replays the album the widget shows.
 
-**A widget cannot tick by itself.** While paused, the "End time" keeps up through minute-by-minute timeline entries for an hour; if the app is killed while playing, the widget shows Play and only the duration once `playingUntil` has passed.
+**A widget cannot tick by itself.** While paused, the "Ends" time keeps up through minute-by-minute timeline entries for an hour; if the app is killed while playing, the widget shows Play and only the duration once `playingUntil` has passed.
 
 **The widget bundles its own copies of the fonts.** The extension lists the four DEKIRU Sans files as resources and under `UIAppFonts`, because it does not load the package's font registration.
 

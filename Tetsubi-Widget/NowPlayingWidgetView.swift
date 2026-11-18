@@ -176,7 +176,7 @@ private struct MediumTrackView: View {
     }
 }
 
-/// Now Playing's line under the album: "Duration: 51m 06s   End time: 13:42"
+/// Now Playing's line under the album: "Duration: 51m 06s   Ends: 13:42"
 /// (just the duration once the finish time isn't known; nothing when the
 /// length isn't known).
 private struct QueueTimesLine: View {
