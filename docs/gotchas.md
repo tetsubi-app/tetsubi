@@ -128,7 +128,7 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **Widget buttons are `AudioPlaybackIntent`s that run in the app.** `Tetsubi-Widget/PlaybackIntents.swift` is therefore compiled into both the widget and the app target (see `project.yml`). With the app killed, Play replays the album the widget shows.
 
-**A widget cannot tick by itself.** While paused, the "Finishes at" time keeps up through minute-by-minute timeline entries for an hour; if the app is killed while playing, the widget shows Play and only the duration once `playingUntil` has passed.
+**A widget cannot tick by itself.** While paused, the "End time" keeps up through minute-by-minute timeline entries for an hour; if the app is killed while playing, the widget shows Play and only the duration once `playingUntil` has passed.
 
 **The widget bundles its own copies of the fonts.** The extension lists the four DEKIRU Sans files as resources and under `UIAppFonts`, because it does not load the package's font registration.
 
@@ -349,6 +349,8 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 **Release tags are `v<versionName>.<versionCode>`, e.g. `v1.0.6`.** Tags are compared number by number after dropping the `v` and anything after the first character that is not a digit or a dot (`v1.1-beta` is 1.1); a missing part counts as 0. Raise `tetsubi.versionCode` before tagging, or people on the previous build are not told.
 
 **A Google Play build must switch the check off.** Play updates its own installs, and its policies restrict apps that update outside it. Set `UpdateCheck.ENABLED_IN_THIS_BUILD` to false for such a build: no request is made, no banner shows and the Settings rows are hidden.
+
+**Android can't seek in a FLAC written on the fly, so downloaded FLACs are repaired.** A track the server converts (`/universal`, e.g. ALAC, which Android can't decode, downloaded under "Original (as served)") is written by ffmpeg to a pipe: STREAMINFO's total samples is 0 and there is no seek table. Media3's FlacExtractor then treats the file as unseekable and a seek restarts it at 0:00. `downloads/FlacRepair.kt` counts the samples (frame headers checked by CRC-8, CRC-16 and frame numbers) and writes the 36-bit total before the `.part` is renamed; a one-time background pass (`downloads.flacTotalsRepaired`) repairs older downloads. Streams the server converts are seeked by restarting them (`StartTimeTicks`), which needs the track's duration.
 
 **A GitHub release needs the files attached.** Attach the signed release APK (`./gradlew :androidApp:assembleRelease`, see the signing item below) to the release; the banner only links to the release page. Linux packages (AppImage, deb, rpm) must be built on Linux, as jpackage only builds for the system it runs on: the `Linux release` GitHub workflow (`.github/workflows/linux-release.yml`) does it on Ubuntu 22.04 when a `v*` tag is pushed (create the release first, or the upload fails; it can be rerun by hand with the tag), starts the app once under a virtual display, and attaches the `.deb`, `.rpm`, `.AppImage` and `SHA256SUMS-linux.txt`. Built on a newer, rolling distro the packages would carry that system's newer libraries and might not start on Ubuntu or Debian.
 

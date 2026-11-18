@@ -57,6 +57,7 @@ class DownloadManagerTest {
         dir: String = tempDir(),
         source: String = "flac",
         playable: () -> Set<AudioFormat> = { emptySet() },
+        audio: (String) -> ByteArray = { "audio of $it".encodeToByteArray() },
     ): Setup {
         lateinit var s: Setup
         val server = FakeServer { request ->
@@ -71,7 +72,7 @@ class DownloadManagerTest {
                     s.gates[id]?.await()
                     if (id in s.failing) respond("broken", HttpStatusCode.InternalServerError)
                     else {
-                        val bytes = "audio of $id".encodeToByteArray()
+                        val bytes = audio(id)
                         respond(bytes, HttpStatusCode.OK, headersOf(HttpHeaders.ContentLength, "${bytes.size}"))
                     }
                 }
@@ -404,6 +405,23 @@ class DownloadManagerTest {
         s.manager.delete(listOf("d2"))
         assertFalse(s.manager.isDownloaded(merged))
         assertTrue(s.manager.isDownloaded("d1"))
+    }
+
+    @Test
+    fun alacConvertedToFlacGetsItsTotalSamplesFilledIn() = runTest {
+        // The server's FFmpeg writes the FLAC to a pipe: total samples 0, so Media3 couldn't seek in the file.
+        val pad = setOf(AudioFormat.FLAC, AudioFormat.MP3, AudioFormat.AAC, AudioFormat.OPUS, AudioFormat.WAV)
+        val converted = FlacFixtures.file(FlacFixtures.frames(false, listOf(4096, 4096, 777)))
+        val s = setup(tracks = 2, source = "alac", playable = { pad }, audio = { converted })
+        s.manager.download(album("al1"))
+        settle()
+        assertTrue(s.manager.isDownloaded("al1"))
+        assertTrue(s.server.requests.filter { it.path.startsWith("/Audio/") }.all { it.path.endsWith("/universal") })
+        for (file in s.manifest("al1").tracks.map { "${s.dir}/al1/${it.file}" }) {
+            val bytes = LocalFiles.readBytes(file)!!
+            assertEquals(converted.size, bytes.size)
+            assertEquals(8_969L, FlacRepair.totalSamples(bytes.copyOfRange(8, 42)))
+        }
     }
 
     @Test

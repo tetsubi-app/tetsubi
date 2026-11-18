@@ -22,6 +22,7 @@ class DownloadException(message: String, cause: Throwable? = null) : Exception(m
  * Downloads one URL to a file. Writes `<file>.part` and renames it when
  * done. A `.part` left by a pause or a closed app is continued with
  * `Range: bytes=<size>-` when the server answers 206; a 200 starts it again.
+ * A finished FLAC gets its total samples filled in first ([FlacRepair]).
  * Cancel the coroutine to stop (the `.part` stays, for resuming).
  */
 class TrackDownloader(
@@ -38,6 +39,8 @@ class TrackDownloader(
                 LocalFiles.deleteRecursively(part)
                 fetch(url, part, onProgress)
             }
+            // A FLAC the server converted has no total samples, so Media3 can't seek in it.
+            if (destination.endsWith(".flac", ignoreCase = true)) FlacRepair.repairFile(part)
             LocalFiles.move(part, destination)
         }
 

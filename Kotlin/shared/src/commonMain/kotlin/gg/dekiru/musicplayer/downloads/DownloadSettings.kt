@@ -15,4 +15,12 @@ class DownloadSettings(private val preferences: Preferences) {
     var allowCellular: Boolean
         get() = preferences.getString("downloads.allowCellular")?.toBooleanStrictOrNull() ?: true
         set(value) = preferences.putString("downloads.allowCellular", value.toString())
+
+    /**
+     * Whether downloaded FLAC files from before [FlacRepair] have been looked
+     * at once (Android and Linux only; not a user setting).
+     */
+    var flacTotalsRepaired: Boolean
+        get() = preferences.getString("downloads.flacTotalsRepaired") == "true"
+        set(value) = preferences.putString("downloads.flacTotalsRepaired", value.toString())
 }

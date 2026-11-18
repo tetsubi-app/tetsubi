@@ -230,7 +230,7 @@ private fun Titles(player: PlayerController, track: PlaybackTrack, castName: Str
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (quality != null) QualityLabel(quality, qualityDetail, accent)
                 Text(
-                    "${if (quality != null) "      " else ""}Duration: ${formatAlbumDuration(player.albumLength)}      Finishes at: $finish",
+                    "${if (quality != null) "      " else ""}Duration: ${formatAlbumDuration(player.albumLength)}      End time: $finish",
                     color = infoColor, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
@@ -350,9 +350,15 @@ private fun Toggles(player: PlayerController, visualiser: VisualiserToggle?, cas
     val castPicker = rememberCastPicker(cast.casting)
     val dim = Color.White.copy(alpha = 0.6f)
     val activeTint = accent ?: TetsubiColors.blue
-    Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+    val showCast = castPicker != null && cast.visible
+    val count = (if (player.maniacMode) 0 else 2) + listOf(visualiser != null, showCast, output != null).count { it }
+    // Equal columns, each label on one line: five fit a 360 dp phone ("Output"
+    // wrapped letter by letter on a 394 dp one with fixed 32 dp gaps). Up to
+    // 80 dp a column, so two or three stay together, centred.
+    Row(Modifier.widthIn(max = 80.dp * count).fillMaxWidth()) {
+        val column = Modifier.weight(1f)
         if (!player.maniacMode) {
-            Toggle("⇄", "Shuffle", active = player.shuffle, onClick = player::toggleShuffle, tint = activeTint)
+            Toggle("⇄", "Shuffle", active = player.shuffle, onClick = player::toggleShuffle, tint = activeTint, modifier = column)
             Toggle(
                 if (player.repeatMode == RepeatMode.ONE) "↻1" else "↻",
                 when (player.repeatMode) {
@@ -364,25 +370,26 @@ private fun Toggles(player: PlayerController, visualiser: VisualiserToggle?, cas
                 onClick = player::cycleRepeatMode,
                 description = "Repeat",
                 tint = activeTint,
+                modifier = column,
             )
         }
         // Stays in Maniac Mode (as iOS).
         if (visualiser != null) {
-            Toggle("", "Visualiser", active = visualiser.isOn, onClick = visualiser::toggle, onOff = visualiser.isOn) {
+            Toggle("", "Visualiser", active = visualiser.isOn, onClick = visualiser::toggle, onOff = visualiser.isOn, modifier = column) {
                 WaveformIcon(22.dp, if (visualiser.isOn) activeTint else Color.White.copy(alpha = 0.6f))
             }
         }
         // Next to the Visualiser (hidden while casting); in the art's colour while casting, as iOS's AirPlay icon.
-        if (castPicker != null && cast.visible) {
+        if (castPicker != null && showCast) {
             val description = if (cast.casting) "Casting. Change or stop" else "Play on a Cast device"
-            Toggle("", "Cast", active = cast.casting, onClick = castPicker, description = description) {
+            Toggle("", "Cast", active = cast.casting, onClick = castPicker, description = description, modifier = column) {
                 CastIcon(22.dp, if (cast.casting) activeTint else dim)
             }
         }
         if (output != null) {
             // In the art's colour while music goes to headphones, Bluetooth, USB…, as iOS's AirPlay icon.
             val external = rememberExternalOutput()
-            Toggle("", "Output", active = external, onClick = output, description = "Choose speakers or headphones") {
+            Toggle("", "Output", active = external, onClick = output, description = "Choose speakers or headphones", modifier = column) {
                 SpeakerIcon(22.dp, if (external) activeTint else dim)
             }
         }
@@ -400,10 +407,11 @@ private fun Toggle(
     onOff: Boolean? = null,
     /** The symbol's colour when on: the art's colour (blue when it has none). */
     tint: Color = TetsubiColors.blue,
+    modifier: Modifier = Modifier,
     icon: (@Composable () -> Unit)? = null,
 ) {
     Column(
-        Modifier.clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 8.dp, vertical = 4.dp)
+        modifier.clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 2.dp, vertical = 4.dp)
             .semantics(mergeDescendants = true) {
                 if (onOff != null) {
                     contentDescription = label
@@ -419,7 +427,7 @@ private fun Toggle(
         } else {
             Text(symbol, color = if (active) tint else Color.White.copy(alpha = 0.6f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
-        Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+        Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, maxLines = 1, softWrap = false)
     }
 }
 

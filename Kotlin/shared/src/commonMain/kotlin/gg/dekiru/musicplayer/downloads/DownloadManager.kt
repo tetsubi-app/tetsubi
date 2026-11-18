@@ -4,6 +4,7 @@ import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.models.JellyfinTrack
 import gg.dekiru.musicplayer.data.models.allDiscs
+import gg.dekiru.musicplayer.logLine
 import gg.dekiru.musicplayer.nowMillis
 import gg.dekiru.musicplayer.playback.AudioFormat
 import gg.dekiru.musicplayer.playback.PlaybackTrack
@@ -146,6 +147,25 @@ class DownloadManager(
     init {
         restore()
         if (queue.isNotEmpty()) this.runner.start(this)
+        repairOldFlacFiles()
+    }
+
+    /**
+     * Once per install: fills in the total samples of FLAC files downloaded
+     * before [TrackDownloader] did it, so Media3 can seek in them. Runs in the
+     * background; each file is replaced whole (see [FlacRepair]), and the flag
+     * is set only when every file has been looked at, so a killed app starts
+     * the scan again next time.
+     */
+    private fun repairOldFlacFiles() {
+        if (settings.flacTotalsRepaired) return
+        // All of it on the I/O dispatcher, the flag too (both real Preferences
+        // are thread-safe), so nothing waits for the main thread.
+        scope.launch(ioDispatcher) {
+            val repaired = repairFlacFiles(paths.root)
+            if (repaired > 0) logLine("Tetsubi", "flac: repaired $repaired downloaded files")
+            runCatching { settings.flacTotalsRepaired = true }
+        }
     }
 
     // Public API
@@ -618,6 +638,25 @@ class DownloadManager(
     }
 
     companion object {
+        /**
+         * Runs [FlacRepair] on every finished `.flac` file under `dir` (album
+         * and playlist folders). Returns how many were repaired.
+         */
+        internal fun repairFlacFiles(dir: String): Int {
+            var repaired = 0
+            // A folder deleted meanwhile (an album removed) is skipped.
+            val names = runCatching { LocalFiles.list(dir) }.getOrDefault(emptyList())
+            for (name in names) {
+                val path = "$dir/$name"
+                if (LocalFiles.isDirectory(path)) {
+                    repaired += repairFlacFiles(path)
+                } else if (name.endsWith(".flac", ignoreCase = true) && FlacRepair.repairFile(path) == FlacRepair.Result.REPAIRED) {
+                    repaired++
+                }
+            }
+            return repaired
+        }
+
         /** Size of saved pictures (px), as iOS. */
         const val COVER_SIZE = 600
 
