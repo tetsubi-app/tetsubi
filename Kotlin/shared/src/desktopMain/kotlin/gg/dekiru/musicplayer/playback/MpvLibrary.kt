@@ -7,6 +7,28 @@ import com.sun.jna.Pointer
 import com.sun.jna.ptr.LongByReference
 
 /**
+ * The C library's `setlocale`. libmpv refuses to start (mpv_create returns
+ * NULL, "Non-C locale detected") unless numbers are formatted the C way, and
+ * the JVM sets the locale from the environment (en_GB, de_DE…).
+ */
+@Suppress("FunctionName")
+internal interface CLibrary : Library {
+    fun setlocale(category: Int, locale: String?): String?
+
+    companion object {
+        /** LC_NUMERIC: 1 with glibc and musl (Linux), 4 on macOS. */
+        fun lcNumeric(osName: String): Int = if (osName.lowercase().let { "mac" in it || "darwin" in it }) 4 else 1
+
+        /** Numbers formatted the C way, as libmpv requires. Never throws. */
+        fun useCNumericLocale(): Result<Unit> = runCatching {
+            val c = Native.load("c", CLibrary::class.java)
+            c.setlocale(lcNumeric(System.getProperty("os.name").orEmpty()), "C") ?: error("setlocale returned NULL")
+            Unit
+        }
+    }
+}
+
+/**
  * The parts of libmpv's client API (`mpv/client.h`) [MpvEngine] uses,
  * through JNA. Every call is thread-safe on libmpv's side.
  */
@@ -33,6 +55,7 @@ internal interface MpvLibrary : Library {
         const val EVENT_LOG_MESSAGE = 2
         const val EVENT_START_FILE = 6
         const val EVENT_END_FILE = 7
+        const val EVENT_FILE_LOADED = 8
         const val EVENT_SEEK = 20
         const val EVENT_PLAYBACK_RESTART = 21
         const val EVENT_PROPERTY_CHANGE = 22

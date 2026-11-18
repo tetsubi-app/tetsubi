@@ -10,6 +10,7 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The Linux player: libmpv (mpv's library) through its C API. mpv's playlist
@@ -66,6 +67,15 @@ class MpvEngine(
     /** Seeks we asked for and haven't seen mpv start: any other seek is mpv's own (Repeat One going round). */
     private val ownSeeks = AtomicInteger(0)
 
+    /**
+     * Whether mpv has the playing file open. mpv rejects a seek before then
+     * ("error running command"), so a seek that comes early waits in
+     * [pendingSeek] and is sent when the file has loaded. A new file (load,
+     * skip, stop) drops a waiting seek: it was for the one before.
+     */
+    @Volatile private var fileLoaded = false
+    private val pendingSeek = AtomicReference<List<String>?>(null)
+
     init {
         val loaded = MpvLibrary.load()
         var handle: Pointer? = null
@@ -93,6 +103,7 @@ class MpvEngine(
 
     /** Makes and starts the player; null (logged) if it won't. */
     private fun start(library: MpvLibrary, extra: Map<String, String>): Pointer? {
+        CLibrary.useCNumericLocale().onFailure { log("Couldn't set the C numeric locale libmpv needs: ${it.message}") }
         val handle = library.mpv_create() ?: run {
             log("mpv_create failed")
             return null
@@ -210,6 +221,17 @@ class MpvEngine(
         if (closed.get()) return
         val task = Runnable {
             if (closed.get()) return@Runnable
+            when (args.first()) {
+                // (loadfile here only appends to the playlist: not a new file.)
+                "playlist-play-index", "playlist-next", "playlist-prev", "stop" -> {
+                    fileLoaded = false
+                    pendingSeek.set(null)
+                }
+                "seek" -> if (!fileLoaded) {
+                    pendingSeek.set(args)
+                    return@Runnable
+                }
+            }
             val code = library.mpv_command(handle, (args + null).toTypedArray())
             if (code < 0) {
                 // Not the arguments: they can be stream addresses.
@@ -233,7 +255,12 @@ class MpvEngine(
             when (event.id) {
                 MpvLibrary.EVENT_SHUTDOWN -> return
                 MpvLibrary.EVENT_PROPERTY_CHANGE -> event.data?.let { property(event.replyUserdata, it) }
+                MpvLibrary.EVENT_FILE_LOADED -> {
+                    fileLoaded = true
+                    pendingSeek.getAndSet(null)?.let(::send)
+                }
                 MpvLibrary.EVENT_START_FILE -> {
+                    fileLoaded = false
                     resetTimes()
                     ownSeeks.set(0)
                     val pos = LongByReference(-1)
