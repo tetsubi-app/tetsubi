@@ -44,8 +44,8 @@ data class CardGrid(val columns: Int, val spacing: Float, val cardWidth: Float, 
  * Favourites tabs' lists). Albums: the whole library fetched once, filtered
  * and sorted here (re-sorting doesn't ask the server again). Random shows
  * 24 at a time in an order fixed until Random is picked again. Offline:
- * the downloaded albums only. The tab, sort, view (albums' and artists'
- * apart) and wide grids' cards per row are remembered.
+ * the downloaded albums only. The tab, sort, filter, view (albums', artists' and
+ * favourites' apart; favourites' sort and filter too) and wide grids' cards per row are remembered.
  */
 class LibraryModel(
     private val api: JellyfinApi,
@@ -96,11 +96,12 @@ class LibraryModel(
             apply()
         }
 
-    private var _filter by mutableStateOf(LibraryFilter.ALL)
+    private var _filter by mutableStateOf(saved(FILTER_KEY, LibraryFilter.entries, LibraryFilter.ALL) { it.title })
     var filter: LibraryFilter
         get() = _filter
         set(value) {
             _filter = value
+            preferences.putString(FILTER_KEY, value.title)
             randomLimit = RANDOM_PAGE
             apply()
         }
@@ -125,6 +126,9 @@ class LibraryModel(
 
     /** Cards per row on wide layouts, shared by every album and artist grid. */
     val gridZoom = GridZoom(preferences)
+
+    /** Favourites' own View, Sort and Filter (Home ▸ Favourites follows them too). */
+    val favouritesOptions = FavouritesOptions(preferences)
 
     // Downloads (kept up to date by the screen)
 
@@ -289,9 +293,15 @@ class LibraryModel(
     var favouritesLoaded by mutableStateOf(false)
         private set
 
-    /** Most recently favourited first; offline, the downloaded ones only. */
+    /**
+     * As [favouritesOptions] arranges them (most recently favourited first
+     * by default); offline, the downloaded ones only.
+     */
     val favourites: List<JellyfinAlbum>
-        get() = if (isOffline) allFavourites.filter(::isDownloaded) else allFavourites
+        get() = favouritesOptions.arrange(allFavourites, isOffline, ::isDownloaded)
+
+    /** Any favourites at all, before the filter (the Downloaded filter's own empty note). */
+    val hasFavourites: Boolean get() = allFavourites.isNotEmpty()
 
     /** Each time the tab shows (favourites change on album pages). */
     fun loadFavourites() {
@@ -318,6 +328,7 @@ class LibraryModel(
         // Remembered choices (iOS keeps them only while the app runs); values are the iOS names.
         const val TAB_KEY = "library.tab"
         const val SORT_KEY = "library.sort"
+        const val FILTER_KEY = "library.filter"
         const val VIEW_KEY = "library.viewMode"
         const val ARTISTS_VIEW_KEY = "library.artistsViewMode"
         const val GRID_COLUMNS_KEY = "library.gridColumns"

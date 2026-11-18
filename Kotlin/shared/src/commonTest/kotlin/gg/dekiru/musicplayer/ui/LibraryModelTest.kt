@@ -459,7 +459,8 @@ class LibraryModelTest {
         assertEquals(LibraryTab.ARTISTS, again.tab)
         assertEquals(LibrarySort.DATE_ADDED, again.sortOption)
         assertEquals(LibraryDisplayMode.LIST, again.displayMode)
-        assertEquals(LibraryFilter.ALL, again.filter, "the filter isn't kept")
+        assertEquals("Downloaded", prefs.getString(LibraryModel.FILTER_KEY))
+        assertEquals(LibraryFilter.DOWNLOADED, again.filter, "the filter is kept")
     }
 
     @Test

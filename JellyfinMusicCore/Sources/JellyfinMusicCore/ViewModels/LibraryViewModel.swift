@@ -62,6 +62,7 @@ public final class LibraryViewModel {
     }
     public var filter: LibraryFilter = .all {
         didSet {
+            defaults.set(filter.rawValue, forKey: Self.filterKey)
             randomLimit = Self.randomPageSize
             applyFilterAndSort()
         }
@@ -75,10 +76,11 @@ public final class LibraryViewModel {
         didSet { defaults.set(artistsDisplayMode.rawValue, forKey: Self.artistsViewModeKey) }
     }
 
-    // Remembered choices (the filter isn't); values are the raw values,
+    // Remembered choices; values are the raw values,
     // e.g. "Date Added", as Android stores them.
     static let tabKey = "library.tab"
     static let sortKey = "library.sort"
+    static let filterKey = "library.filter"
     static let viewModeKey = "library.viewMode"
     static let artistsViewModeKey = "library.artistsViewMode"
 
@@ -144,6 +146,7 @@ public final class LibraryViewModel {
         tab = defaults.string(forKey: Self.tabKey).flatMap(LibraryTab.init(rawValue:)) ?? .albums
         sortOption = defaults.string(forKey: Self.sortKey).flatMap(LibrarySortOption.init(rawValue:)) ?? .name
         displayMode = defaults.string(forKey: Self.viewModeKey).flatMap(LibraryDisplayMode.init(rawValue:)) ?? .grid
+        filter = defaults.string(forKey: Self.filterKey).flatMap(LibraryFilter.init(rawValue:)) ?? .all
         artistsDisplayMode = defaults.string(forKey: Self.artistsViewModeKey)
             .flatMap(LibraryDisplayMode.init(rawValue:)) ?? .grid
     }

@@ -228,7 +228,7 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                     when (top) {
                         null -> when (tab) {
                             Tab.HOME -> HomeScreen(
-                                api, home, onOpen = ::open, onMore = ::openList, onSignOut = session::signOut,
+                                api, home, onOpen = ::open, onMore = ::openList,
                                 network = session.environment.network.state, downloads = downloads,
                                 playlists = playlists, onOpenPlaylist = ::openPlaylist,
                                 onMorePlaylists = {
@@ -263,7 +263,10 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                             isOnline = network.online, onAddToPlaylist = addToPlaylist::start, onDeleted = { leave(top) },
                             manager = downloads,
                         )
-                        is ListEntry -> AlbumListScreen(api, top.model, onOpen = ::open, onBack = ::back, downloads = downloads, zoom = library.gridZoom)
+                        is ListEntry -> AlbumListScreen(
+                            api, top.model, onOpen = ::open, onBack = ::back, downloads = downloads,
+                            zoom = library.gridZoom, favourites = library.favouritesOptions,
+                        )
                     }
                 }
             }

@@ -93,7 +93,7 @@ private val wideAccessoryWidth = accessoryWidth * 3
 /**
  * The Library (as `LibraryView` on iOS): Albums / Artists / Favourites /
  * Playlists along the top, the View, Sort and Filter menu at the right
- * (Albums; View and Sort for Playlists).
+ * (Albums and Favourites; View and Sort for Playlists).
  * Albums: grid or list, the A–Z strip when sorted by Name or Artist;
  * Random shows 24 at a time, pull down or shake for a new shuffle.
  * Offline: a banner and the downloaded albums only. Artists open through
@@ -137,6 +137,7 @@ fun LibraryScreen(
     val artistList = rememberLazyListState()
     val artistGrid = rememberLazyGridState()
     val favouriteGrid = rememberLazyGridState()
+    val favouriteList = rememberLazyListState()
     val playlistGrid = rememberLazyGridState()
     val playlistList = rememberLazyListState()
 
@@ -146,7 +147,7 @@ fun LibraryScreen(
         val zoomable = when (model.tab) {
             LibraryTab.ALBUMS -> model.displayMode == LibraryDisplayMode.GRID
             LibraryTab.ARTISTS -> model.artistsDisplayMode == LibraryDisplayMode.GRID
-            LibraryTab.FAVOURITES -> true
+            LibraryTab.FAVOURITES -> model.favouritesOptions.displayMode == LibraryDisplayMode.GRID
             LibraryTab.PLAYLISTS -> false
         }
         LibraryTabBar(model.tab, onSelect = { model.tab = it }, accessoryWidth = if (wide) wideAccessoryWidth else accessoryWidth) {
@@ -155,6 +156,7 @@ fun LibraryScreen(
                 when (model.tab) {
                     LibraryTab.ALBUMS -> OptionsMenu(model)
                     LibraryTab.ARTISTS -> ArtistOptionsMenu(model)
+                    LibraryTab.FAVOURITES -> FavouritesOptionsMenu(model.favouritesOptions)
                     LibraryTab.PLAYLISTS -> if (playlists != null) PlaylistOptionsMenu(model, playlists)
                     else -> Unit
                 }
@@ -168,8 +170,13 @@ fun LibraryScreen(
                 LibraryTab.ARTISTS -> ArtistsTab(api, model, onOpenArtist, artistList, artistGrid)
                 LibraryTab.FAVOURITES -> when {
                     !model.favouritesLoaded -> LibrarySpinner()
+                    model.favourites.isEmpty() && model.favouritesOptions.filter == LibraryFilter.DOWNLOADED && !model.isOffline && model.hasFavourites ->
+                        NoDownloadedFavourites { model.favouritesOptions.filter = LibraryFilter.ALL }
                     model.favourites.isEmpty() -> LibraryNote("No favourite albums yet.\nTap the heart on an album to add one.")
-                    else -> LibraryAlbumGrid(api, model.favourites, favouriteGrid, onOpen, model::isDownloaded, localArt, zoom = model.gridZoom)
+                    else -> FavouriteAlbums(
+                        api, model.favourites, model.favouritesOptions, onOpen, model::isDownloaded, localArt,
+                        favouriteGrid, favouriteList, model.gridZoom,
+                    )
                 }
                 LibraryTab.PLAYLISTS -> if (playlists != null) {
                     PlaylistsTab(api, playlists, model.displayMode, onOpenPlaylist, playlistGrid, playlistList)
@@ -255,6 +262,93 @@ private fun OptionsMenu(model: LibraryModel) {
                 )
             }
         }
+    }
+}
+
+/** View, Sort and Filter for the Favourites tab (as the Albums one); Home ▸ Favourites follows them too. */
+@Composable
+private fun FavouritesOptionsMenu(options: FavouritesOptions) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            Modifier.size(accessoryWidth, 32.dp).clip(RoundedCornerShape(8.dp))
+                .clickable(role = Role.Button) { open = true }
+                .semantics { contentDescription = "View, sort and filter" },
+            contentAlignment = Alignment.Center,
+        ) { SlidersIcon(20.dp) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            fun pick(action: () -> Unit) {
+                action()
+                open = false
+            }
+            MenuHeading("View")
+            for (mode in LibraryDisplayMode.entries) {
+                MenuChoice(mode.title, mode == options.displayMode, icon = {
+                    if (mode == LibraryDisplayMode.GRID) GridIcon(18.dp) else ListIcon(18.dp)
+                }) { pick { options.displayMode = mode } }
+            }
+            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+            MenuHeading("Sort")
+            for (sort in FavouritesSort.entries) {
+                MenuChoice(sort.title, sort == options.sortOption) { pick { options.sortOption = sort } }
+            }
+            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+            MenuHeading("Filter")
+            for (filter in LibraryFilter.entries) {
+                MenuChoice(filter.title, filter == options.filter) { pick { options.filter = filter } }
+            }
+        }
+    }
+}
+
+/**
+ * Favourite albums (already arranged by [options]) as the Library's album
+ * grid or list, with the A–Z strip for the Name and Artist sorts (as iOS
+ * `FavouritesTabView`). Library ▸ Favourites and Home ▸ Favourites.
+ */
+@Composable
+internal fun FavouriteAlbums(
+    api: JellyfinApi,
+    albums: List<JellyfinAlbum>,
+    options: FavouritesOptions,
+    onOpen: (JellyfinAlbum) -> Unit,
+    isDownloaded: (JellyfinAlbum) -> Boolean,
+    localArt: (JellyfinAlbum) -> String?,
+    grid: androidx.compose.foundation.lazy.grid.LazyGridState,
+    list: LazyListState,
+    zoom: GridZoom?,
+) {
+    val scope = rememberCoroutineScope()
+    val key = options.indexKey
+    val isGrid = options.displayMode == LibraryDisplayMode.GRID
+    val firstIds = remember(albums, options.sortOption) {
+        key?.let { AlphaIndex.firstIds(albums, it) { album -> album.id } }.orEmpty()
+    }
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().padding(end = if (key != null) AlphaIndexBarWidth else 0.dp)) {
+            if (isGrid) {
+                LibraryAlbumGrid(api, albums, grid, onOpen, isDownloaded, localArt, trailingEdge = key == null, zoom = zoom)
+            } else {
+                LibraryAlbumList(api, albums, list, onOpen, isDownloaded, localArt)
+            }
+        }
+        if (key != null) {
+            AlphaIndexBar(firstIds.keys, onSelect = { label ->
+                // The letter, or the next one that has albums.
+                val id = AlphaIndex.target(label, firstIds) ?: return@AlphaIndexBar
+                val index = albums.indexOfFirst { it.id == id }.coerceAtLeast(0)
+                scope.launch { if (isGrid) grid.scrollToItem(index) else list.scrollToItem(index) }
+            }, modifier = Modifier.align(Alignment.CenterEnd))
+        }
+    }
+}
+
+/** Favourites with the Downloaded filter and none downloaded (online). */
+@Composable
+internal fun NoDownloadedFavourites(onShowAll: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("No downloaded favourite albums yet.", color = TetsubiColors.albumYearText, fontSize = 13.sp, textAlign = TextAlign.Center)
+        TextButton(onClick = onShowAll) { Text("Show all favourites", color = TetsubiColors.blue, fontSize = 13.sp) }
     }
 }
 

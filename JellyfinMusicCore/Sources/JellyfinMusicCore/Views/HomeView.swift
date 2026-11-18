@@ -85,7 +85,8 @@ public struct HomeView: View {
                     FavouritesTabView(api: api)
                         .navigationTitle("Favourites")
                         .appTheme()
-                        .gridZoomToolbar()
+                        // The Library's Favourites choices; no −/+ in List.
+                        .gridZoomToolbar(FavouritesOptions.shared.displayMode == .grid)
                 case .random:
                     RandomAlbumsView(api: api)
                         .appTheme()

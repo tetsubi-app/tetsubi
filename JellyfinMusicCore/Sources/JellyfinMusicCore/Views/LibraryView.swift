@@ -36,7 +36,7 @@ public struct LibraryView: View {
         switch tab {
         case .albums:     return model.displayMode == .grid
         case .artists:    return model.artistsDisplayMode == .grid
-        case .favourites: return true
+        case .favourites: return FavouritesOptions.shared.displayMode == .grid
         case .playlists:  return false
         }
     }
@@ -93,6 +93,8 @@ public struct LibraryView: View {
                         optionsMenu(model: model)
                     } else if tab == .artists, let model = viewModel {
                         artistsOptionsMenu(model: model)
+                    } else if tab == .favourites {
+                        favouritesOptionsMenu(options: FavouritesOptions.shared)
                     } else if tab == .playlists, let playlistsModel {
                         playlistsOptionsMenu(model: playlistsModel)
                     }
@@ -192,38 +194,7 @@ public struct LibraryView: View {
         model: LibraryViewModel,
         @ViewBuilder content: @escaping (ScrollViewProxy) -> Content
     ) -> some View {
-        ScrollViewReader { proxy in
-            let key = model.indexKey
-            let firstByBucket = firstAlbumIDs(model.sortedAlbums, key: key)
-            // The strip floats over the trailing edge; the content reserves its
-            // width so the grid keeps the full remaining width and padding.
-            content(proxy)
-                .padding(.trailing, key != nil ? AlphaIndexBar.width : 0)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .trailing) {
-                    if key != nil {
-                        AlphaIndexBar(available: Set(firstByBucket.keys)) { label in
-                            // Jump to the letter, or the next one that has albums.
-                            let start = AlphaIndex.labels.firstIndex(of: label) ?? 0
-                            let target = AlphaIndex.labels[start...].first { firstByBucket[$0] != nil }
-                                ?? AlphaIndex.labels.last { firstByBucket[$0] != nil }
-                            if let target, let id = firstByBucket[target] {
-                                proxy.scrollTo(id, anchor: .top)
-                            }
-                        }
-                    }
-                }
-        }
-    }
-
-    private func firstAlbumIDs(_ albums: [JellyfinAlbum], key: ((JellyfinAlbum) -> String)?) -> [String: String] {
-        guard let key else { return [:] }
-        var result: [String: String] = [:]
-        for album in albums {
-            let bucket = AlphaIndex.bucket(for: key(album))
-            if result[bucket] == nil { result[bucket] = album.id }
-        }
-        return result
+        AlphaIndexedAlbums(albums: model.sortedAlbums, key: model.indexKey, content: content)
     }
 
     // MARK: - Grid
@@ -372,41 +343,9 @@ public struct LibraryView: View {
     // MARK: - List
 
     private func listView(model: LibraryViewModel, proxy: ScrollViewProxy) -> some View {
-        List(model.sortedAlbums) { album in
-            NavigationLink(value: album) {
-                HStack(spacing: 12.scaled) {
-                    AlbumArtView(
-                        request: api?.imageURLRequest(for: album.id, size: 100),
-                        size: 60.scaled, cornerRadius: 4.scaled
-                    )
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(album.displayName)
-                            .font(.plex(.body))
-                            .lineLimit(1)
-                        Text(album.artistName)
-                            .font(.plex(.caption))
-                            .foregroundStyle(Color.albumArtistText)
-                            .lineLimit(1)
-                        if let year = album.productionYear {
-                            Text(String(year))
-                                .font(.plex(.caption2))
-                                .foregroundStyle(Color.albumYearText)
-                        }
-                    }
-                    Spacer()
-                    if isDownloaded(album) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.plex(.title3))
-                            .foregroundStyle(.green)
-                    }
-                }
-            }
-            .id(album.id)
-            .listRowBackground(Color.clear)
-            .onAppear { model.loadMoreIfNeeded(after: album) }
+        AlbumListView(api: api, albums: model.sortedAlbums, isDownloaded: isDownloaded) {
+            model.loadMoreIfNeeded(after: $0)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
     }
 
     // MARK: - States
@@ -470,7 +409,7 @@ public struct LibraryView: View {
     // MARK: - Options menu
 
     /// View, Sort and Filter in one menu, shown at the right end of the
-    /// Albums / Artists / Favourites row (Albums only).
+    /// Albums / Artists / Favourites / Playlists row (Albums).
     func optionsMenu(model: LibraryViewModel) -> some View {
         Menu {
             Picker("View", selection: Binding(get: { model.displayMode }, set: { model.displayMode = $0 })) {
@@ -506,6 +445,37 @@ public struct LibraryView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("View, sort and filter")
         .accessibilityIdentifier("LibraryView.options")
+    }
+
+    /// View, Sort and Filter for the Favourites tab, in the same place and
+    /// wording as the Albums one. Home ▸ Favourites follows these too.
+    func favouritesOptionsMenu(options: FavouritesOptions) -> some View {
+        Menu {
+            Picker("View", selection: Binding(get: { options.displayMode }, set: { options.displayMode = $0 })) {
+                ForEach(LibraryDisplayMode.allCases) { mode in
+                    Label(mode.rawValue, systemImage: LibraryView.symbol(for: mode)).tag(mode)
+                }
+            }
+            .pickerStyle(.menu)
+            Picker("Sort", selection: Binding(get: { options.sortOption }, set: { options.sortOption = $0 })) {
+                ForEach(FavouritesSortOption.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.menu)
+            Picker("Filter", selection: Binding(get: { options.filter }, set: { options.filter = $0 })) {
+                ForEach(LibraryFilter.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.menu)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.plex(.title3))
+                .foregroundStyle(.white)
+                .frame(width: libraryTabAccessoryWidth.scaled, height: 32.scaled)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .accessibilityLabel("View, sort and filter")
+        .accessibilityIdentifier("LibraryView.favouritesOptions")
     }
 
     /// Grid or list for the Artists tab, in the same place and wording.

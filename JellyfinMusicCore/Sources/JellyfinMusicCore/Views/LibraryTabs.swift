@@ -129,6 +129,9 @@ struct AlbumGridView: View {
     /// Follows the +/− card size on wide layouts. Off for Random Albums,
     /// whose 9-or-12 count is worked out from the fixed card size.
     var zooms: Bool = false
+    /// Padding on the right too; off while the A–Z strip leaves that room
+    /// (as Library ▸ Albums, so three covers still fit on a phone).
+    var trailingEdge: Bool = true
 
     @Environment(\.isWideLayout) private var isWideLayout
     @Environment(\.displayScale) private var displayScale
@@ -140,7 +143,8 @@ struct AlbumGridView: View {
         let wide = zooms && isWideLayout
         GeometryReader { geo in
             let edge = LibraryView.gridEdgePadding
-            let metrics = LibraryView.gridMetrics(width: geo.size.width - 2 * edge,
+            let trailing = trailingEdge ? edge : 0
+            let metrics = LibraryView.gridMetrics(width: geo.size.width - edge - trailing,
                                                   scale: UIScale.shared.factor, wide: wide,
                                                   chosen: GridZoom.shared.columns, displayScale: displayScale)
             ScrollView {
@@ -155,9 +159,11 @@ struct AlbumGridView: View {
                                           titleLines: titleLines)
                         }
                         .buttonStyle(.plain)
+                        .id(album.id)   // for the A–Z strip's jumps
                     }
                 }
-                .padding(.horizontal, edge)
+                .padding(.leading, edge)
+                .padding(.trailing, trailing)
                 .padding(.vertical)
                 if let footer {
                     Text(footer)
@@ -200,21 +206,126 @@ enum LibraryOffline {
     }
 }
 
-/// Favourite albums, most recently favourited first; offline, the
-/// downloaded ones only.
+/// Album rows: small cover, title, artist, year, the downloaded tick at
+/// the right. Library ▸ Albums' and Favourites' list view.
+struct AlbumListView: View {
+    let api: JellyfinAPI?
+    let albums: [JellyfinAlbum]
+    let isDownloaded: (JellyfinAlbum) -> Bool
+    /// Runs as each album appears (Random's next page).
+    var onAppear: (JellyfinAlbum) -> Void = { _ in }
+
+    var body: some View {
+        List(albums) { album in
+            NavigationLink(value: album) {
+                HStack(spacing: 12.scaled) {
+                    AlbumArtView(
+                        request: api?.imageURLRequest(for: album.id, size: 100),
+                        size: 60.scaled, cornerRadius: 4.scaled
+                    )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(album.displayName)
+                            .font(.plex(.body))
+                            .lineLimit(1)
+                        Text(album.artistName)
+                            .font(.plex(.caption))
+                            .foregroundStyle(Color.albumArtistText)
+                            .lineLimit(1)
+                        if let year = album.productionYear {
+                            Text(String(year))
+                                .font(.plex(.caption2))
+                                .foregroundStyle(Color.albumYearText)
+                        }
+                    }
+                    Spacer()
+                    if isDownloaded(album) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.plex(.title3))
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
+            .id(album.id)
+            .listRowBackground(Color.clear)
+            .onAppear { onAppear(album) }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+}
+
+/// An album grid or list with a scroll proxy and, when `key` is set (the
+/// alphabetical sorts), the A–Z strip on the right that jumps to the
+/// first album under each letter.
+struct AlphaIndexedAlbums<Content: View>: View {
+    let albums: [JellyfinAlbum]
+    let key: ((JellyfinAlbum) -> String)?
+    @ViewBuilder let content: (ScrollViewProxy) -> Content
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            let firstByBucket = Self.firstAlbumIDs(albums, key: key)
+            // The strip floats over the trailing edge; the content reserves its
+            // width so the grid keeps the full remaining width and padding.
+            content(proxy)
+                .padding(.trailing, key != nil ? AlphaIndexBar.width : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .trailing) {
+                    if key != nil {
+                        AlphaIndexBar(available: Set(firstByBucket.keys)) { label in
+                            // Jump to the letter, or the next one that has albums.
+                            let start = AlphaIndex.labels.firstIndex(of: label) ?? 0
+                            let target = AlphaIndex.labels[start...].first { firstByBucket[$0] != nil }
+                                ?? AlphaIndex.labels.last { firstByBucket[$0] != nil }
+                            if let target, let id = firstByBucket[target] {
+                                proxy.scrollTo(id, anchor: .top)
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    /// The first album's ID under each letter of the strip.
+    static func firstAlbumIDs(_ albums: [JellyfinAlbum], key: ((JellyfinAlbum) -> String)?) -> [String: String] {
+        guard let key else { return [:] }
+        var result: [String: String] = [:]
+        for album in albums {
+            let bucket = AlphaIndex.bucket(for: key(album))
+            if result[bucket] == nil { result[bucket] = album.id }
+        }
+        return result
+    }
+}
+
+/// Favourite albums as a grid or list, sorted and filtered by
+/// `FavouritesOptions` (most recently favourited first by default), with
+/// the A–Z strip for the Name and Artist sorts. Offline, the downloaded
+/// ones only. Library ▸ Favourites and Home ▸ Favourites.
 struct FavouritesTabView: View {
     let api: JellyfinAPI?
     @State private var all: [JellyfinAlbum] = []
     @State private var loaded = false
 
-    private var albums: [JellyfinAlbum] {
-        LibraryOffline.favourites(all, offline: !NetworkMonitor.shared.isConnected)
-    }
+    private var options: FavouritesOptions { .shared }
+    private var isOffline: Bool { !NetworkMonitor.shared.isConnected }
 
     var body: some View {
+        let albums = FavouritesOptions.arrange(all, sort: options.sortOption, filter: options.filter,
+                                               offline: isOffline, isDownloaded: LibraryOffline.isDownloaded)
         Group {
             if !loaded {
                 ProgressView().padding()
+            } else if albums.isEmpty, options.filter == .downloaded, !isOffline, !all.isEmpty {
+                VStack(spacing: 12) {
+                    Text("No downloaded favourite albums yet.")
+                        .font(.plex(.footnote))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button("Show all favourites") { options.filter = .all }
+                        .font(.plex(.footnote))
+                }
+                .padding()
             } else if albums.isEmpty {
                 Text("No favourite albums yet.\nTap the heart on an album to add one.")
                     .font(.plex(.footnote))
@@ -222,7 +333,15 @@ struct FavouritesTabView: View {
                     .multilineTextAlignment(.center)
                     .padding()
             } else {
-                AlbumGridView(api: api, albums: albums, zooms: true)
+                let key = options.indexKey
+                AlphaIndexedAlbums(albums: albums, key: key) { _ in
+                    switch options.displayMode {
+                    case .grid:
+                        AlbumGridView(api: api, albums: albums, zooms: true, trailingEdge: key == nil)
+                    case .list:
+                        AlbumListView(api: api, albums: albums, isDownloaded: LibraryOffline.isDownloaded)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

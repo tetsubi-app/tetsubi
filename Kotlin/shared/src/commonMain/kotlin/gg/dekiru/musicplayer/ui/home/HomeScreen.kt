@@ -82,14 +82,14 @@ import kotlinx.coroutines.flow.map
 
 /**
  * Home (as `HomeView` on iOS): titled, horizontally scrolling rows over the
- * background picture. Pull down to reload. Sign out sits top right until
- * Settings arrives (A5). Offline: a banner and the downloaded albums only.
+ * background picture. Pull down to reload. Signing out is in Settings, as
+ * iOS. Offline: a banner and the downloaded albums only.
  * A Playlists row follows Favourites when there's at least one playlist;
  * its › goes to the Library's Playlists tab ([onMorePlaylists]).
  * Wide layouts (with [zoom]): every row's cards follow the grids' shared
  * cards-per-row setting, a third of the next card showing at the end
- * ([LibraryModel.homeRow]), and the − / + buttons sit right of Sign out in
- * a top row that stays put (iOS: Home's toolbar). Phones: as before.
+ * ([LibraryModel.homeRow]), and the − / + buttons sit at the right of a
+ * top row that stays put (iOS: Home's toolbar). Phones: no top row.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,7 +98,6 @@ fun HomeScreen(
     model: HomeModel,
     onOpen: (JellyfinAlbum) -> Unit,
     onMore: (AlbumList) -> Unit,
-    onSignOut: () -> Unit,
     network: StateFlow<NetworkState> = MutableStateFlow(NetworkState()),
     downloads: DownloadManager? = null,
     playlists: PlaylistsModel? = null,
@@ -130,8 +129,8 @@ fun HomeScreen(
         modifier = Modifier.fillMaxSize(),
     ) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
-            // Wide: the top row stays put, with the zoom buttons; phones: it scrolls away, as before.
-            if (wide) TopRow(onSignOut, zoom)
+            // Wide: a top row that stays put, with the zoom buttons.
+            if (wide) TopRow(zoom)
             BoxWithConstraints(Modifier.weight(1f)) {
                 val row = LibraryModel.homeRow(maxWidth.value, wide, zoom?.columns, density)
                 if (wide) SideEffect { zoom.shown = row.columns }
@@ -141,7 +140,6 @@ fun HomeScreen(
                     contentPadding = insets,
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    if (!wide) item { TopRow(onSignOut, null) }
                     // A newer release (Android and Linux), above everything else, offline too.
                     updates?.banner?.let { update -> item(key = "update-${update.version}") { UpdateBanner(update, onSkip = updates::skip) } }
                     if (model.isOffline) {
@@ -204,12 +202,11 @@ fun HomeScreen(
     }
 }
 
-/** Sign out at the top right; wide, the zoom buttons right of it (as iOS's trailing toolbar items). */
+/** Wide layouts: the zoom buttons at the top right (as iOS's trailing toolbar items). */
 @Composable
-private fun TopRow(onSignOut: () -> Unit, zoom: GridZoom?) {
+private fun TopRow(zoom: GridZoom) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onSignOut) { Text("Sign out", color = TetsubiColors.albumArtistText, fontSize = 13.sp) }
-        if (zoom != null) GridZoomButtons(zoom)
+        GridZoomButtons(zoom)
     }
 }
 

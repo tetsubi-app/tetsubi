@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,14 +55,19 @@ import gg.dekiru.musicplayer.data.api.JellyfinError
 import gg.dekiru.musicplayer.data.models.DiscGrouping
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.settings.FavoritesStore
+import gg.dekiru.musicplayer.data.settings.InMemoryPreferences
 import gg.dekiru.musicplayer.downloads.DownloadManager
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.downloads.rememberIsDownloaded
 import gg.dekiru.musicplayer.ui.components.AlbumCard
 import gg.dekiru.musicplayer.ui.components.ShakeEffect
+import gg.dekiru.musicplayer.ui.library.FavouriteAlbums
+import gg.dekiru.musicplayer.ui.library.FavouritesOptions
 import gg.dekiru.musicplayer.ui.library.GridZoom
 import gg.dekiru.musicplayer.ui.library.GridZoomButtons
-import gg.dekiru.musicplayer.ui.library.LibraryAlbumGrid
+import gg.dekiru.musicplayer.ui.library.LibraryDisplayMode
+import gg.dekiru.musicplayer.ui.library.LibraryFilter
+import gg.dekiru.musicplayer.ui.library.NoDownloadedFavourites
 import gg.dekiru.musicplayer.ui.library.isWideLayout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -146,8 +153,9 @@ class AlbumListModel(
  * A full page of albums (Home ▸ Favourites › or Random Albums ›): a grid
  * of cards, pull down to load again. Random shows 9 or 12 (as many rows as
  * fit), one-line titles, and "Shake it" where the device can be shaken.
- * Favourites on wide layouts: the Library's album grid (as iOS, where
- * it's the same view) with the zoom buttons ([zoom]) in the top bar.
+ * Favourites: Library ▸ Favourites' view (as iOS, where it's the same
+ * view), following its remembered View, Sort and Filter ([favourites]);
+ * on wide layouts in Grid, the zoom buttons ([zoom]) in the top bar.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -158,8 +166,11 @@ fun AlbumListScreen(
     onBack: () -> Unit,
     downloads: DownloadManager? = null,
     zoom: GridZoom? = null,
+    favourites: FavouritesOptions? = null,
 ) {
     LaunchedEffect(model) { model.loadIfNeeded() }
+    val options = favourites ?: remember { FavouritesOptions(InMemoryPreferences()) }
+    val isFavourites = model.list == AlbumList.FAVOURITES
     val isDownloaded = rememberIsDownloaded(downloads)
     val isRandom = model.list == AlbumList.RANDOM
     val haptics = LocalHapticFeedback.current
@@ -180,9 +191,10 @@ fun AlbumListScreen(
         (title + 2 * line).toDp().value + 12 + 140 + 12
     }
     val bottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues()
-    // Random keeps its fixed cards (its 9 or 12 depends on their size).
-    val zoomed = if (!isRandom && isWideLayout()) zoom else null
-    val zoomedGrid = rememberLazyGridState()
+    // Random keeps its fixed cards (its 9 or 12 depends on their size); Favourites' list has no zoom.
+    val zoomed = if (isFavourites && options.displayMode == LibraryDisplayMode.GRID && isWideLayout()) zoom else null
+    val favouriteGrid = rememberLazyGridState()
+    val favouriteList = rememberLazyListState()
 
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
         androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
@@ -202,9 +214,14 @@ fun AlbumListScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 when {
-                    zoomed != null && model.albums.isNotEmpty() -> LibraryAlbumGrid(
-                        api, model.albums, zoomedGrid, onOpen, isDownloaded, zoom = zoomed,
-                    )
+                    isFavourites && model.albums.isNotEmpty() -> {
+                        val shown = options.arrange(model.albums, offline = false, isDownloaded = isDownloaded)
+                        if (shown.isEmpty()) {
+                            NoDownloadedFavourites { options.filter = LibraryFilter.ALL }
+                        } else {
+                            FavouriteAlbums(api, shown, options, onOpen, isDownloaded, { null }, favouriteGrid, favouriteList, zoom)
+                        }
+                    }
                     model.albums.isNotEmpty() -> BoxWithConstraints(Modifier.fillMaxSize()) {
                     val shown = if (isRandom) {
                         val height = maxHeight.value - bottom.calculateBottomPadding().value

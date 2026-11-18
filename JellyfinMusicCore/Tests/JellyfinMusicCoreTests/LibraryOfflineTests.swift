@@ -41,23 +41,25 @@ final class LibrarySavedChoicesTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "library.tab"), "Favourites")
         XCTAssertEqual(defaults.string(forKey: "library.sort"), "Date Added")
         XCTAssertEqual(defaults.string(forKey: "library.viewMode"), "List")
+        XCTAssertEqual(defaults.string(forKey: "library.filter"), "Downloaded")
 
         let next = LibraryViewModel(api: api, defaults: defaults)
         XCTAssertEqual(next.tab, .favourites)
         XCTAssertEqual(next.sortOption, .dateAdded)
         XCTAssertEqual(next.displayMode, .list)
-        // The filter isn't remembered.
-        XCTAssertEqual(next.filter, .all)
+        XCTAssertEqual(next.filter, .downloaded)
     }
 
     func testUnknownValuesFallBack() {
         defaults.set("Genres", forKey: "library.tab")
         defaults.set("DATE_ADDED", forKey: "library.sort")
         defaults.set(3, forKey: "library.viewMode")
+        defaults.set("Offline", forKey: "library.filter")
         let model = LibraryViewModel(api: api, defaults: defaults)
         XCTAssertEqual(model.tab, .albums)
         XCTAssertEqual(model.sortOption, .name)
         XCTAssertEqual(model.displayMode, .grid)
+        XCTAssertEqual(model.filter, .all)
     }
 }
 
