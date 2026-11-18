@@ -430,7 +430,7 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 
 ## Linux desktop
 
-**The desktop app shares the Kotlin code but not every feature.** Playback uses `UnsupportedPlayerEngine` until a libmpv engine is written, so Play stays off; the equaliser, visualiser, shake, Cast and output switcher are hidden or do nothing, `NetworkMonitor` always reports online, and reading format details from a downloaded file returns nothing.
+**The desktop app shares the Kotlin code but not every feature.** Playback is libmpv (`MpvEngine`, below); the equaliser, visualiser, shake, Cast and output switcher are hidden or do nothing, `NetworkMonitor` always reports online, and reading format details from a downloaded file returns nothing.
 
 **Storage names carry the app ID, never the app's name.** Android's SharedPreferences files (`secrets`, `settings`, `app`), the Keystore alias (`secrets`), the WorkManager work name (`downloads`) and the desktop folders (`gg.dekiru.musicplayer` under each XDG directory) are name-free on purpose, like the bundle IDs. Changing any of them after a release would need code that moves the old data across.
 
@@ -439,6 +439,26 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 **`:desktopApp` needs `components-resources` as a direct dependency.** Without it the desktop app cannot load images from the shared module.
 
 **A UDP sweep blocks on Linux kernels (Android included).** A packet to an address that has not answered ARP waits in the kernel and counts against the socket's send buffer, so after about 150 of them `send` blocked and the sweep took 9 seconds. The fix is a 4 MB send buffer and listening while the sweep goes out. macOS does not behave this way.
+
+### Playback (libmpv)
+
+**Linux plays through libmpv, because gapless albums come first.** `MpvEngine` (`shared/src/desktopMain/.../playback/`) drives mpv's library through its C API with JNA. mpv's own playlist holds the whole queue, so mpv joins the tracks itself: `gapless-audio=yes` keeps one audio output open across tracks (a track in a different format is resampled rather than the output reopened, which would leave a gap) and `prefetch-playlist=yes` opens the next track before the current one ends. Other settings: audio only (`vo=null`, `video=no`, `audio-display=no`), none of the user's mpv config, scripts, keys or terminal, `idle=yes` with `keep-open=no` (the playlist stays when the queue ends), a 30-second read-ahead cache, `replaygain=no` (normalisation is the app's own volume) and `audio-client-name=Tetsubi`.
+
+**The queue is mpv's playlist, entry for entry.** `MpvPlayback` keeps the same list and mirrors `Media3Engine`: a new queue is `stop` plus `loadfile … append` per track and `playlist-play-index`; a skip is `playlist-play-index`; Up next changes (`replaceAfterCurrent`) remove the entries after `playlist-pos` from the end and append, so the playing track is never touched; Repeat One is `loop-file=inf`, Repeat All `loop-playlist=inf`. A start mpv makes by itself (the next track, Repeat All going round) is reported as automatic; a start the app asked for is waited for, and earlier, stale starts are ignored. Repeat One going round makes no new file, so the engine treats a seek it did not ask for near the end of the track as the repeat.
+
+**mpv goes on to the next track when one fails; Media3 stops.** On an end-of-file with reason "error" the engine pauses and sends `stop keep-playlist`, reports the error, and Play loads the failed track again. The last track ending with Repeat off is `onEnded`; mpv is then idle with the playlist kept, and the controller's skip back to track 1 loads it paused.
+
+**Commands run in order on their own thread, events on another, and the window never asks mpv anything.** libmpv can block while it opens a slow stream, so the main thread only queues commands; position and length are values mpv reported (`time-pos`, `duration`), and events reach `PlayerController` on the AWT event thread. The engine is closed (`mpv_terminate_destroy`) when the window closes, and by a shutdown hook otherwise.
+
+**The `Authorization` header goes in `http-header-fields`, with `change-list … append`.** The option is a string list whose plain `set` splits on commas, and the Jellyfin header is full of them. Being a global option, it applies to every stream mpv opens, prefetched ones included.
+
+**Originals, not conversions, for gapless.** `directPlayFormats` is every `AudioFormat` (FFmpeg decodes them all, ALAC included), so the server sends the original file. A stream the server converts on the fly (`/universal`) carries encoder padding at both ends, which is a gap between tracks. Files `AudioFormat.source` does not recognise (APE, WavPack, DSD and so on) are still converted to FLAC by the server and so are not gapless; they would need their own `AudioFormat` entries. Converted streams are seeked by restarting them at the point, as on Android.
+
+**Without libmpv, Play stays off and Home says what to install.** The library is loaded as `mpv`, then `libmpv.so.2`, then `libmpv.so.1` (runtime packages ship only the versioned file; `libmpv.dylib` from Homebrew for development on a Mac), and client API 1 or 2 is accepted. If it is missing, `isSupported` is false, the reason is logged to stderr ("Tetsubi playback: …") and Home shows "Install mpv (libmpv) to play music on Linux." (`PlayerEngine.unavailableReason`). Packages: `libmpv2` (Debian 12, Ubuntu 24.04 and later) or `libmpv1` (Ubuntu 22.04), `mpv-libs` on Fedora.
+
+**Compose cannot add package dependencies, so the release workflow edits the .deb.** Compose Multiplatform's `nativeDistributions.linux` has no setting for jpackage's `--linux-package-deps` (checked in 1.12.2), and jpackage only finds libraries the Java runtime links, not ones loaded at run time. The `Linux release` workflow unpacks the .deb, adds `libmpv2 | libmpv1` to `Depends` and packs it again. The .rpm has no such step yet, so on Fedora `mpv-libs` must be installed by hand (the app says so); the AppImage does not bundle libmpv either. The workflow installs `libmpv1` on the runner and fails the start-up check if the app logs that playback is off.
+
+**Tests never make a sound.** `MpvPlaybackTest` drives the queue logic with made-up mpv events. `MpvEngineIntegrationTest` uses the real libmpv with `ao=null` and generated WAV files, and is skipped where libmpv is not installed.
 
 **Packaging is configured but untested.** AppImage, deb and rpm targets are set up in `Kotlin/desktopApp/build.gradle.kts` and had not been built.
 

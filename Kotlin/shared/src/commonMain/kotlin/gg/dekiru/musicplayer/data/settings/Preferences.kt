@@ -32,7 +32,7 @@ class AppEnvironment(
     /** Downloaded albums: Android `filesDir/Downloads`, Linux `$XDG_DATA_HOME/gg.dekiru.musicplayer/Downloads`. */
     val downloadsDir: String,
     val preferences: Preferences,
-    /** The app's one player (Media3 on Android; none yet on Linux). */
+    /** The app's one player (Media3 on Android, libmpv on Linux). */
     val playerEngine: PlayerEngine = UnsupportedPlayerEngine(),
     /** Online and metered (Android: `ConnectivityManager`; the desktop: always online, unmetered). */
     val network: NetworkMonitor = NetworkMonitor(),

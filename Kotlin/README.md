@@ -30,7 +30,7 @@ Install on the emulator or a connected device:
 adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
 ```
 
-Desktop window (on the Mac now; Linux later):
+Desktop window (on the Mac now, for development; the Linux app plays through libmpv, so install `libmpv2`/`libmpv1` or `mpv-libs`, or mpv from Homebrew to play on the Mac):
 
 ```bash
 ./gradlew :desktopApp:run

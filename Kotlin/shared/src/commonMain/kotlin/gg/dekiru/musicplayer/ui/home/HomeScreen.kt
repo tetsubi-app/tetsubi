@@ -105,6 +105,8 @@ fun HomeScreen(
     onMorePlaylists: () -> Unit = {},
     zoom: GridZoom? = null,
     updates: UpdateChecker? = null,
+    /** Why nothing can play here (Linux without libmpv), shown as a banner; null: nothing to say. */
+    playerUnavailable: String? = null,
 ) {
     // Loads on first appearance; reloads when the connection comes back.
     LaunchedEffect(model, network) { network.collect { model.networkChanged(it.online) } }
@@ -142,6 +144,8 @@ fun HomeScreen(
                 ) {
                     // A newer release (Android and Linux), above everything else, offline too.
                     updates?.banner?.let { update -> item(key = "update-${update.version}") { UpdateBanner(update, onSkip = updates::skip) } }
+                    // No player on this system (Linux without libmpv), offline too.
+                    playerUnavailable?.let { message -> item(key = "player-unavailable") { StatusBanner(message) } }
                     if (model.isOffline) {
                         item { StatusBanner(OFFLINE_MESSAGE, icon = "\u2298") }
                         section("Downloaded")

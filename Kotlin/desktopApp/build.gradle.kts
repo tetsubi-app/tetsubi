@@ -42,6 +42,8 @@ compose.desktop {
             description = "A music player for Jellyfin"
             vendor = "DEKIRU Ltd"
             linux {
+                // Playback needs libmpv at run time. Compose has no setting for jpackage's
+                // --linux-package-deps, so the release workflow adds it to the .deb (see docs/gotchas.md).
                 iconFile.set(project.file("icons/tetsubi.png"))
             }
         }

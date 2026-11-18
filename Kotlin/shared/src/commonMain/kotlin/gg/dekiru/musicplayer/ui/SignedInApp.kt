@@ -239,6 +239,7 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                                 },
                                 zoom = library.gridZoom,
                                 updates = session.updates,
+                                playerUnavailable = session.environment.playerEngine.unavailableReason,
                             )
                             Tab.LIBRARY -> LibraryScreen(
                                 api, library, onOpen = ::open, onOpenArtist = ::openArtist,

@@ -119,6 +119,8 @@ kotlin {
         }
         getByName("desktopMain").dependencies {
             implementation(libs.kotlinx.coroutines.swing)
+            // libmpv's C API for playback (MpvEngine).
+            implementation(libs.jna)
         }
     }
 }

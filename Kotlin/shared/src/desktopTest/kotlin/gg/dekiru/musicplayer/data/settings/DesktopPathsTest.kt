@@ -1,6 +1,7 @@
 package gg.dekiru.musicplayer.data.settings
 
 import gg.dekiru.musicplayer.data.auth.FileSecretStore
+import gg.dekiru.musicplayer.playback.UnsupportedPlayerEngine
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -23,6 +24,6 @@ class DesktopPathsTest {
     fun loginAndDownloadsSitInTheDataFolder() {
         val data = xdg("XDG_DATA_HOME", ".local/share")
         assertEquals(File(data, "login.properties"), FileSecretStore.defaultFile())
-        assertEquals(File(data, "Downloads").absolutePath, desktopEnvironment().downloadsDir)
+        assertEquals(File(data, "Downloads").absolutePath, desktopEnvironment(UnsupportedPlayerEngine()).downloadsDir)
     }
 }

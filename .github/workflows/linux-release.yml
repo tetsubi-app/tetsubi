@@ -40,12 +40,40 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y rpm fakeroot xvfb desktop-file-utils
+          # libmpv for the start-up check below (the runtime package: only the versioned libmpv.so.1).
+          sudo apt-get install -y libmpv1
           curl -sSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
           chmod +x appimagetool
 
       - name: Build .deb, .rpm and the AppImage folder
         working-directory: Kotlin
         run: ./gradlew --no-daemon :desktopApp:packageReleaseDeb :desktopApp:packageReleaseRpm :desktopApp:packageReleaseAppImage
+
+      # Playback needs libmpv, which the app loads at run time (JNA), so
+      # jpackage doesn't see it, and Compose has no setting for jpackage's
+      # --linux-package-deps: add it to the .deb's Depends here. libmpv2 on
+      # Debian 12 / Ubuntu 24.04 and later, libmpv1 on Ubuntu 22.04.
+      # (The .rpm isn't changed: Fedora users install mpv-libs.)
+      - name: Make the .deb depend on libmpv
+        run: |
+          set -euo pipefail
+          DEB=$(ls Kotlin/desktopApp/build/compose/binaries/main-release/deb/*.deb)
+          fakeroot sh -c '
+            set -e
+            rm -rf debx
+            dpkg-deb -R "$1" debx
+            if grep -q "^Depends: *[^ ]" debx/DEBIAN/control; then
+              sed -i "s/^Depends: *\(.*\)$/Depends: \1, libmpv2 | libmpv1/" debx/DEBIAN/control
+            else
+              sed -i "/^Depends:/d" debx/DEBIAN/control
+              echo "Depends: libmpv2 | libmpv1" >> debx/DEBIAN/control
+            fi
+            dpkg-deb -b debx "$1"
+          ' sh "$DEB"
+          rm -rf debx
+          DEPENDS=$(dpkg-deb -f "$DEB" Depends)
+          echo "Depends: $DEPENDS"
+          case "$DEPENDS" in *libmpv*) ;; *) exit 1 ;; esac
 
       - name: Make the AppImage file
         run: |
@@ -65,15 +93,17 @@ jobs:
           ls -la dist
           (cd dist && sha256sum *) | tee dist/SHA256SUMS-linux.txt
 
-      # The release build is shrunk by ProGuard, so make sure it still starts:
-      # it should still be running after 20 seconds (timeout's exit code 124).
+      # Make sure the release build still starts: it should still be running
+      # after 20 seconds (timeout's exit code 124), with libmpv loaded (the
+      # app logs "Playback is off" when it can't load or start it).
       - name: Start the app once
         run: |
           set +e
-          xvfb-run -a timeout 20 Kotlin/desktopApp/build/compose/binaries/main-release/app/tetsubi/bin/tetsubi
-          code=$?
+          xvfb-run -a timeout 20 Kotlin/desktopApp/build/compose/binaries/main-release/app/tetsubi/bin/tetsubi 2>&1 | tee start.log
+          code=${PIPESTATUS[0]}
           echo "exit code $code"
-          test "$code" -eq 124
+          test "$code" -eq 124 || exit 1
+          if grep -q "Tetsubi playback: Playback is off" start.log; then exit 1; fi
 
       - name: Attach to the release
         env:

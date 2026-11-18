@@ -43,15 +43,18 @@ interface EngineListener {
 }
 
 /**
- * The platform player: Media3 ExoPlayer on Android (gapless through its
- * playlist), libmpv on Linux later. It holds the whole queue; skips, repeat
+ * The platform player: Media3 ExoPlayer on Android and libmpv on Linux
+ * (`MpvEngine`), both gapless through their own playlist. It holds the whole queue; skips, repeat
  * and moving to the next item happen inside it, and the lock screen and
  * headset buttons reach it directly, so it reports changes back through
  * [listener]. Main thread only.
  */
 interface PlayerEngine {
-    /** False where there's no player yet (the desktop until the Linux phase). */
+    /** False where there's no player (Linux without libmpv). */
     val isSupported: Boolean
+
+    /** Why there's no player and what to do, for Home to show; null when it plays (or when there's nothing to say). */
+    val unavailableReason: String? get() = null
 
     /** Formats it plays as they are; others are transcoded by the server. */
     val directPlayFormats: Set<AudioFormat>

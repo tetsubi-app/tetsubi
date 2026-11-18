@@ -17,6 +17,7 @@ mediarouter = "1.8.1"
 appcompat = "1.7.1"
 work = "2.11.0"
 glance = "1.2.0"
+jna = "5.19.1"
 
 android-compileSdk = "37"
 android-targetSdk = "37"
@@ -51,6 +52,7 @@ androidx-media3-cast = { module = "androidx.media3:media3-cast", version.ref = "
 androidx-mediarouter = { module = "androidx.mediarouter:mediarouter", version.ref = "mediarouter" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 androidx-glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glance" }
 
 [plugins]

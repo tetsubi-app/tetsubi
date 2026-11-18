@@ -17,10 +17,15 @@ import org.jetbrains.compose.resources.painterResource
 import java.awt.Dimension
 
 fun main() {
-    val session = AppSession(Authenticator(FileSecretStore.default(), desktopDeviceName()), desktopEnvironment())
+    val environment = desktopEnvironment()
+    val session = AppSession(Authenticator(FileSecretStore.default(), desktopDeviceName()), environment)
     application {
         Window(
-            onCloseRequest = ::exitApplication,
+            onCloseRequest = {
+                // Stops libmpv cleanly before the app goes.
+                (environment.playerEngine as? AutoCloseable)?.close()
+                exitApplication()
+            },
             title = "Tetsubi",
             state = rememberWindowState(size = DpSize(1100.dp, 760.dp)),
             icon = painterResource(Res.drawable.disc),
