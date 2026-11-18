@@ -12,6 +12,7 @@ import gg.dekiru.musicplayer.downloads.DownloadedAlbum
 import gg.dekiru.musicplayer.playback.settle
 import gg.dekiru.musicplayer.ui.library.AlphaIndex
 import gg.dekiru.musicplayer.ui.library.ArtistModel
+import gg.dekiru.musicplayer.ui.library.GridZoom
 import gg.dekiru.musicplayer.ui.library.LibraryDisplayMode
 import gg.dekiru.musicplayer.ui.library.LibraryFilter
 import gg.dekiru.musicplayer.ui.library.LibraryModel
@@ -144,6 +145,177 @@ class LibraryModelTest {
         assertEquals(3, LibraryModel.gridLayout(411f - 4 - 22).columns) // a typical Android phone
         assertEquals(LibraryModel.gridLayout(1000f).columns, 7)
         assertEquals(12f, LibraryModel.gridLayout(1000f).spacing)
+    }
+
+    // Wide grids (cards per row, zoom)
+
+    @Test
+    fun wideIsTheDesktopOrA600dpAndroidWindow() {
+        assertTrue(LibraryModel.isWide(isAndroid = false, windowWidth = 400f))
+        assertFalse(LibraryModel.isWide(isAndroid = true, windowWidth = 411f))
+        assertTrue(LibraryModel.isWide(isAndroid = true, windowWidth = 600f))
+        assertFalse(LibraryModel.isWide(isAndroid = true, windowWidth = 599.9f))
+    }
+
+    @Test
+    fun phonesKeepTheFixedGrid() {
+        val grid = LibraryModel.cardGrid(393f - 4 - 22, wide = false, chosen = 5, displayScale = 3f)
+        assertEquals(3, grid.columns)
+        assertEquals(3.5f, grid.spacing, 0.01f)
+        assertEquals(120f, grid.cardWidth)
+        assertEquals(1f, grid.textScale)
+        assertEquals(300, grid.imageSize)
+    }
+
+    @Test
+    fun wideAutomaticIsTodaysCountKeptToThreeToTen() {
+        assertEquals(7, LibraryModel.cardGrid(1000f, wide = true).columns)
+        assertEquals(3, LibraryModel.cardGrid(300f, wide = true).columns) // today 2
+        assertEquals(10, LibraryModel.cardGrid(3000f, wide = true).columns) // today 22
+    }
+
+    @Test
+    fun wideCardsFillTheirColumns() {
+        val grid = LibraryModel.cardGrid(1000f, wide = true, chosen = 4)
+        assertEquals(4, grid.columns)
+        assertEquals(12f, grid.spacing)
+        assertEquals((1000f - 3 * 12) / 4, grid.cardWidth, 0.01f)
+        assertEquals(grid.columns * grid.cardWidth + (grid.columns - 1) * grid.spacing, 1000f, 0.01f)
+        // At ten, a wider window makes bigger cards, not an eleventh column.
+        val narrow = LibraryModel.cardGrid(2000f, wide = true, chosen = 10)
+        val wider = LibraryModel.cardGrid(2500f, wide = true, chosen = 10)
+        assertEquals(10, wider.columns)
+        assertTrue(wider.cardWidth > narrow.cardWidth)
+        // A saved choice outside 3…10 is kept inside.
+        assertEquals(10, LibraryModel.cardGrid(1000f, wide = true, chosen = 14).columns)
+        assertEquals(3, LibraryModel.cardGrid(1000f, wide = true, chosen = 1).columns)
+    }
+
+    @Test
+    fun textScalesWithTheCardBetweenOneAndThree() {
+        assertEquals(1f, LibraryModel.cardGrid(600f, wide = true, chosen = 10).textScale) // tiny cards: never smaller
+        assertEquals(2f, LibraryModel.cardGrid(3 * 240f + 2 * 12, wide = true, chosen = 3).textScale, 0.001f)
+        assertEquals(3f, LibraryModel.cardGrid(4000f, wide = true, chosen = 3).textScale) // a huge monitor
+        // The platform's UI scale counts as the card's normal size.
+        assertEquals(1f, LibraryModel.cardGrid(3 * 240f + 2 * 24, wide = true, chosen = 3, scale = 2f).textScale, 0.001f)
+    }
+
+    @Test
+    fun coversAreFetchedAtTheirDrawnSizeInFourSteps() {
+        assertEquals(300, LibraryModel.imageSize(120f))
+        assertEquals(300, LibraryModel.imageSize(300f))
+        assertEquals(600, LibraryModel.imageSize(301f))
+        assertEquals(1000, LibraryModel.imageSize(900f))
+        assertEquals(1500, LibraryModel.imageSize(1400f))
+        assertEquals(1500, LibraryModel.imageSize(4000f))
+        // 4 across 1000 dp at 2× density: 241 dp cards, 482 px.
+        assertEquals(600, LibraryModel.cardGrid(1000f, wide = true, chosen = 4, displayScale = 2f).imageSize)
+    }
+
+    @Test
+    fun homePhonesKeepTheFixedCards() {
+        val row = LibraryModel.homeRow(393f, wide = false, chosen = 5, displayScale = 3f)
+        assertEquals(140f, row.cardWidth)
+        assertEquals(12f, row.spacing)
+        assertEquals(1f, row.textScale)
+        assertEquals(300, row.imageSize)
+    }
+
+    @Test
+    fun homeAutomaticIsTodaysWholeCardsKeptToThreeToTen() {
+        // 1000 visible after the 16 dp leading: (1000 + 12) / 152 = 6.66 → 6 (as iOS).
+        assertEquals(6, LibraryModel.homeRow(1016f, wide = true).columns)
+        assertEquals(6, LibraryModel.homeRow(916f, wide = true).columns) // 6 × 140 + 5 × 12 = 900, exactly
+        assertEquals(5, LibraryModel.homeRow(915f, wide = true).columns)
+        assertEquals(3, LibraryModel.homeRow(400f, wide = true).columns) // today 2
+        assertEquals(10, LibraryModel.homeRow(3000f, wide = true).columns) // today 19
+    }
+
+    @Test
+    fun homeShowsTheChosenCardsAndAThirdOfTheNext() {
+        for (width in listOf(700f, 1024f, 1600f, 2400f)) {
+            for (chosen in 3..10) {
+                val row = LibraryModel.homeRow(width, wide = true, chosen = chosen)
+                assertEquals(chosen, row.columns)
+                // Leading, n whole cards with their gaps, then a third of the next: the whole width.
+                assertEquals(width, LibraryModel.HOME_WIDE_LEADING + row.columns * (row.cardWidth + row.spacing) + row.cardWidth / 3, 0.01f)
+            }
+        }
+        assertEquals((1000f - 4 * 12) / (4 + 1f / 3), LibraryModel.homeRow(1016f, wide = true, chosen = 4).cardWidth, 0.01f)
+        assertEquals(10, LibraryModel.homeRow(1016f, wide = true, chosen = 14).columns)
+        assertEquals(3, LibraryModel.homeRow(1016f, wide = true, chosen = 1).columns)
+    }
+
+    @Test
+    fun homeTextScalesFromA140CardBetweenOneAndThree() {
+        assertEquals(1f, LibraryModel.homeRow(800f, wide = true, chosen = 10).textScale) // tiny cards: never smaller
+        val twice = 16 + 3 * (280 + 12) + 280f / 3
+        assertEquals(2f, LibraryModel.homeRow(twice, wide = true, chosen = 3).textScale, 0.001f)
+        assertEquals(3f, LibraryModel.homeRow(4000f, wide = true, chosen = 3).textScale)
+        // The platform's UI scale counts as the card's normal size.
+        val row = LibraryModel.homeRow(2000f, wide = true, chosen = 4, scale = 1.6f)
+        assertEquals(row.cardWidth / 224, row.textScale, 0.001f)
+    }
+
+    @Test
+    fun homeCoversAreFetchedAtTheirDrawnSize() {
+        // Four across 1000 dp: 220 dp cards.
+        assertEquals(600, LibraryModel.homeRow(1016f, wide = true, chosen = 4, displayScale = 2f).imageSize)
+        assertEquals(1000, LibraryModel.homeRow(1016f, wide = true, chosen = 4, displayScale = 3f).imageSize)
+        assertEquals(300, LibraryModel.homeRow(1016f, wide = true, chosen = 10, displayScale = 2f).imageSize)
+        assertEquals(1500, LibraryModel.homeRow(6000f, wide = true, chosen = 3, displayScale = 2f).imageSize)
+    }
+
+    @Test
+    fun zoomStepsOneColumnAndStopsAtTheEnds() {
+        assertEquals(4, LibraryModel.zoomed(5, zoomIn = true))
+        assertEquals(6, LibraryModel.zoomed(5, zoomIn = false))
+        assertEquals(3, LibraryModel.zoomed(3, zoomIn = true))
+        assertEquals(10, LibraryModel.zoomed(10, zoomIn = false))
+        assertFalse(LibraryModel.canZoomIn(3))
+        assertTrue(LibraryModel.canZoomIn(4))
+        assertFalse(LibraryModel.canZoomOut(10))
+        assertTrue(LibraryModel.canZoomOut(9))
+    }
+
+    @Test
+    fun theFirstZoomStartsFromWhatsShownAndIsRemembered() {
+        val prefs = InMemoryPreferences()
+        val zoom = GridZoom(prefs)
+        assertNull(zoom.columns)
+        assertFalse(zoom.canZoomIn, "nothing drawn yet")
+        zoom.shown = 7 // automatic
+        zoom.zoomIn()
+        assertEquals(6, zoom.columns)
+        zoom.shown = 6
+        repeat(5) { zoom.zoomIn() }
+        assertEquals(3, zoom.columns)
+        assertFalse(zoom.canZoomIn)
+        assertTrue(zoom.canZoomOut)
+        assertEquals("3", prefs.getString(LibraryModel.GRID_COLUMNS_KEY))
+        assertEquals(3, GridZoom(prefs).columns)
+        repeat(9) { zoom.zoomOut() }
+        assertEquals(10, zoom.columns)
+        assertFalse(zoom.canZoomOut)
+        prefs.putString(LibraryModel.GRID_COLUMNS_KEY, "nonsense")
+        assertNull(GridZoom(prefs).columns)
+        prefs.putString(LibraryModel.GRID_COLUMNS_KEY, "14")
+        assertNull(GridZoom(prefs).columns, "outside 3…10 is automatic")
+    }
+
+    @Test
+    fun artistsAreAGridByDefaultRememberedApartFromAlbums() = runTest {
+        val prefs = InMemoryPreferences()
+        val first = model(backgroundScope, prefs = prefs)
+        assertEquals(LibraryDisplayMode.GRID, first.artistsDisplayMode)
+        first.artistsDisplayMode = LibraryDisplayMode.LIST
+        assertEquals(LibraryDisplayMode.GRID, first.displayMode, "the albums' view is its own")
+        val again = model(backgroundScope, prefs = prefs)
+        assertEquals(LibraryDisplayMode.LIST, again.artistsDisplayMode)
+        assertEquals(LibraryDisplayMode.GRID, again.displayMode)
+        again.displayMode = LibraryDisplayMode.LIST
+        again.artistsDisplayMode = LibraryDisplayMode.GRID
+        assertEquals(LibraryDisplayMode.GRID, model(backgroundScope, prefs = prefs).artistsDisplayMode)
     }
 
     // Random

@@ -10,14 +10,23 @@ public enum LibraryTab: String, CaseIterable, Identifiable {
 }
 
 /// Large tab strip pinned to the top of the Library.
-/// Width kept at the right of the Library tab row for the options button.
+/// Width kept at the right of the Library tab row for the options button
+/// (and, on iPad, for each of the grid's − and + buttons).
 let libraryTabAccessoryWidth: CGFloat = 36
 
 struct LibraryTabBar<Accessory: View>: View {
     @Binding var selection: LibraryTab
-    /// Right-hand control (the Albums and Playlists options menus). Its
-    /// width is always kept, so the tab labels don't move when it's hidden.
+    /// Right-hand controls (the options menus; on iPad the grid's − and +
+    /// too). Their width is always kept, so the tab labels don't move when
+    /// some are hidden; they sit at the right end.
     @ViewBuilder var accessory: () -> Accessory
+
+    @Environment(\.isWideLayout) private var isWide
+
+    /// One button's width, or three where the − and + buttons join it.
+    private var accessoryWidth: CGFloat {
+        (GridZoom.buttonsInTabRow(wide: isWide) ? 3 : 1) * libraryTabAccessoryWidth.scaled
+    }
 
     /// The least space between two labels (four are tight on a phone).
     private static var labelGap: CGFloat { 12.scaled }
@@ -65,9 +74,46 @@ struct LibraryTabBar<Accessory: View>: View {
                 }
                 .buttonStyle(.plain)
             }
-            accessory()
-                .frame(width: libraryTabAccessoryWidth.scaled)
+            HStack(spacing: 0) { accessory() }
+                .frame(width: accessoryWidth, alignment: .trailing)
                 .padding(.bottom, 9.scaled)   // line up with the labels, above the underline
+        }
+    }
+}
+
+/// One album in a grid: cover, downloaded tick, title and artist. On a
+/// wide layout the cover fills its column and the text and gaps grow with
+/// it (`LibraryView.GridMetrics`); on a phone it's the fixed 120pt card.
+struct AlbumGridCard: View {
+    let album: JellyfinAlbum
+    let request: URLRequest?
+    let metrics: LibraryView.GridMetrics
+    let isDownloaded: Bool
+    var titleLines: Int = 2
+
+    var body: some View {
+        let t = metrics.textScale
+        VStack(spacing: 4.scaled * t) {
+            AlbumArtView(request: request, size: metrics.cardWidth, cornerRadius: 8.scaled * t)
+                .overlay(alignment: .bottomTrailing) {
+                    if isDownloaded {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.plex(.caption, times: t))
+                            .foregroundStyle(.green)
+                            .padding(4 * t)
+                    }
+                }
+            Text(album.displayName)
+                .font(.plex(.caption, times: t).bold())
+                .lineLimit(titleLines)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, alignment: .center)
+            Text(album.artistName)
+                .font(.plex(.caption2, times: t))
+                .foregroundStyle(Color.albumArtistText)
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 }
@@ -80,45 +126,33 @@ struct AlbumGridView: View {
     var footer: String? = nil
     /// Lines for each album title (Random Albums uses 1 so four rows fit).
     var titleLines: Int = 2
+    /// Follows the +/− card size on wide layouts. Off for Random Albums,
+    /// whose 9-or-12 count is worked out from the fixed card size.
+    var zooms: Bool = false
+
+    @Environment(\.isWideLayout) private var isWideLayout
+    @Environment(\.displayScale) private var displayScale
 
     /// Same layout as Library ▸ Albums: fixed 120pt covers, 3 across on a
-    /// phone (`LibraryView.gridLayout`), downloaded tick on the cover.
+    /// phone (`LibraryView.gridLayout`), downloaded tick on the cover; on
+    /// a wide layout the shared cards-per-row setting.
     var body: some View {
+        let wide = zooms && isWideLayout
         GeometryReader { geo in
             let edge = LibraryView.gridEdgePadding
-            let layout = LibraryView.gridLayout(width: geo.size.width - 2 * edge,
-                                                scale: UIScale.shared.factor)
+            let metrics = LibraryView.gridMetrics(width: geo.size.width - 2 * edge,
+                                                  scale: UIScale.shared.factor, wide: wide,
+                                                  chosen: GridZoom.shared.columns, displayScale: displayScale)
             ScrollView {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: layout.spacing, alignment: .top),
-                                         count: layout.columns),
-                          spacing: 16.scaled) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: metrics.spacing, alignment: .top),
+                                         count: metrics.columns),
+                          spacing: 16.scaled * metrics.textScale) {
                     ForEach(albums) { album in
                         NavigationLink(value: album) {
-                            VStack(spacing: 4.scaled) {
-                                AlbumArtView(
-                                    request: api?.imageURLRequest(for: album.id, size: 300),
-                                    size: LibraryView.scaledGridArtSize, cornerRadius: 8.scaled
-                                )
-                                .overlay(alignment: .bottomTrailing) {
-                                    if isDownloaded(album) {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .font(.plex(.caption))
-                                            .foregroundStyle(.green)
-                                            .padding(4)
-                                    }
-                                }
-                                Text(album.displayName)
-                                    .font(.plex(.caption).bold())
-                                    .lineLimit(titleLines)
-                                    .multilineTextAlignment(.center)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                Text(album.artistName)
-                                    .font(.plex(.caption2))
-                                    .foregroundStyle(Color.albumArtistText)
-                                    .lineLimit(1)
-                                    .multilineTextAlignment(.center)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                            }
+                            AlbumGridCard(album: album,
+                                          request: api?.imageURLRequest(for: album.id, size: metrics.imageSize),
+                                          metrics: metrics, isDownloaded: isDownloaded(album),
+                                          titleLines: titleLines)
                         }
                         .buttonStyle(.plain)
                     }
@@ -133,6 +167,7 @@ struct AlbumGridView: View {
                         .padding(.bottom, 24)
                 }
             }
+            .reportsGridColumns(metrics.columns, active: wide)
         }
     }
 
@@ -187,7 +222,7 @@ struct FavouritesTabView: View {
                     .multilineTextAlignment(.center)
                     .padding()
             } else {
-                AlbumGridView(api: api, albums: albums)
+                AlbumGridView(api: api, albums: albums, zooms: true)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -212,10 +247,15 @@ struct FavouritesTabView: View {
 }
 
 /// All album artists with the A–Z strip; tap one to see their albums.
+/// A grid of round pictures (sized like the album grid) or a list.
 struct ArtistsTabView: View {
     let api: JellyfinAPI?
+    var mode: LibraryDisplayMode = .grid
     @State private var artists: [JellyfinArtist] = []
     @State private var loaded = false
+
+    @Environment(\.isWideLayout) private var isWide
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Group {
@@ -227,25 +267,10 @@ struct ArtistsTabView: View {
             } else {
                 ScrollViewReader { proxy in
                     let firstByBucket = firstIDs()
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(artists) { artist in
-                                NavigationLink(value: artist) {
-                                    HStack(spacing: 12.scaled) {
-                                        AlbumArtView(
-                                            request: api?.imageURLRequest(for: artist.id, size: 100),
-                                            size: 48.scaled, cornerRadius: 24.scaled
-                                        )
-                                        Text(artist.name).lineLimit(1)
-                                        Spacer(minLength: 0)
-                                    }
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 6.scaled)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .id(artist.id)
-                            }
+                    Group {
+                        switch mode {
+                        case .grid: grid
+                        case .list: list
                         }
                     }
                     .padding(.trailing, AlphaIndexBar.width)
@@ -265,6 +290,59 @@ struct ArtistsTabView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Again when the connection comes back, if it came back empty.
         .task(id: NetworkMonitor.shared.isConnected) { load() }
+    }
+
+    private var list: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(artists) { artist in
+                    NavigationLink(value: artist) {
+                        HStack(spacing: 12.scaled) {
+                            AlbumArtView(
+                                request: api?.imageURLRequest(for: artist.id, size: 100),
+                                size: 48.scaled, cornerRadius: 24.scaled
+                            )
+                            Text(artist.name).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 6.scaled)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .id(artist.id)
+                }
+            }
+        }
+    }
+
+    /// Same columns and card size as the album grid (the A–Z strip leaves
+    /// the room on the right, as in Library ▸ Albums).
+    private var grid: some View {
+        GeometryReader { geo in
+            let edge = LibraryView.gridEdgePadding
+            let metrics = LibraryView.gridMetrics(width: geo.size.width - edge,
+                                                  scale: UIScale.shared.factor, wide: isWide,
+                                                  chosen: GridZoom.shared.columns, displayScale: displayScale)
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: metrics.spacing, alignment: .top),
+                                         count: metrics.columns),
+                          spacing: 16.scaled * metrics.textScale) {
+                    ForEach(artists) { artist in
+                        NavigationLink(value: artist) {
+                            ArtistGridCard(artist: artist,
+                                           request: api?.imageURLRequest(for: artist.id, size: metrics.imageSize),
+                                           metrics: metrics)
+                        }
+                        .buttonStyle(.plain)
+                        .id(artist.id)
+                    }
+                }
+                .padding(.leading, edge)
+                .padding(.vertical)
+            }
+            .reportsGridColumns(metrics.columns, active: isWide)
+        }
     }
 
     private func firstIDs() -> [String: String] {
@@ -298,6 +376,27 @@ struct ArtistsTabView: View {
     }
 }
 
+/// One artist in the grid: a round picture filling the card's width (the
+/// music-note placeholder when there's none), name centred underneath in
+/// the album title's style.
+struct ArtistGridCard: View {
+    let artist: JellyfinArtist
+    let request: URLRequest?
+    let metrics: LibraryView.GridMetrics
+
+    var body: some View {
+        let t = metrics.textScale
+        VStack(spacing: 4.scaled * t) {
+            AlbumArtView(request: request, size: metrics.cardWidth, cornerRadius: metrics.cardWidth / 2)
+            Text(artist.name)
+                .font(.plex(.caption, times: t).bold())
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+}
+
 /// One artist's albums; offline, their downloaded albums only.
 struct ArtistAlbumsView: View {
     let api: JellyfinAPI?
@@ -320,7 +419,7 @@ struct ArtistAlbumsView: View {
             } else if albums.isEmpty {
                 Text("No albums found.").font(.plex(.footnote)).foregroundStyle(.secondary).padding()
             } else {
-                AlbumGridView(api: api, albums: albums)
+                AlbumGridView(api: api, albums: albums, zooms: true)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

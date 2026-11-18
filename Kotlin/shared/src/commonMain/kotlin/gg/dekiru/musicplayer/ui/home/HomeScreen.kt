@@ -54,6 +54,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalDensity
+import gg.dekiru.musicplayer.ui.library.CardGrid
+import gg.dekiru.musicplayer.ui.library.GridZoom
+import gg.dekiru.musicplayer.ui.library.GridZoomButtons
+import gg.dekiru.musicplayer.ui.library.LibraryModel
+import gg.dekiru.musicplayer.ui.library.isWideLayout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -65,6 +74,10 @@ import kotlinx.coroutines.flow.map
  * Settings arrives (A5). Offline: a banner and the downloaded albums only.
  * A Playlists row follows Favourites when there's at least one playlist;
  * its › goes to the Library's Playlists tab ([onMorePlaylists]).
+ * Wide layouts (with [zoom]): every row's cards follow the grids' shared
+ * cards-per-row setting, a third of the next card showing at the end
+ * ([LibraryModel.homeRow]), and the − / + buttons sit right of Sign out in
+ * a top row that stays put (iOS: Home's toolbar). Phones: as before.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,6 +92,7 @@ fun HomeScreen(
     playlists: PlaylistsModel? = null,
     onOpenPlaylist: (JellyfinPlaylist) -> Unit = {},
     onMorePlaylists: () -> Unit = {},
+    zoom: GridZoom? = null,
 ) {
     // Loads on first appearance; reloads when the connection comes back.
     LaunchedEffect(model, network) { network.collect { model.networkChanged(it.online) } }
@@ -91,6 +105,8 @@ fun HomeScreen(
     val isDownloaded = rememberIsDownloaded(downloads)
     // Scrolling content stops below the status bar; the bottom inset is padding inside the list.
     val insets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues()
+    val wide = zoom != null && isWideLayout()
+    val density = LocalDensity.current.density
 
     PullToRefreshBox(
         isRefreshing = model.isLoading && hasAnyAlbums(model) && !model.isOffline,
@@ -100,71 +116,85 @@ fun HomeScreen(
         },
         modifier = Modifier.fillMaxSize(),
     ) {
-        LazyColumn(
-            state = rememberLazyListState(),
-            contentPadding = insets,
-            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
-        ) {
-            item {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onSignOut) { Text("Sign out", color = TetsubiColors.albumArtistText, fontSize = 13.sp) }
-                }
-            }
-            if (model.isOffline) {
-                item { StatusBanner(OFFLINE_MESSAGE, icon = "\u2298") }
-                section("Downloaded")
-                item(key = "row-Downloaded") {
-                    if (downloadedRow.isNotEmpty()) {
-                        AlbumRow(api, downloadedRow, onOpen, localArt = { album -> downloads.coverPath(album) }, isDownloaded = isDownloaded)
-                    } else {
-                        EmptyLine("No downloaded albums yet.")
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
+            // Wide: the top row stays put, with the zoom buttons; phones: it scrolls away, as before.
+            if (wide) TopRow(onSignOut, zoom)
+            BoxWithConstraints(Modifier.weight(1f)) {
+                val row = LibraryModel.homeRow(maxWidth.value, wide, zoom?.columns, density)
+                if (wide) SideEffect { zoom.shown = row.columns }
+                val size = row.takeIf { wide }
+                LazyColumn(
+                    state = rememberLazyListState(),
+                    contentPadding = insets,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    if (!wide) item { TopRow(onSignOut, null) }
+                    if (model.isOffline) {
+                        item { StatusBanner(OFFLINE_MESSAGE, icon = "\u2298") }
+                        section("Downloaded")
+                        item(key = "row-Downloaded") {
+                            if (downloadedRow.isNotEmpty()) {
+                                AlbumRow(api, downloadedRow, onOpen, localArt = { album -> downloads.coverPath(album) }, isDownloaded = isDownloaded, size = size)
+                            } else {
+                                EmptyLine("No downloaded albums yet.")
+                            }
+                        }
+                        // Downloaded playlists, when there are any (as online: no row without playlists).
+                        val offlinePlaylists = playlists?.playlists.orEmpty()
+                        if (playlists != null && offlinePlaylists.isNotEmpty()) {
+                            section("Playlists", onMorePlaylists)
+                            item(key = "row-Playlists") { PlaylistRow(api, playlists, offlinePlaylists, onOpenPlaylist, size) }
+                        }
+                        item { androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp)) }
+                        return@LazyColumn
                     }
-                }
-                // Downloaded playlists, when there are any (as online: no row without playlists).
-                val offlinePlaylists = playlists?.playlists.orEmpty()
-                if (playlists != null && offlinePlaylists.isNotEmpty()) {
-                    section("Playlists", onMorePlaylists)
-                    item(key = "row-Playlists") { PlaylistRow(api, playlists, offlinePlaylists, onOpenPlaylist) }
-                }
-                item { androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp)) }
-                return@LazyColumn
-            }
-            model.errorMessage?.takeIf { !model.isLoading }?.let { error ->
-                item {
-                    StatusBanner("Can't reach your Jellyfin server. $error", "Retry", action = {
-                        model.refresh()
-                        playlists?.load()
-                    })
-                }
-            }
+                    model.errorMessage?.takeIf { !model.isLoading }?.let { error ->
+                        item {
+                            StatusBanner("Can't reach your Jellyfin server. $error", "Retry", action = {
+                                model.refresh()
+                                playlists?.load()
+                            })
+                        }
+                    }
 
-            // On This Day first: the most distinctive row. Shown while Home
-            // loads and when something matched; hidden otherwise.
-            if (model.onThisDay.isNotEmpty() || model.isLoading) {
-                section("On This Day")
-                item(key = "row-On This Day") {
-                    if (model.onThisDay.isNotEmpty()) {
-                        AlbumRow(
-                            api, model.onThisDay.map { it.album }, onOpen,
-                            badge = { album -> model.onThisDay.firstOrNull { it.album.id == album.id }?.label },
-                            isDownloaded = isDownloaded,
-                        )
-                    } else {
-                        AlbumRowPlaceholder()
+                    // On This Day first: the most distinctive row. Shown while Home
+                    // loads and when something matched; hidden otherwise.
+                    if (model.onThisDay.isNotEmpty() || model.isLoading) {
+                        section("On This Day")
+                        item(key = "row-On This Day") {
+                            if (model.onThisDay.isNotEmpty()) {
+                                AlbumRow(
+                                    api, model.onThisDay.map { it.album }, onOpen,
+                                    badge = { album -> model.onThisDay.firstOrNull { it.album.id == album.id }?.label },
+                                    isDownloaded = isDownloaded, size = size,
+                                )
+                            } else {
+                                AlbumRowPlaceholder(size)
+                            }
+                        }
                     }
+                    albumSection("Favourites", model.favoriteAlbums, model.isLoading, "No favourite albums yet.", api, onOpen, isDownloaded, size) { onMore(AlbumList.FAVOURITES) }
+                    albumSection("Random Albums", model.randomAlbums, model.isLoading, "No random albums available.", api, onOpen, isDownloaded, size) { onMore(AlbumList.RANDOM) }
+                    val playlistRow = playlists?.playlists.orEmpty()
+                    if (playlists != null && playlistRow.isNotEmpty()) {
+                        section("Playlists", onMorePlaylists)
+                        item(key = "row-Playlists") { PlaylistRow(api, playlists, playlistRow, onOpenPlaylist, size) }
+                    }
+                    albumSection("Recently Played", model.recentlyPlayed, model.isLoading, "No recently played music yet.", api, onOpen, isDownloaded, size)
+                    albumSection("Recently Added", model.recentlyAdded, model.isLoading, "No recently added music.", api, onOpen, isDownloaded, size)
+                    item { androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp)) }
                 }
             }
-            albumSection("Favourites", model.favoriteAlbums, model.isLoading, "No favourite albums yet.", api, onOpen, isDownloaded) { onMore(AlbumList.FAVOURITES) }
-            albumSection("Random Albums", model.randomAlbums, model.isLoading, "No random albums available.", api, onOpen, isDownloaded) { onMore(AlbumList.RANDOM) }
-            val playlistRow = playlists?.playlists.orEmpty()
-            if (playlists != null && playlistRow.isNotEmpty()) {
-                section("Playlists", onMorePlaylists)
-                item(key = "row-Playlists") { PlaylistRow(api, playlists, playlistRow, onOpenPlaylist) }
-            }
-            albumSection("Recently Played", model.recentlyPlayed, model.isLoading, "No recently played music yet.", api, onOpen, isDownloaded)
-            albumSection("Recently Added", model.recentlyAdded, model.isLoading, "No recently added music.", api, onOpen, isDownloaded)
-            item { androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp)) }
         }
+    }
+}
+
+/** Sign out at the top right; wide, the zoom buttons right of it (as iOS's trailing toolbar items). */
+@Composable
+private fun TopRow(onSignOut: () -> Unit, zoom: GridZoom?) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = onSignOut) { Text("Sign out", color = TetsubiColors.albumArtistText, fontSize = 13.sp) }
+        if (zoom != null) GridZoomButtons(zoom)
     }
 }
 
@@ -208,13 +238,14 @@ private fun LazyListScope.albumSection(
     api: JellyfinApi,
     onOpen: (JellyfinAlbum) -> Unit,
     isDownloaded: (JellyfinAlbum) -> Boolean,
+    size: CardGrid?,
     onMore: (() -> Unit)? = null,
 ) {
     section(title, onMore)
     item(key = "row-$title") {
         when {
-            albums.isNotEmpty() -> AlbumRow(api, albums, onOpen, isDownloaded = isDownloaded)
-            isLoading -> AlbumRowPlaceholder()
+            albums.isNotEmpty() -> AlbumRow(api, albums, onOpen, isDownloaded = isDownloaded, size = size)
+            isLoading -> AlbumRowPlaceholder(size)
             else -> EmptyLine(emptyMessage)
         }
     }

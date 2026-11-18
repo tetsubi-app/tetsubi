@@ -45,6 +45,9 @@ import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.models.JellyfinPlaylist
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
+import gg.dekiru.musicplayer.ui.components.homeCardPadding
+import gg.dekiru.musicplayer.ui.components.homeRowPadding
+import gg.dekiru.musicplayer.ui.library.CardGrid
 import gg.dekiru.musicplayer.ui.library.LibraryModel
 
 // Playlists as the Library's grid and list and Home's row show them.
@@ -121,23 +124,26 @@ fun PlaylistListRow(api: JellyfinApi, model: PlaylistsModel, playlist: JellyfinP
     }
 }
 
-/** Home's row: cards the size of the album cards. */
+/** Home's row: cards the size of the album cards ([size] as `AlbumCard`'s on wide layouts). */
 @Composable
-fun PlaylistRow(api: JellyfinApi, model: PlaylistsModel, playlists: List<JellyfinPlaylist>, onOpen: (JellyfinPlaylist) -> Unit) {
-    LazyRow(contentPadding = PaddingValues(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+fun PlaylistRow(api: JellyfinApi, model: PlaylistsModel, playlists: List<JellyfinPlaylist>, onOpen: (JellyfinPlaylist) -> Unit, size: CardGrid? = null) {
+    val width = (size?.cardWidth ?: LibraryModel.HOME_CARD).dp
+    val t = size?.textScale ?: 1f
+    LazyRow(contentPadding = homeRowPadding(size), horizontalArrangement = Arrangement.spacedBy((size?.spacing ?: 12f).dp)) {
         items(playlists, key = { it.id }) { playlist ->
             Column(
-                Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { onOpen(playlist) }.padding(6.dp).width(140.dp),
+                Modifier.clip(RoundedCornerShape((8 * t).dp)).clickable(role = Role.Button) { onOpen(playlist) }
+                    .then(homeCardPadding(size)).width(width),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy((4 * t).dp),
             ) {
-                PlaylistArt(api, model, playlist, size = 140.dp, cornerRadius = 8.dp, maxWidth = 300)
+                PlaylistArt(api, model, playlist, size = width, cornerRadius = (8 * t).dp, maxWidth = size?.imageSize ?: 300)
                 Text(
-                    playlist.displayName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 2,
+                    playlist.displayName, color = Color.White, fontSize = (12 * t).sp, fontWeight = FontWeight.Bold, maxLines = 2,
                     overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    PlaylistsModel.summary(playlist), color = TetsubiColors.albumArtistText, fontSize = 11.sp, maxLines = 1,
+                    PlaylistsModel.summary(playlist), color = TetsubiColors.albumArtistText, fontSize = (11 * t).sp, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
             }

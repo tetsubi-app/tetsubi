@@ -65,6 +65,8 @@ public struct AppRootView: View {
         .appTheme()
         // Mac: covers, text and spacing grow with the window (`UIScale`).
         .measuresUIScale()
+        // iPad full width: bigger grid cards and the +/− buttons.
+        .measuresWideLayout()
     }
 
     // MARK: - Tabs

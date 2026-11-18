@@ -234,6 +234,7 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                                     library.tab = LibraryTab.PLAYLISTS
                                     tab = Tab.LIBRARY
                                 },
+                                zoom = library.gridZoom,
                             )
                             Tab.LIBRARY -> LibraryScreen(
                                 api, library, onOpen = ::open, onOpenArtist = ::openArtist,
@@ -251,14 +252,14 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                         is AlbumEntry -> AlbumScreen(api, top.model, playing, onOpen = ::open, onBack = ::back, onAddToPlaylist = addToPlaylist::start)
                         is ArtistEntry -> ArtistScreen(
                             api, top.model, onOpen = ::open, onBack = ::back,
-                            network = session.environment.network.state, downloads = downloads,
+                            network = session.environment.network.state, downloads = downloads, zoom = library.gridZoom,
                         )
                         is PlaylistPageEntry -> PlaylistScreen(
                             api, top.model, playing, onOpenAlbum = ::open, onBack = ::back,
                             isOnline = network.online, onAddToPlaylist = addToPlaylist::start, onDeleted = { leave(top) },
                             manager = downloads,
                         )
-                        is ListEntry -> AlbumListScreen(api, top.model, onOpen = ::open, onBack = ::back, downloads = downloads)
+                        is ListEntry -> AlbumListScreen(api, top.model, onOpen = ::open, onBack = ::back, downloads = downloads, zoom = library.gridZoom)
                     }
                 }
             }

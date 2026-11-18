@@ -43,7 +43,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * One artist's albums (as `ArtistAlbumsView` on iOS), titled with their
- * name, with Back. Offline: their downloaded albums only.
+ * name, with Back. Offline: their downloaded albums only. Wide layouts:
+ * the zoom buttons at the right of the top bar ([zoom], the Library's).
  */
 @Composable
 fun ArtistScreen(
@@ -53,6 +54,7 @@ fun ArtistScreen(
     onBack: () -> Unit,
     network: StateFlow<NetworkState> = MutableStateFlow(NetworkState()),
     downloads: DownloadManager? = null,
+    zoom: GridZoom? = null,
 ) {
     val online = network.collectAsState().value.online
     LaunchedEffect(model, online) { if (online) model.loadIfNeeded() }
@@ -70,13 +72,15 @@ fun ArtistScreen(
                 }
                 Text(
                     model.artist.name, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { heading() },
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() },
                 )
+                if (zoom != null && isWideLayout()) GridZoomButtons(zoom, Modifier.padding(end = 8.dp))
             }
             when {
                 albums.isNotEmpty() -> LibraryAlbumGrid(
                     api, albums, grid, onOpen, isDownloaded,
                     localArt = { album -> if (isDownloaded(album)) downloads.coverPath(album) else null },
+                    zoom = zoom,
                 )
                 online && !model.loaded -> LibrarySpinner()
                 else -> LibraryNote("No albums found.")

@@ -60,8 +60,13 @@ public extension Font {
     /// on the Mac, with the window through `UIScale`).
     /// Headline is semibold, as the system's is.
     static func plex(_ style: Font.TextStyle) -> Font {
+        plex(style, times: 1)
+    }
+
+    /// The same, `times` larger (grid cards whose text grows with the card).
+    static func plex(_ style: Font.TextStyle, times: CGFloat) -> Font {
         PlexFont.register()
-        let font = Font.custom(PlexFont.family, size: PlexFont.size(for: style).scaled, relativeTo: style)
+        let font = Font.custom(PlexFont.family, size: PlexFont.size(for: style).scaled * times, relativeTo: style)
         return style == .headline ? font.weight(.semibold) : font
     }
 

@@ -27,6 +27,20 @@ public struct LibraryView: View {
     /// The tab shown (remembered by the view model).
     private var tab: LibraryTab { viewModel?.tab ?? .albums }
 
+    @Environment(\.isWideLayout) private var isWide
+    @Environment(\.displayScale) private var displayScale
+
+    /// Whether the tab shown is a grid the +/− buttons resize.
+    private var showsZoomableGrid: Bool {
+        guard let model = viewModel else { return false }
+        switch tab {
+        case .albums:     return model.displayMode == .grid
+        case .artists:    return model.artistsDisplayMode == .grid
+        case .favourites: return true
+        case .playlists:  return false
+        }
+    }
+
     // MARK: Init
 
     public init(
@@ -52,7 +66,7 @@ public struct LibraryView: View {
             if let model = viewModel {
                 switch tab {
                 case .albums:     content(model)
-                case .artists:    ArtistsTabView(api: api)
+                case .artists:    ArtistsTabView(api: api, mode: model.artistsDisplayMode)
                 case .favourites: FavouritesTabView(api: api)
                 case .playlists:
                     if let playlistsModel { PlaylistsTabView(api: api, model: playlistsModel) }
@@ -70,8 +84,15 @@ public struct LibraryView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 LibraryTabBar(selection: Binding(get: { tab }, set: { viewModel?.tab = $0 })) {
+                    // iPad: − and + before the options menu (the Mac has
+                    // them in the title bar instead).
+                    if GridZoom.buttonsInTabRow(wide: isWide), showsZoomableGrid {
+                        GridZoomButtons()
+                    }
                     if tab == .albums, let model = viewModel {
                         optionsMenu(model: model)
+                    } else if tab == .artists, let model = viewModel {
+                        artistsOptionsMenu(model: model)
                     } else if tab == .playlists, let playlistsModel {
                         playlistsOptionsMenu(model: playlistsModel)
                     }
@@ -92,6 +113,9 @@ public struct LibraryView: View {
         // row is the header, so it sits in the same place on every tab.
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
+        #else
+        // Mac: − and + at the right of the title bar.
+        .gridZoomToolbar(showsZoomableGrid)
         #endif
         .task {
             viewModel?.downloadsChanged()
@@ -100,6 +124,7 @@ public struct LibraryView: View {
         .navigationDestination(for: JellyfinArtist.self) { artist in
             ArtistAlbumsView(api: api, artist: artist)
                 .appTheme()
+                .gridZoomToolbar()
         }
     }
 
@@ -226,44 +251,110 @@ public struct LibraryView: View {
         return (max(1, comfortable), gap)
     }
 
+    /// Cards per row the +/− buttons allow on wide layouts.
+    nonisolated static let gridColumnRange = 3...10
+    /// Cover sizes asked of the server, in pixels. Few, so the image cache
+    /// still gets hits as the cards change size.
+    nonisolated static let gridImageSizes = [300, 600, 1000, 1500]
+
+    /// A grid's layout: columns, the gap between them, each card's width
+    /// (the cover's side), how much its text grows, and the cover size to
+    /// ask the server for.
+    struct GridMetrics: Equatable, Sendable {
+        var columns: Int
+        var spacing: CGFloat
+        var cardWidth: CGFloat
+        var textScale: CGFloat
+        var imageSize: Int
+    }
+
+    /// The grid for `width`. Not wide (phones): `gridLayout` with fixed
+    /// 120pt covers, as always. Wide (Mac, iPad full width): `chosen`
+    /// columns (the +/− setting) or the automatic count kept to 3…10, each
+    /// cover filling its column, so a wider window means bigger cards
+    /// rather than more of them. The text grows with the card (never
+    /// smaller than on a phone, at most 3×) and the cover is asked for at
+    /// the next size up from its pixels on this display.
+    nonisolated static func gridMetrics(width: CGFloat, scale: CGFloat = 1, wide: Bool,
+                                        chosen: Int? = nil, displayScale: CGFloat = 2) -> GridMetrics {
+        let auto = gridLayout(width: width, scale: scale)
+        let art = gridArtSize * scale
+        guard wide else {
+            return GridMetrics(columns: auto.columns, spacing: auto.spacing, cardWidth: art,
+                               textScale: 1, imageSize: gridImageSizes[0])
+        }
+        let range = gridColumnRange
+        let columns = min(max(chosen ?? auto.columns, range.lowerBound), range.upperBound)
+        let gap = 12 * scale
+        let card = max(1, (width - gap * CGFloat(columns - 1)) / CGFloat(columns))
+        let textScale = min(max(card / art, 1), 3)
+        return GridMetrics(columns: columns, spacing: gap, cardWidth: card,
+                           textScale: textScale, imageSize: imageSize(forPixels: card * displayScale))
+    }
+
+    /// The smallest of `gridImageSizes` that covers `pixels`, or the largest.
+    nonisolated static func imageSize(forPixels pixels: CGFloat) -> Int {
+        gridImageSizes.first { CGFloat($0) >= pixels } ?? gridImageSizes.last!
+    }
+
+    /// Home's album card at scale 1 (`AlbumCardView.width`), wider than
+    /// the grid's.
+    nonisolated static let homeCardSize: CGFloat = 140
+    /// Space before the first card in a Home row (the section titles'
+    /// inset), which the row's width is measured after.
+    nonisolated static let homeRowLeading: CGFloat = 16
+
+    /// The cards in Home's sideways rows for a row `width` wide (the whole
+    /// screen, `homeRowLeading` included). Not wide (phones): today's fixed
+    /// 140pt cards. Wide: `chosen` cards per row (the Library's +/−
+    /// setting) or as many of today's cards as fit whole, kept to 3…10;
+    /// they're sized so that many fit with a third of the next one peeking
+    /// in at the edge, which shows the row scrolls. Text grows with the
+    /// card as in the Library (from 140pt rather than 120), and the cover
+    /// size asked for follows its pixels.
+    nonisolated static func homeRowMetrics(width: CGFloat, scale: CGFloat = 1, wide: Bool,
+                                           chosen: Int? = nil, displayScale: CGFloat = 2) -> GridMetrics {
+        let art = homeCardSize * scale
+        let gap = 12 * scale
+        let visible = width - homeRowLeading
+        let fits = max(1, Int((visible + gap) / (art + gap)))
+        guard wide else {
+            return GridMetrics(columns: fits, spacing: gap, cardWidth: art,
+                               textScale: 1, imageSize: gridImageSizes[0])
+        }
+        let range = gridColumnRange
+        let count = min(max(chosen ?? fits, range.lowerBound), range.upperBound)
+        let card = max(1, (visible - CGFloat(count) * gap) / (CGFloat(count) + 1.0 / 3))
+        let textScale = min(max(card / art, 1), 3)
+        return GridMetrics(columns: count, spacing: gap, cardWidth: card,
+                           textScale: textScale, imageSize: imageSize(forPixels: card * displayScale))
+    }
+
+    /// The count after a zoom step from `current`: in is one fewer per row
+    /// (bigger cards), out one more. nil at the limit (the button is off).
+    nonisolated static func zoomed(from current: Int, in zoomIn: Bool) -> Int? {
+        let clamped = min(max(current, gridColumnRange.lowerBound), gridColumnRange.upperBound)
+        let next = clamped + (zoomIn ? -1 : 1)
+        return gridColumnRange.contains(next) ? next : nil
+    }
+
     private func gridView(model: LibraryViewModel, proxy: ScrollViewProxy) -> some View {
         // The A–Z strip already leaves room on the right, so no trailing
         // padding when it's showing — that's what lets 3 covers fit on a phone.
         let trailing: CGFloat = model.indexKey != nil ? 0 : Self.gridEdgePadding
         return GeometryReader { geo in
-            let layout = Self.gridLayout(width: geo.size.width - Self.gridEdgePadding - trailing,
-                                         scale: UIScale.shared.factor)
+            let metrics = Self.gridMetrics(width: geo.size.width - Self.gridEdgePadding - trailing,
+                                           scale: UIScale.shared.factor, wide: isWide,
+                                           chosen: GridZoom.shared.columns, displayScale: displayScale)
             ScrollView {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: layout.spacing, alignment: .top),
-                                     count: layout.columns),
-                      spacing: 16.scaled) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: metrics.spacing, alignment: .top),
+                                     count: metrics.columns),
+                      spacing: 16.scaled * metrics.textScale) {
                 ForEach(model.sortedAlbums) { album in
                     NavigationLink(value: album) {
-                        VStack(spacing: 4.scaled) {
-                            AlbumArtView(
-                                request: api?.imageURLRequest(for: album.id, size: 300),
-                                size: Self.scaledGridArtSize, cornerRadius: 8.scaled
-                            )
-                            .overlay(alignment: .bottomTrailing) {
-                                if isDownloaded(album) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.plex(.caption))
-                                        .foregroundStyle(.green)
-                                        .padding(4)
-                                }
-                            }
-                            Text(album.displayName)
-                                .font(.plex(.caption).bold())
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                            Text(album.artistName)
-                                .font(.plex(.caption2))
-                                .foregroundStyle(Color.albumArtistText)
-                                .lineLimit(1)
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                        }
+                        AlbumGridCard(album: album,
+                                      request: api?.imageURLRequest(for: album.id, size: metrics.imageSize),
+                                      metrics: metrics, isDownloaded: isDownloaded(album))
                     }
                     .buttonStyle(.plain)
                     .id(album.id)
@@ -274,6 +365,7 @@ public struct LibraryView: View {
             .padding(.trailing, trailing)
             .padding(.vertical)
             }
+            .reportsGridColumns(metrics.columns, active: isWide)
         }
     }
 
@@ -414,6 +506,29 @@ public struct LibraryView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("View, sort and filter")
         .accessibilityIdentifier("LibraryView.options")
+    }
+
+    /// Grid or list for the Artists tab, in the same place and wording.
+    func artistsOptionsMenu(model: LibraryViewModel) -> some View {
+        Menu {
+            Picker("View", selection: Binding(get: { model.artistsDisplayMode },
+                                              set: { model.artistsDisplayMode = $0 })) {
+                ForEach(LibraryDisplayMode.allCases) { mode in
+                    Label(mode.rawValue, systemImage: LibraryView.symbol(for: mode)).tag(mode)
+                }
+            }
+            .pickerStyle(.menu)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.plex(.title3))
+                .foregroundStyle(.white)
+                .frame(width: libraryTabAccessoryWidth.scaled, height: 32.scaled)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .accessibilityLabel("View")
+        .accessibilityIdentifier("LibraryView.artistsOptions")
     }
 
     /// View and Sort for the Playlists tab, in the same place.

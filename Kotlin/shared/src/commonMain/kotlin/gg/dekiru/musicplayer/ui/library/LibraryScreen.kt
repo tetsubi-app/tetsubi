@@ -58,6 +58,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
@@ -86,6 +87,9 @@ import kotlinx.coroutines.launch
 /** Room kept at the right of the tab row for the options button. */
 private val accessoryWidth = 36.dp
 
+/** On wide layouts, room for the zoom buttons too, kept on every tab so the labels don't move. */
+private val wideAccessoryWidth = accessoryWidth * 3
+
 /**
  * The Library (as `LibraryView` on iOS): Albums / Artists / Favourites /
  * Playlists along the top, the View, Sort and Filter menu at the right
@@ -95,6 +99,8 @@ private val accessoryWidth = 36.dp
  * Offline: a banner and the downloaded albums only. Artists open through
  * [onOpenArtist] (an [ArtistScreen] on the tab's stack), playlists through
  * [onOpenPlaylist]. Offline, the Playlists tab lists the downloaded playlists.
+ * Artists: grid (by default) or list, with its own View menu. Wide
+ * layouts: zoom buttons beside the menu while a grid shows.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -129,16 +135,29 @@ fun LibraryScreen(
     val albumGrid = rememberLazyGridState()
     val albumList = rememberLazyListState()
     val artistList = rememberLazyListState()
+    val artistGrid = rememberLazyGridState()
     val favouriteGrid = rememberLazyGridState()
     val playlistGrid = rememberLazyGridState()
     val playlistList = rememberLazyListState()
 
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
-        LibraryTabBar(model.tab, onSelect = { model.tab = it }) {
-            when (model.tab) {
-                LibraryTab.ALBUMS -> OptionsMenu(model)
-                LibraryTab.PLAYLISTS -> if (playlists != null) PlaylistOptionsMenu(model, playlists)
-                else -> Unit
+        val wide = isWideLayout()
+        // The zoom buttons only while the tab shows a grid they change.
+        val zoomable = when (model.tab) {
+            LibraryTab.ALBUMS -> model.displayMode == LibraryDisplayMode.GRID
+            LibraryTab.ARTISTS -> model.artistsDisplayMode == LibraryDisplayMode.GRID
+            LibraryTab.FAVOURITES -> true
+            LibraryTab.PLAYLISTS -> false
+        }
+        LibraryTabBar(model.tab, onSelect = { model.tab = it }, accessoryWidth = if (wide) wideAccessoryWidth else accessoryWidth) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (wide && zoomable) GridZoomButtons(model.gridZoom)
+                when (model.tab) {
+                    LibraryTab.ALBUMS -> OptionsMenu(model)
+                    LibraryTab.ARTISTS -> ArtistOptionsMenu(model)
+                    LibraryTab.PLAYLISTS -> if (playlists != null) PlaylistOptionsMenu(model, playlists)
+                    else -> Unit
+                }
             }
         }
         if (model.isOffline) StatusBanner(OFFLINE_MESSAGE, icon = "⊘")
@@ -146,11 +165,11 @@ fun LibraryScreen(
             val localArt: (JellyfinAlbum) -> String? = { album -> if (model.isDownloaded(album)) downloads.coverPath(album) else null }
             when (model.tab) {
                 LibraryTab.ALBUMS -> AlbumsTab(api, model, onOpen, localArt, albumGrid, albumList)
-                LibraryTab.ARTISTS -> ArtistsTab(api, model, onOpenArtist, artistList)
+                LibraryTab.ARTISTS -> ArtistsTab(api, model, onOpenArtist, artistList, artistGrid)
                 LibraryTab.FAVOURITES -> when {
                     !model.favouritesLoaded -> LibrarySpinner()
                     model.favourites.isEmpty() -> LibraryNote("No favourite albums yet.\nTap the heart on an album to add one.")
-                    else -> LibraryAlbumGrid(api, model.favourites, favouriteGrid, onOpen, model::isDownloaded, localArt)
+                    else -> LibraryAlbumGrid(api, model.favourites, favouriteGrid, onOpen, model::isDownloaded, localArt, zoom = model.gridZoom)
                 }
                 LibraryTab.PLAYLISTS -> if (playlists != null) {
                     PlaylistsTab(api, playlists, model.displayMode, onOpenPlaylist, playlistGrid, playlistList)
@@ -160,9 +179,9 @@ fun LibraryScreen(
     }
 }
 
-/** The large tab row (as iOS `LibraryTabBar`); [accessory] sits at the right, its room always kept. */
+/** The large tab row (as iOS `LibraryTabBar`); [accessory] sits at the right, its room ([accessoryWidth]) always kept. */
 @Composable
-private fun LibraryTabBar(selected: LibraryTab, onSelect: (LibraryTab) -> Unit, accessory: @Composable () -> Unit) {
+private fun LibraryTabBar(selected: LibraryTab, onSelect: (LibraryTab) -> Unit, accessoryWidth: Dp, accessory: @Composable () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(TetsubiColors.background.copy(alpha = 0.6f)).padding(start = 16.dp, end = 16.dp, top = 8.dp),
         verticalAlignment = Alignment.Bottom,
@@ -191,7 +210,7 @@ private fun LibraryTabBar(selected: LibraryTab, onSelect: (LibraryTab) -> Unit, 
             }
         }
         // Lined up with the labels, above the underline.
-        Box(Modifier.width(accessoryWidth).padding(bottom = 9.dp), contentAlignment = Alignment.Center) { accessory() }
+        Box(Modifier.width(accessoryWidth).padding(bottom = 9.dp), contentAlignment = Alignment.CenterEnd) { accessory() }
     }
 }
 
@@ -234,6 +253,31 @@ private fun OptionsMenu(model: LibraryModel) {
                     leadingIcon = { ShuffleIcon(18.dp) },
                     onClick = { pick(model::shuffleAgain) },
                 )
+            }
+        }
+    }
+}
+
+/** View for the Artists tab (its own, as the albums' Grid / List). */
+@Composable
+private fun ArtistOptionsMenu(model: LibraryModel) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            Modifier.size(accessoryWidth, 32.dp).clip(RoundedCornerShape(8.dp))
+                .clickable(role = Role.Button) { open = true }
+                .semantics { contentDescription = "View" },
+            contentAlignment = Alignment.Center,
+        ) { SlidersIcon(20.dp) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            MenuHeading("View")
+            for (mode in LibraryDisplayMode.entries) {
+                MenuChoice(mode.title, mode == model.artistsDisplayMode, icon = {
+                    if (mode == LibraryDisplayMode.GRID) GridIcon(18.dp) else ListIcon(18.dp)
+                }) {
+                    model.artistsDisplayMode = mode
+                    open = false
+                }
             }
         }
     }
@@ -360,7 +404,7 @@ private fun AlbumsTab(
                         when (model.displayMode) {
                             LibraryDisplayMode.GRID -> LibraryAlbumGrid(
                                 api, model.sortedAlbums, grid, onOpen, model::isDownloaded, localArt,
-                                trailingEdge = key == null, onAppear = model::loadMoreIfNeeded,
+                                trailingEdge = key == null, onAppear = model::loadMoreIfNeeded, zoom = model.gridZoom,
                             )
                             LibraryDisplayMode.LIST -> LibraryAlbumList(
                                 api, model.sortedAlbums, list, onOpen, model::isDownloaded, localArt, onAppear = model::loadMoreIfNeeded,
@@ -426,9 +470,19 @@ private fun ErrorState(message: String, retry: () -> Unit) {
     }
 }
 
-/** All album artists with the A–Z strip (as iOS `ArtistsTabView`); tap one for their albums. */
+/**
+ * All album artists with the A–Z strip (as iOS `ArtistsTabView`): round
+ * pictures in a grid (the album cards' size and columns) or today's list;
+ * the strip jumps in either. Tap one for their albums.
+ */
 @Composable
-private fun ArtistsTab(api: JellyfinApi, model: LibraryModel, onOpenArtist: (JellyfinArtist) -> Unit, state: LazyListState) {
+private fun ArtistsTab(
+    api: JellyfinApi,
+    model: LibraryModel,
+    onOpenArtist: (JellyfinArtist) -> Unit,
+    list: LazyListState,
+    grid: androidx.compose.foundation.lazy.grid.LazyGridState,
+) {
     when {
         !model.artistsLoaded -> LibrarySpinner()
         model.artists.isEmpty() -> LibraryNote("No artists found.")
@@ -436,27 +490,34 @@ private fun ArtistsTab(api: JellyfinApi, model: LibraryModel, onOpenArtist: (Jel
             val scope = rememberCoroutineScope()
             val firstIds = remember(model.artists) { AlphaIndex.firstIds(model.artists, { it.name }) { it.id } }
             val bottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues().calculateBottomPadding()
+            val isGrid = model.artistsDisplayMode == LibraryDisplayMode.GRID
             Box(Modifier.fillMaxSize()) {
-                LazyColumn(
-                    state = state,
-                    contentPadding = PaddingValues(bottom = 16.dp + bottom),
-                    modifier = Modifier.fillMaxSize().padding(end = AlphaIndexBarWidth),
-                ) {
-                    items(model.artists, key = { it.id }) { artist ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpenArtist(artist) }.padding(horizontal = 16.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            AlbumArt(api, artist.id, size = 48.dp, cornerRadius = 24.dp, maxWidth = 100)
-                            Text(artist.name, color = Color.White, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (isGrid) {
+                    Box(Modifier.fillMaxSize().padding(end = AlphaIndexBarWidth)) {
+                        LibraryArtistGrid(api, model.artists, grid, onOpenArtist, zoom = model.gridZoom)
+                    }
+                } else {
+                    LazyColumn(
+                        state = list,
+                        contentPadding = PaddingValues(bottom = 16.dp + bottom),
+                        modifier = Modifier.fillMaxSize().padding(end = AlphaIndexBarWidth),
+                    ) {
+                        items(model.artists, key = { it.id }) { artist ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpenArtist(artist) }.padding(horizontal = 16.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                AlbumArt(api, artist.id, size = 48.dp, cornerRadius = 24.dp, maxWidth = 100)
+                                Text(artist.name, color = Color.White, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     }
                 }
                 AlphaIndexBar(firstIds.keys, onSelect = { label ->
                     val id = AlphaIndex.target(label, firstIds) ?: return@AlphaIndexBar
                     val index = model.artists.indexOfFirst { it.id == id }.coerceAtLeast(0)
-                    scope.launch { state.scrollToItem(index) }
+                    scope.launch { if (isGrid) grid.scrollToItem(index) else list.scrollToItem(index) }
                 }, modifier = Modifier.align(Alignment.CenterEnd))
             }
         }

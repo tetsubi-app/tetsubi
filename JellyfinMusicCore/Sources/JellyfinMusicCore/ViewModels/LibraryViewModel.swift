@@ -69,12 +69,18 @@ public final class LibraryViewModel {
     public var displayMode: LibraryDisplayMode {
         didSet { defaults.set(displayMode.rawValue, forKey: Self.viewModeKey) }
     }
+    /// Library ▸ Artists: grid (round pictures) or list. Kept apart from the
+    /// Albums view, and a grid unless the list was picked.
+    public var artistsDisplayMode: LibraryDisplayMode {
+        didSet { defaults.set(artistsDisplayMode.rawValue, forKey: Self.artistsViewModeKey) }
+    }
 
     // Remembered choices (the filter isn't); values are the raw values,
     // e.g. "Date Added", as Android stores them.
     static let tabKey = "library.tab"
     static let sortKey = "library.sort"
     static let viewModeKey = "library.viewMode"
+    static let artistsViewModeKey = "library.artistsViewMode"
 
     // MARK: Random
 
@@ -138,6 +144,8 @@ public final class LibraryViewModel {
         tab = defaults.string(forKey: Self.tabKey).flatMap(LibraryTab.init(rawValue:)) ?? .albums
         sortOption = defaults.string(forKey: Self.sortKey).flatMap(LibrarySortOption.init(rawValue:)) ?? .name
         displayMode = defaults.string(forKey: Self.viewModeKey).flatMap(LibraryDisplayMode.init(rawValue:)) ?? .grid
+        artistsDisplayMode = defaults.string(forKey: Self.artistsViewModeKey)
+            .flatMap(LibraryDisplayMode.init(rawValue:)) ?? .grid
     }
 
     // MARK: Public

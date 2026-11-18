@@ -30,10 +30,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -44,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
+import gg.dekiru.musicplayer.data.models.JellyfinArtist
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
 import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
@@ -52,8 +55,9 @@ import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
 
 /**
  * Square covers in columns (as iOS `AlbumGridView`): fixed 120 dp covers,
- * three across on a phone, more on the Pad, a green tick on downloaded
- * albums. [onAppear] runs as each album comes into view.
+ * three across on a phone, a green tick on downloaded albums. Wide (with
+ * [zoom]): the shared cards-per-row, each cover filling its column, the
+ * text growing with it. [onAppear] runs as each album comes into view.
  */
 @Composable
 fun LibraryAlbumGrid(
@@ -65,45 +69,92 @@ fun LibraryAlbumGrid(
     localArt: (JellyfinAlbum) -> String? = { null },
     trailingEdge: Boolean = true,
     onAppear: (JellyfinAlbum) -> Unit = {},
+    zoom: GridZoom? = null,
 ) {
-    val bottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues().calculateBottomPadding()
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        // The A–Z strip already leaves room on the right: no trailing padding then (so three fit on a phone).
-        val trailing = if (trailingEdge) LibraryModel.GRID_EDGE else 0f
-        val layout = LibraryModel.gridLayout(maxWidth.value - LibraryModel.GRID_EDGE - trailing)
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(layout.columns),
-            state = state,
-            contentPadding = PaddingValues(start = LibraryModel.GRID_EDGE.dp, end = trailing.dp, top = 16.dp, bottom = 16.dp + bottom),
-            horizontalArrangement = Arrangement.spacedBy(layout.spacing.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.fillMaxSize(),
+    CardGridView(albums, { it.id }, state, trailingEdge, zoom) { album, grid ->
+        LaunchedEffect(album.id, albums.size) { onAppear(album) }
+        GridCell(api, album, grid, isDownloaded(album), localArt(album)) { onOpen(album) }
+    }
+}
+
+/** Round artist pictures with the name underneath, the same size and columns as album cards (as the iOS Artists grid). */
+@Composable
+internal fun LibraryArtistGrid(
+    api: JellyfinApi,
+    artists: List<JellyfinArtist>,
+    state: LazyGridState,
+    onOpen: (JellyfinArtist) -> Unit,
+    zoom: GridZoom? = null,
+) {
+    CardGridView(artists, { it.id }, state, trailingEdge = false, zoom = zoom) { artist, grid ->
+        val t = grid.textScale
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { onOpen(artist) },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy((4 * t).dp),
         ) {
-            items(albums, key = { it.id }) { album ->
-                LaunchedEffect(album.id, albums.size) { onAppear(album) }
-                GridCell(api, album, isDownloaded(album), localArt(album)) { onOpen(album) }
-            }
+            AlbumArt(api, artist.id, size = grid.cardWidth.dp, cornerRadius = (grid.cardWidth / 2).dp, maxWidth = grid.imageSize)
+            Text(
+                artist.name, color = Color.White, fontSize = (12 * t).sp, fontWeight = FontWeight.Bold, maxLines = 2,
+                overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
 
+/**
+ * The columns shared by album and artist grids ([LibraryModel.cardGrid]).
+ * Wide with [zoom]: tells it how many columns show, for the zoom buttons.
+ */
 @Composable
-private fun GridCell(api: JellyfinApi, album: JellyfinAlbum, downloaded: Boolean, localArt: String?, onClick: () -> Unit) {
+private fun <T> CardGridView(
+    items: List<T>,
+    key: (T) -> Any,
+    state: LazyGridState,
+    trailingEdge: Boolean,
+    zoom: GridZoom?,
+    cell: @Composable (T, CardGrid) -> Unit,
+) {
+    val bottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues().calculateBottomPadding()
+    val wide = zoom != null && isWideLayout()
+    val density = LocalDensity.current.density
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // The A–Z strip already leaves room on the right: no trailing padding then (so three fit on a phone).
+        val trailing = if (trailingEdge) LibraryModel.GRID_EDGE else 0f
+        val grid = LibraryModel.cardGrid(maxWidth.value - LibraryModel.GRID_EDGE - trailing, wide, zoom?.columns, density)
+        if (wide) SideEffect { zoom.shown = grid.columns }
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(grid.columns),
+            state = state,
+            contentPadding = PaddingValues(start = LibraryModel.GRID_EDGE.dp, end = trailing.dp, top = 16.dp, bottom = 16.dp + bottom),
+            horizontalArrangement = Arrangement.spacedBy(grid.spacing.dp),
+            verticalArrangement = Arrangement.spacedBy((16 * grid.textScale).dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(items, key = key) { item -> cell(item, grid) }
+        }
+    }
+}
+
+/** One album card; on wide layouts the cover fills the column and the text, gaps, tick and corners scale with it. */
+@Composable
+private fun GridCell(api: JellyfinApi, album: JellyfinAlbum, grid: CardGrid, downloaded: Boolean, localArt: String?, onClick: () -> Unit) {
+    val t = grid.textScale
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onClick),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape((8 * t).dp)).clickable(role = Role.Button, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy((4 * t).dp),
     ) {
         Box {
-            AlbumArt(api, album.id, size = LibraryModel.GRID_ART.dp, cornerRadius = 8.dp, maxWidth = 300, localPath = localArt)
-            if (downloaded) DownloadedTick(16.dp, Modifier.align(Alignment.BottomEnd).padding(4.dp))
+            AlbumArt(api, album.id, size = grid.cardWidth.dp, cornerRadius = (8 * t).dp, maxWidth = grid.imageSize, localPath = localArt)
+            if (downloaded) DownloadedTick((16 * t).dp, Modifier.align(Alignment.BottomEnd).padding((4 * t).dp))
         }
         Text(
-            album.displayName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 2,
+            album.displayName, color = Color.White, fontSize = (12 * t).sp, fontWeight = FontWeight.Bold, maxLines = 2,
             overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            album.artistName, color = TetsubiColors.albumArtistText, fontSize = 11.sp, maxLines = 1,
+            album.artistName, color = TetsubiColors.albumArtistText, fontSize = (11 * t).sp, maxLines = 1,
             overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
         )
     }

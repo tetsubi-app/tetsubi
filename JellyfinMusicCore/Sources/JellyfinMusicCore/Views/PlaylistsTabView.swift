@@ -83,18 +83,23 @@ struct PlaylistCardView: View {
     var artSize: CGFloat = LibraryView.gridArtSize
     /// Home's row: the card is as wide as its art.
     var fixedWidth = false
+    /// Home on a wide layout: the same size as the album cards beside it
+    /// (`LibraryView.homeRowMetrics`), in place of `artSize`.
+    var metrics: LibraryView.GridMetrics? = nil
 
     var body: some View {
-        let art = artSize.scaled
-        return VStack(spacing: 4.scaled) {
-            PlaylistArtView(api: api, playlist: playlist, size: art, cornerRadius: 8.scaled)
+        let art = metrics?.cardWidth ?? artSize.scaled
+        let t = metrics?.textScale ?? 1
+        return VStack(spacing: 4.scaled * t) {
+            PlaylistArtView(api: api, playlist: playlist, size: art, cornerRadius: 8.scaled * t,
+                            requestSize: metrics?.imageSize ?? 300)
             Text(playlist.name)
-                .font(.plex(.caption).bold())
+                .font(.plex(.caption, times: t).bold())
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, alignment: .center)
             Text(playlist.summary)
-                .font(.plex(.caption2))
+                .font(.plex(.caption2, times: t))
                 .foregroundStyle(Color.albumArtistText)
                 .lineLimit(1)
                 .multilineTextAlignment(.center)
@@ -202,22 +207,25 @@ struct PlaylistsTabView: View {
 
 // MARK: - Home row
 
-/// Home's horizontal row of playlists.
+/// Home's horizontal row of playlists. On a wide layout its cards are the
+/// album rows' size (`metrics`); nil keeps today's 140pt cards.
 struct HomePlaylistsRow: View {
     let api: JellyfinAPI?
     let playlists: [JellyfinPlaylist]
+    var metrics: LibraryView.GridMetrics? = nil
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 12.scaled) {
+            HStack(alignment: .top, spacing: metrics?.spacing ?? 12.scaled) {
                 ForEach(playlists) { playlist in
                     NavigationLink(value: playlist) {
-                        PlaylistCardView(api: api, playlist: playlist, artSize: 140, fixedWidth: true)
+                        PlaylistCardView(api: api, playlist: playlist, artSize: LibraryView.homeCardSize,
+                                         fixedWidth: true, metrics: metrics)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal)
+            .homeRowPadding(wide: metrics != nil)
             .padding(.bottom, 8)
         }
     }

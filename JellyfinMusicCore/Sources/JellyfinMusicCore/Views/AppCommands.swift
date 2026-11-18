@@ -1,4 +1,4 @@
-// MARK: - AppCommands — Mac menu bar: Playback menu, View tabs, Settings
+// MARK: - AppCommands — Mac menu bar: Playback menu, View tabs and zoom, Settings
 
 import SwiftUI
 
@@ -78,6 +78,16 @@ public struct AppCommands: Commands {
             }
             .keyboardShortcut(Self.playlistsShortcut, modifiers: .command)
             .disabled(tab == nil || libraryTab == nil)
+            Divider()
+            // Cards per row in the album and artist grids and Home's rows,
+            // as the title bar's + and − buttons; off when none is showing.
+            let zoom = GridZoom.shared
+            Button("Zoom In") { zoom.zoomIn() }
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(!zoom.canZoomIn)
+            Button("Zoom Out") { zoom.zoomOut() }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(!zoom.canZoomOut)
             Divider()
         }
 

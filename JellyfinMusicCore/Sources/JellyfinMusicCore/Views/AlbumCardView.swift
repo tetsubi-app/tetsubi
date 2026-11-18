@@ -30,16 +30,27 @@ public struct AlbumCardView: View {
     /// Pass `nil` for plain rows (Random / Recently Added / Recently Played).
     public let badge: String?
 
+    /// Home on a wide layout: the card's width (the cover's side), and how
+    /// much its text, gaps and badge grow (`LibraryView.homeRowMetrics`).
+    /// The card then has no side padding, so the row's maths is exact.
+    /// nil: today's fixed card.
+    let sizedWidth: CGFloat?
+    let textScale: CGFloat
+
     // MARK: Init
 
     public init(album: JellyfinAlbum,
                 artRequest: URLRequest? = nil,
                 isDownloaded: Bool = false,
-                badge: String? = nil) {
+                badge: String? = nil,
+                width: CGFloat? = nil,
+                textScale: CGFloat = 1) {
         self.album = album
         self.artRequest = artRequest
         self.isDownloaded = isDownloaded
         self.badge = badge
+        self.sizedWidth = width
+        self.textScale = textScale
     }
 
     // MARK: Body
@@ -48,37 +59,38 @@ public struct AlbumCardView: View {
     static var width: CGFloat { 140.scaled }
 
     public var body: some View {
-        let width = Self.width
-        return VStack(spacing: 4.scaled) {
-            AlbumArtView(request: artRequest, size: width, cornerRadius: 8.scaled)
+        let width = sizedWidth ?? Self.width
+        let t = textScale
+        return VStack(spacing: 4.scaled * t) {
+            AlbumArtView(request: artRequest, size: width, cornerRadius: 8.scaled * t)
                 .overlay(alignment: .topTrailing) {
                     if let badge, !badge.isEmpty {
                         Text(badge)
-                            .font(.plex(.caption2).bold())
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
+                            .font(.plex(.caption2, times: t).bold())
+                            .padding(.horizontal, 6 * t)
+                            .padding(.vertical, 3 * t)
                             .background(Capsule().fill(Color.accentColor.opacity(0.7)))
                             .foregroundStyle(.white)
-                            .padding(4)
+                            .padding(4 * t)
                     }
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if isDownloaded {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.plex(.title3))
+                            .font(.plex(.title3, times: t))
                             .foregroundStyle(.green)
-                            .padding(6)
+                            .padding(6 * t)
                     }
                 }
 
             Text(album.displayName)
-                .font(.plex(.caption).bold())
+                .font(.plex(.caption, times: t).bold())
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .frame(width: width, alignment: .center)
 
             Text(album.artistName)
-                .font(.plex(.caption2))
+                .font(.plex(.caption2, times: t))
                 .foregroundStyle(Color.albumArtistText)
                 .lineLimit(1)
                 .multilineTextAlignment(.center)
@@ -86,14 +98,14 @@ public struct AlbumCardView: View {
 
             if let year = album.productionYear {
                 Text(String(year))
-                    .font(.plex(.caption2))
+                    .font(.plex(.caption2, times: t))
                     .foregroundStyle(Color.albumYearText)
                     .lineLimit(1)
                     .multilineTextAlignment(.center)
                 .frame(width: width, alignment: .center)
             }
         }
-        .padding(6.scaled)
+        .cardPadding(sized: sizedWidth != nil, textScale: t)
     }
 
     // MARK: - Grid variant
@@ -112,46 +124,82 @@ public struct AlbumCardView: View {
     }
 }
 
+// MARK: - Home row sizing
+
+extension View {
+    /// Around a Home album card: 6pt all round as always; on a wide layout
+    /// (sized cards) only above and below, grown with the text, so the
+    /// row's gaps are exactly the ones `LibraryView.homeRowMetrics` counts.
+    @ViewBuilder
+    func cardPadding(sized: Bool, textScale: CGFloat) -> some View {
+        if sized {
+            padding(.vertical, 6.scaled * textScale)
+        } else {
+            padding(6.scaled)
+        }
+    }
+
+    /// Around a Home row's cards: the default inset as always; on a wide
+    /// layout the fixed `LibraryView.homeRowLeading` the maths assumes.
+    @ViewBuilder
+    func homeRowPadding(wide: Bool) -> some View {
+        if wide {
+            padding(.horizontal, LibraryView.homeRowLeading)
+        } else {
+            padding(.horizontal)
+        }
+    }
+}
+
 // MARK: - Loading placeholder
 
 /// Same size and layout as `AlbumCardView`, shown while a Home row loads so
 /// the screen doesn't jump when the albums arrive.
 struct AlbumCardPlaceholder: View {
+    /// Home on a wide layout (as `AlbumCardView`); nil: the fixed card.
+    var metrics: LibraryView.GridMetrics? = nil
+
     var body: some View {
-        let width = AlbumCardView.width
-        return VStack(spacing: 4.scaled) {
-            LoadingOutline(cornerRadius: 8.scaled)
+        let width = metrics?.cardWidth ?? AlbumCardView.width
+        let t = metrics?.textScale ?? 1
+        return VStack(spacing: 4.scaled * t) {
+            LoadingOutline(cornerRadius: 8.scaled * t)
                 .frame(width: width, height: width)
 
             Text("Loading…")
-                .font(.plex(.caption).bold())
+                .font(.plex(.caption, times: t).bold())
                 .lineLimit(2)
                 .frame(width: width, alignment: .center)
 
             Text("Sit tight…")
-                .font(.plex(.caption2))
+                .font(.plex(.caption2, times: t))
                 .foregroundStyle(Color.albumArtistText)
                 .lineLimit(1)
                 .frame(width: width, alignment: .center)
 
             Text("Soon…")
-                .font(.plex(.caption2))
+                .font(.plex(.caption2, times: t))
                 .foregroundStyle(Color.albumYearText)
                 .lineLimit(1)
                 .frame(width: width, alignment: .center)
         }
-        .padding(6.scaled)
+        .cardPadding(sized: metrics != nil, textScale: t)
     }
 }
 
-/// A row of four placeholder cards, laid out like a loaded Home row.
+/// A row of placeholder cards, laid out like a loaded Home row: four, or
+/// on a wide layout enough to fill it (the cards-per-row and the peek).
 struct AlbumRowPlaceholder: View {
+    var metrics: LibraryView.GridMetrics? = nil
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 12.scaled) {
-                ForEach(0..<4, id: \.self) { _ in AlbumCardPlaceholder() }
+            HStack(alignment: .top, spacing: metrics?.spacing ?? 12.scaled) {
+                ForEach(0..<(metrics.map { $0.columns + 1 } ?? 4), id: \.self) { _ in
+                    AlbumCardPlaceholder(metrics: metrics)
+                }
             }
-            .padding(.horizontal)
+            .homeRowPadding(wide: metrics != nil)
             .padding(.bottom, 8)
         }
         .scrollDisabled(true)

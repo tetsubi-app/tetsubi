@@ -58,6 +58,10 @@ import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.downloads.rememberIsDownloaded
 import gg.dekiru.musicplayer.ui.components.AlbumCard
 import gg.dekiru.musicplayer.ui.components.ShakeEffect
+import gg.dekiru.musicplayer.ui.library.GridZoom
+import gg.dekiru.musicplayer.ui.library.GridZoomButtons
+import gg.dekiru.musicplayer.ui.library.LibraryAlbumGrid
+import gg.dekiru.musicplayer.ui.library.isWideLayout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -142,6 +146,8 @@ class AlbumListModel(
  * A full page of albums (Home ▸ Favourites › or Random Albums ›): a grid
  * of cards, pull down to load again. Random shows 9 or 12 (as many rows as
  * fit), one-line titles, and "Shake it" where the device can be shaken.
+ * Favourites on wide layouts: the Library's album grid (as iOS, where
+ * it's the same view) with the zoom buttons ([zoom]) in the top bar.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -151,6 +157,7 @@ fun AlbumListScreen(
     onOpen: (JellyfinAlbum) -> Unit,
     onBack: () -> Unit,
     downloads: DownloadManager? = null,
+    zoom: GridZoom? = null,
 ) {
     LaunchedEffect(model) { model.loadIfNeeded() }
     val isDownloaded = rememberIsDownloaded(downloads)
@@ -173,6 +180,9 @@ fun AlbumListScreen(
         (title + 2 * line).toDp().value + 12 + 140 + 12
     }
     val bottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues()
+    // Random keeps its fixed cards (its 9 or 12 depends on their size).
+    val zoomed = if (!isRandom && isWideLayout()) zoom else null
+    val zoomedGrid = rememberLazyGridState()
 
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
         androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
@@ -182,8 +192,9 @@ fun AlbumListScreen(
                 }
                 Text(
                     model.list.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
+                if (zoomed != null) GridZoomButtons(zoomed, Modifier.padding(end = 8.dp))
             }
             PullToRefreshBox(
                 isRefreshing = model.isLoading && model.albums.isNotEmpty(),
@@ -191,6 +202,9 @@ fun AlbumListScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 when {
+                    zoomed != null && model.albums.isNotEmpty() -> LibraryAlbumGrid(
+                        api, model.albums, zoomedGrid, onOpen, isDownloaded, zoom = zoomed,
+                    )
                     model.albums.isNotEmpty() -> BoxWithConstraints(Modifier.fillMaxSize()) {
                     val shown = if (isRandom) {
                         val height = maxHeight.value - bottom.calculateBottomPadding().value

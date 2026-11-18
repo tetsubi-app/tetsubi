@@ -7,7 +7,9 @@ import Observation
 ///
 /// Layout (PlexAmp-inspired): a vertical `LazyVStack` of titled, horizontally
 /// scrolling rows over `AppBackgroundView` (blurred album art while playing). Each row is a `HomeSectionRow`
-/// (or `OnThisDayRow`); tapping a card pushes `AlbumDetailView`.
+/// (or `OnThisDayRow`); tapping a card pushes `AlbumDetailView`. On a wide
+/// layout every row's cards follow the Library's cards-per-row setting
+/// (`LibraryView.homeRowMetrics`) and the −/+ buttons sit in the top bar.
 public struct HomeView: View {
 
     @State private var viewModel: HomeViewModel?
@@ -16,6 +18,9 @@ public struct HomeView: View {
     private let downloadManager: DownloadManager?
     /// Opens Library ▸ Playlists (the Playlists row's ›).
     private let onShowPlaylists: (() -> Void)?
+
+    @Environment(\.isWideLayout) private var isWide
+    @Environment(\.displayScale) private var displayScale
 
     // MARK: Init
 
@@ -34,6 +39,13 @@ public struct HomeView: View {
 
     public var body: some View {
         ZStack {
+            GeometryReader { geo in
+            // Wide layouts: every row's cards follow the Library's
+            // cards-per-row setting; phones keep today's fixed cards (nil).
+            let metrics = LibraryView.homeRowMetrics(width: geo.size.width, scale: UIScale.shared.factor,
+                                                     wide: isWide, chosen: GridZoom.shared.columns,
+                                                     displayScale: displayScale)
+            let cards = isWide ? metrics : nil
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     statusBanner
@@ -42,35 +54,38 @@ public struct HomeView: View {
                     // when nothing was released on today's date.
                     if showsOnThisDay {
                         sectionHeader("On This Day")
-                        onThisDaySection
+                        onThisDaySection(cards)
                     }
 
                     sectionHeader("Favourites", more: .favourites)
-                    favoritesSection
+                    albumRow("Favourites", viewModel?.favorites, empty: "No favourite albums yet.", cards: cards)
 
                     sectionHeader("Random Albums", more: .random)
-                    randomAlbumsSection
+                    albumRow("Random Albums", viewModel?.randomAlbums, empty: "No random albums available.", cards: cards)
 
                     // Only when there's at least one playlist.
                     if !shownPlaylists.isEmpty {
                         sectionHeader("Playlists", action: onShowPlaylists)
-                        HomePlaylistsRow(api: api, playlists: shownPlaylists)
+                        HomePlaylistsRow(api: api, playlists: shownPlaylists, metrics: cards)
                     }
 
                     sectionHeader("Recently Played")
-                    recentlyPlayedSection
+                    albumRow("Recently Played", viewModel?.recentlyPlayed, empty: "No recently played music yet.", cards: cards)
 
                     sectionHeader("Recently Added")
-                    recentlyAddedSection
+                    albumRow("Recently Added", viewModel?.recentlyAdded, empty: "No recently added music.", cards: cards)
                 }
                 .padding(.bottom, 24)
             }
+            // The first −/+ press starts from Home's count while it shows.
+            .reportsGridColumns(metrics.columns, active: isWide)
             .navigationDestination(for: HomeMore.self) { more in
                 switch more {
                 case .favourites:
                     FavouritesTabView(api: api)
                         .navigationTitle("Favourites")
                         .appTheme()
+                        .gridZoomToolbar()
                 case .random:
                     RandomAlbumsView(api: api)
                         .appTheme()
@@ -86,7 +101,10 @@ public struct HomeView: View {
             .onChange(of: PlaylistEvents.shared.version) { _, _ in
                 viewModel?.refreshPlaylists()
             }
+            }
         }
+        // Mac: − and + at the right of the title bar; iPad: in Home's slim bar.
+        .gridZoomToolbar()
         .untitledTab()
     }
 
@@ -151,59 +169,24 @@ public struct HomeView: View {
     }
 
     @ViewBuilder
-    private var onThisDaySection: some View {
+    private func onThisDaySection(_ cards: LibraryView.GridMetrics?) -> some View {
         if let entries = viewModel?.onThisDay, !entries.isEmpty {
-            OnThisDayRow(api: api, entries: entries, downloadManager: downloadManager)
+            OnThisDayRow(api: api, entries: entries, downloadManager: downloadManager, metrics: cards)
         } else {
-            AlbumRowPlaceholder()
+            AlbumRowPlaceholder(metrics: cards)
         }
     }
 
-    @ViewBuilder
-    private var recentlyAddedSection: some View {
+    private func albumRow(_ title: String, _ albums: [JellyfinAlbum]?, empty: String,
+                          cards: LibraryView.GridMetrics?) -> some View {
         HomeSectionRow(
             api: api,
-            title: "Recently Added",
-            albums: viewModel?.recentlyAdded ?? [],
+            title: title,
+            albums: albums ?? [],
             isLoading: viewModel?.isLoading ?? false,
-            emptyMessage: "No recently added music.",
-            downloadManager: downloadManager
-        )
-    }
-
-    @ViewBuilder
-    private var recentlyPlayedSection: some View {
-        HomeSectionRow(
-            api: api,
-            title: "Recently Played",
-            albums: viewModel?.recentlyPlayed ?? [],
-            isLoading: viewModel?.isLoading ?? false,
-            emptyMessage: "No recently played music yet.",
-            downloadManager: downloadManager
-        )
-    }
-
-    @ViewBuilder
-    private var favoritesSection: some View {
-        HomeSectionRow(
-            api: api,
-            title: "Favourites",
-            albums: viewModel?.favorites ?? [],
-            isLoading: viewModel?.isLoading ?? false,
-            emptyMessage: "No favourite albums yet.",
-            downloadManager: downloadManager
-        )
-    }
-
-    @ViewBuilder
-    private var randomAlbumsSection: some View {
-        HomeSectionRow(
-            api: api,
-            title: "Random Albums",
-            albums: viewModel?.randomAlbums ?? [],
-            isLoading: viewModel?.isLoading ?? false,
-            emptyMessage: "No random albums available.",
-            downloadManager: downloadManager
+            emptyMessage: empty,
+            downloadManager: downloadManager,
+            metrics: cards
         )
     }
 }
@@ -220,12 +203,15 @@ struct HomeSectionRow: View {
     let isLoading: Bool
     let emptyMessage: String
     let downloadManager: DownloadManager?
+    /// Wide layouts: the cards' size (`LibraryView.homeRowMetrics`); nil
+    /// for today's fixed cards.
+    var metrics: LibraryView.GridMetrics? = nil
 
     var body: some View {
         Group {
             if albums.isEmpty {
                 if isLoading {
-                    AlbumRowPlaceholder()
+                    AlbumRowPlaceholder(metrics: metrics)
                 } else {
                     Text(emptyMessage)
                         .font(.plex(.footnote))
@@ -235,21 +221,23 @@ struct HomeSectionRow: View {
                 }
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 12.scaled) {
+                    HStack(alignment: .top, spacing: metrics?.spacing ?? 12.scaled) {
                         ForEach(albums) { album in
                             NavigationLink(value: album) {
                                 AlbumCardView(
                                     album: album,
-                                    artRequest: api?.imageURLRequest(for: album.id, size: 300),
+                                    artRequest: api?.imageURLRequest(for: album.id, size: metrics?.imageSize ?? 300),
                                     isDownloaded: album.allDiscs.allSatisfy {
                                         downloadManager?.isDownloaded($0.id) ?? DownloadPaths.exists(albumID: $0.id)
-                                    }
+                                    },
+                                    width: metrics?.cardWidth,
+                                    textScale: metrics?.textScale ?? 1
                                 )
                             }
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.horizontal)
+                    .homeRowPadding(wide: metrics != nil)
                     .padding(.bottom, 8.scaled)
                 }
             }
@@ -266,29 +254,34 @@ struct OnThisDayRow: View {
     let api: JellyfinAPI?
     let entries: [OnThisDayEntry]
     let downloadManager: DownloadManager?
+    /// As `HomeSectionRow`'s.
+    var metrics: LibraryView.GridMetrics? = nil
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 12.scaled) {
+            HStack(alignment: .top, spacing: metrics?.spacing ?? 12.scaled) {
                 ForEach(entries) { entry in
                     NavigationLink(value: entry.album) {
                         AlbumCardView(
                             album: entry.album,
-                            artRequest: api?.imageURLRequest(for: entry.album.id, size: 300),
+                            artRequest: api?.imageURLRequest(for: entry.album.id, size: metrics?.imageSize ?? 300),
                             isDownloaded: entry.album.allDiscs.allSatisfy {
                                 downloadManager?.isDownloaded($0.id) ?? DownloadPaths.exists(albumID: $0.id)
                             },
-                            badge: entry.label.isEmpty ? nil : entry.label
+                            badge: entry.label.isEmpty ? nil : entry.label,
+                            width: metrics?.cardWidth,
+                            textScale: metrics?.textScale ?? 1
                         )
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal)
+            .homeRowPadding(wide: metrics != nil)
             .padding(.bottom, 8.scaled)
         }
     }
 }
+
 // MARK: - Untitled tab
 
 extension View {

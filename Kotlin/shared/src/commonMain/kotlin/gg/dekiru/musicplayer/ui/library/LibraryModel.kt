@@ -33,11 +33,19 @@ enum class LibraryDisplayMode(val title: String) { GRID("Grid"), LIST("List") }
 data class GridLayout(val columns: Int, val spacing: Float)
 
 /**
+ * An album or artist grid as drawn (as on iOS): [columns] and the
+ * gap, each card [cardWidth] wide, its text, inner gaps, tick, corners and the row gap times
+ * [textScale], covers fetched [imageSize] pixels wide.
+ */
+data class CardGrid(val columns: Int, val spacing: Float, val cardWidth: Float, val textScale: Float, val imageSize: Int)
+
+/**
  * The Library (as `LibraryViewModel` on iOS, plus the Artists and
  * Favourites tabs' lists). Albums: the whole library fetched once, filtered
  * and sorted here (re-sorting doesn't ask the server again). Random shows
  * 24 at a time in an order fixed until Random is picked again. Offline:
- * the downloaded albums only. The tab, sort and view are remembered.
+ * the downloaded albums only. The tab, sort, view (albums' and artists'
+ * apart) and wide grids' cards per row are remembered.
  */
 class LibraryModel(
     private val api: JellyfinApi,
@@ -104,6 +112,19 @@ class LibraryModel(
             _display = value
             preferences.putString(VIEW_KEY, value.title)
         }
+
+    private var _artistsDisplay by mutableStateOf(saved(ARTISTS_VIEW_KEY, LibraryDisplayMode.entries, LibraryDisplayMode.GRID) { it.title })
+
+    /** Artists' own Grid / List (grid by default on every device), kept apart from the albums' view. */
+    var artistsDisplayMode: LibraryDisplayMode
+        get() = _artistsDisplay
+        set(value) {
+            _artistsDisplay = value
+            preferences.putString(ARTISTS_VIEW_KEY, value.title)
+        }
+
+    /** Cards per row on wide layouts, shared by every album and artist grid. */
+    val gridZoom = GridZoom(preferences)
 
     // Downloads (kept up to date by the screen)
 
@@ -298,6 +319,8 @@ class LibraryModel(
         const val TAB_KEY = "library.tab"
         const val SORT_KEY = "library.sort"
         const val VIEW_KEY = "library.viewMode"
+        const val ARTISTS_VIEW_KEY = "library.artistsViewMode"
+        const val GRID_COLUMNS_KEY = "library.gridColumns"
 
         /** Cover size in the grid: fixed, columns adapt around it. */
         const val GRID_ART = 120f
@@ -314,6 +337,95 @@ class LibraryModel(
             if (3 * GRID_ART + 2 * 2 <= width) return GridLayout(3, minOf(12f, (width - 3 * GRID_ART) / 2))
             return GridLayout(comfortable, 12f)
         }
+
+        /** Cards per row on wide layouts: the zoom buttons stop at these. */
+        const val MIN_GRID_COLUMNS = 3
+        const val MAX_GRID_COLUMNS = 10
+
+        /** The gap between cards on wide layouts (today's comfortable gap). */
+        const val WIDE_SPACING = 12f
+
+        /** Android is wide from this window width (dp) up, as iPad's regular width; the desktop always is. */
+        const val WIDE_WIDTH = 600f
+
+        /** Text grows with the card up to this; never smaller than a phone's. */
+        const val MAX_TEXT_SCALE = 3f
+
+        /** Cover sizes asked of the server, few so the image cache keeps hitting. */
+        val IMAGE_SIZES = listOf(300, 600, 1000, 1500)
+
+        /** Wide (zoom buttons, cards fill their columns): the desktop always, Android from [WIDE_WIDTH] dp. */
+        fun isWide(isAndroid: Boolean, windowWidth: Float): Boolean = !isAndroid || windowWidth >= WIDE_WIDTH
+
+        /**
+         * The grid for [width] (dp, inside the edges). Phones (not [wide]):
+         * [gridLayout] with fixed 120 dp covers, as before. Wide: [chosen]
+         * columns (null: today's automatic count, kept to 3…10), each card
+         * filling its column so a wider window means bigger cards; the text
+         * scales with the card (×1…×3) and the cover is fetched at the
+         * size it's drawn ([displayScale] pixels per dp). [scale] is the
+         * platform's UI scale (1 here; Mac's UIScale on iOS).
+         */
+        fun cardGrid(width: Float, wide: Boolean, chosen: Int? = null, displayScale: Float = 1f, scale: Float = 1f): CardGrid {
+            val auto = gridLayout(width)
+            if (!wide) return CardGrid(auto.columns, auto.spacing, GRID_ART, 1f, IMAGE_SIZES.first())
+            val columns = chosen?.coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS) ?: auto.columns.coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
+            val spacing = WIDE_SPACING * scale
+            val card = maxOf(0f, (width - spacing * (columns - 1)) / columns)
+            val textScale = (card / (GRID_ART * scale)).coerceIn(1f, MAX_TEXT_SCALE)
+            return CardGrid(columns, spacing, card, textScale, imageSize(card * displayScale))
+        }
+
+        /** Home's card (cover and text width) on phones, as iOS `AlbumCardView.width`. */
+        const val HOME_CARD = 140f
+
+        /** Home rows' padding before the first card on phones. */
+        const val HOME_EDGE = 10f
+
+        /** Each Home card's own margin on phones, on each side (its press highlight); wide: top and bottom only. */
+        const val HOME_CARD_PADDING = 6f
+
+        /** Home rows' space before the first card on wide layouts (as iOS `homeRowLeading`); [homeRow] counts on it. */
+        const val HOME_WIDE_LEADING = 16f
+
+        /** Of the next card, this much shows at the end of a wide Home row, so it plainly scrolls. */
+        const val HOME_PEEK = 1f / 3
+
+        /**
+         * Home's sideways rows for [width] (dp, the whole row,
+         * [HOME_WIDE_LEADING] included), as iOS `homeRowMetrics`. Phones
+         * (not [wide]): fixed 140 dp cards, as before. Wide: [chosen] cards
+         * (null: as many of today's 140 dp cards as fit whole, kept to
+         * 3…10) plus a third of the next, so each card is
+         * (width − 16 − n × gap) / (n + ⅓), cards [CardGrid.spacing] apart
+         * with no side margin. Text scales with the card (×1…×3 of 140 dp
+         * times [scale]) and the cover is fetched at the size it's drawn.
+         */
+        fun homeRow(width: Float, wide: Boolean, chosen: Int? = null, displayScale: Float = 1f, scale: Float = 1f): CardGrid {
+            val art = HOME_CARD * scale
+            val spacing = WIDE_SPACING * scale
+            val visible = width - HOME_WIDE_LEADING
+            val fits = maxOf(1, ((visible + spacing) / (art + spacing)).toInt())
+            if (!wide) return CardGrid(fits, spacing, art, 1f, IMAGE_SIZES.first())
+            val count = (chosen ?: fits).coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
+            val card = maxOf(1f, (visible - count * spacing) / (count + HOME_PEEK))
+            val textScale = (card / art).coerceIn(1f, MAX_TEXT_SCALE)
+            return CardGrid(count, spacing, card, textScale, imageSize(card * displayScale))
+        }
+
+        /** The smallest of [IMAGE_SIZES] at least [pixels] wide (the largest beyond that). */
+        fun imageSize(pixels: Float): Int = IMAGE_SIZES.firstOrNull { it >= pixels } ?: IMAGE_SIZES.last()
+
+        /**
+         * Columns after a zoom button, from what's shown now (so the first
+         * press never jumps): in (bigger cards) is one fewer, out one more,
+         * kept to 3…10.
+         */
+        fun zoomed(shown: Int, zoomIn: Boolean): Int =
+            (if (zoomIn) shown - 1 else shown + 1).coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
+
+        fun canZoomIn(shown: Int): Boolean = shown > MIN_GRID_COLUMNS
+        fun canZoomOut(shown: Int): Boolean = shown < MAX_GRID_COLUMNS
 
         /** Albums in the chosen order. Name and Artist follow the A–Z strip; Year is newest release first (full date, else Jan 1 of the year; none last); Date Added keeps the server's order. */
         fun sort(albums: List<JellyfinAlbum>, by: LibrarySort, random: Random = Random.Default): List<JellyfinAlbum> = when (by) {
