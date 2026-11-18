@@ -46,18 +46,18 @@ public enum WidgetDisplay: Equatable, Sendable {
             queueSeconds > 0 ? "Duration: \(WidgetDisplay.formatDuration(queueSeconds))" : nil
         }
 
-        /// "Finishes at: 13:42" in the device's 12- or 24-hour time, or nil.
+        /// "End time: 13:42" in the device's 12- or 24-hour time, or nil.
         public func finishText(locale: Locale = .autoupdatingCurrent,
                                timeZone: TimeZone = .autoupdatingCurrent) -> String? {
             guard let finishesAt else { return nil }
             var style = Date.FormatStyle(date: .omitted, time: .shortened)
             style.locale = locale
             style.timeZone = timeZone
-            return "Finishes at: \(finishesAt.formatted(style))"
+            return "End time: \(finishesAt.formatted(style))"
         }
 
         /// The medium widget's line under the album, as Now Playing's:
-        /// "Duration: 51m 06s   Finishes at: 13:42", just the duration once
+        /// "Duration: 51m 06s   End time: 13:42", just the duration once
         /// the finish isn't known, nil when the length isn't known.
         public func timesLine(separator: String = "   ", locale: Locale = .autoupdatingCurrent,
                               timeZone: TimeZone = .autoupdatingCurrent) -> String? {

@@ -231,7 +231,7 @@ public struct NowPlayingView: View {
                         HStack(spacing: 16.scaled) {
                             qualityText(for: track)
                             Text("Duration: \(Self.formatAlbumDuration(manager.albumLength))")
-                            Text("Finishes at: \(end.formatted(date: .omitted, time: .shortened))")
+                            Text("End time: \(end.formatted(date: .omitted, time: .shortened))")
                         }
                         .font(.plex(.caption))
                         .foregroundStyle(.white.opacity(0.5))
