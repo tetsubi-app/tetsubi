@@ -38,6 +38,18 @@ import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.models.JellyfinPlaylist
 import gg.dekiru.musicplayer.data.network.NetworkState
+import gg.dekiru.musicplayer.data.update.UpdateChecker
+import gg.dekiru.musicplayer.data.update.UpdateInfo
+import gg.dekiru.musicplayer.data.update.UpdateText
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalUriHandler
 import gg.dekiru.musicplayer.downloads.DownloadManager
 import gg.dekiru.musicplayer.downloads.DownloadedAlbum
 import gg.dekiru.musicplayer.ui.downloads.coverPath
@@ -93,6 +105,7 @@ fun HomeScreen(
     onOpenPlaylist: (JellyfinPlaylist) -> Unit = {},
     onMorePlaylists: () -> Unit = {},
     zoom: GridZoom? = null,
+    updates: UpdateChecker? = null,
 ) {
     // Loads on first appearance; reloads when the connection comes back.
     LaunchedEffect(model, network) { network.collect { model.networkChanged(it.online) } }
@@ -129,6 +142,8 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     if (!wide) item { TopRow(onSignOut, null) }
+                    // A newer release (Android and Linux), above everything else, offline too.
+                    updates?.banner?.let { update -> item(key = "update-${update.version}") { UpdateBanner(update, onSkip = updates::skip) } }
                     if (model.isOffline) {
                         item { StatusBanner(OFFLINE_MESSAGE, icon = "\u2298") }
                         section("Downloaded")
@@ -276,5 +291,48 @@ fun StatusBanner(message: String, actionTitle: String? = null, action: (() -> Un
         if (actionTitle != null && action != null) {
             OutlinedButton(onClick = action) { Text(actionTitle, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
         }
+    }
+}
+
+/**
+ * A newer release on GitHub (Android and Linux): in the style of [StatusBanner].
+ * Download opens the release page in the browser (nothing is downloaded by the
+ * app); What's new shows the release notes; Skip this version hides it for good.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun UpdateBanner(update: UpdateInfo, onSkip: () -> Unit) {
+    val uri = LocalUriHandler.current
+    var showNotes by rememberSaveable(update.version) { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .background(TetsubiColors.groupBackground, RoundedCornerShape(12.dp))
+            .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("\u2193", color = TetsubiColors.blue, fontSize = 15.sp)
+            Text(UpdateText.available(update.version), color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        }
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { runCatching { uri.openUri(update.pageUrl) } }) {
+                Text(UpdateText.DOWNLOAD, color = TetsubiColors.blue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            TextButton(onClick = { showNotes = true }) { Text(UpdateText.WHATS_NEW, color = TetsubiColors.blue, fontSize = 13.sp) }
+            TextButton(onClick = onSkip) { Text(UpdateText.SKIP, color = TetsubiColors.albumArtistText, fontSize = 13.sp) }
+        }
+    }
+    if (showNotes) {
+        AlertDialog(
+            onDismissRequest = { showNotes = false },
+            title = { Text(UpdateText.notesTitle(update.version)) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(update.notes.ifBlank { UpdateText.NO_NOTES })
+                }
+            },
+            confirmButton = { TextButton(onClick = { showNotes = false }) { Text(UpdateText.CLOSE) } },
+        )
     }
 }

@@ -20,7 +20,9 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.AppImage, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "tetsubi"
-            packageVersion = "0.1.0"
+            // "<versionName>.<versionCode>" from ../gradle.properties, e.g. 1.0.5 (jpackage wants three numbers).
+            packageVersion = providers.gradleProperty("tetsubi.versionName").get() + "." +
+                providers.gradleProperty("tetsubi.versionCode").get()
             description = "A music player for Jellyfin"
             vendor = "DEKIRU Ltd"
             linux {

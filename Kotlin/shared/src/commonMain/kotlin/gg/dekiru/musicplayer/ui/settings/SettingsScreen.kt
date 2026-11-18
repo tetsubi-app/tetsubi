@@ -65,6 +65,7 @@ import coil3.SingletonImageLoader
 import coil3.compose.LocalPlatformContext
 import gg.dekiru.musicplayer.AppSession
 import gg.dekiru.musicplayer.data.api.JellyfinApi
+import gg.dekiru.musicplayer.data.update.UpdateChecker
 import gg.dekiru.musicplayer.platformName
 import gg.dekiru.musicplayer.resources.Res
 import gg.dekiru.musicplayer.resources.disc
@@ -157,6 +158,8 @@ fun SettingsScreen(session: AppSession, api: JellyfinApi) {
 
             StorageSection()
 
+            if (session.updates.enabled) UpdatesSection(session.updates)
+
             AboutSection()
 
             Spacer(Modifier.height(32.dp))
@@ -213,6 +216,28 @@ private fun StorageSection() {
             verticalAlignment = Alignment.CenterVertically,
         ) { Text(SettingsText.CLEAR_IMAGE_CACHE, color = TetsubiColors.red, fontSize = 17.sp) }
     }
+}
+
+/** The GitHub update check (Android and Linux): the switch, Check now with what it found, and what is sent. */
+@Composable
+private fun UpdatesSection(updates: UpdateChecker) {
+    Header(SettingsText.UPDATES)
+    Group {
+        ToggleRow(SettingsText.CHECK_FOR_UPDATES, updates.checkForUpdates, updates::changeCheckForUpdates)
+        Divider()
+        Row(
+            Modifier.fillMaxWidth().clickable(enabled = !updates.checking, role = Role.Button) { updates.checkNow() }
+                .heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(SettingsText.CHECK_NOW, color = if (updates.checking) tertiary else TetsubiColors.blue, fontSize = 17.sp)
+                updates.status?.let { Text(it, color = secondary, fontSize = 12.sp) }
+            }
+            Text(SettingsText.version, color = secondary, fontSize = 17.sp)
+        }
+    }
+    Footer(SettingsText.UPDATES_FOOTER)
 }
 
 @Composable

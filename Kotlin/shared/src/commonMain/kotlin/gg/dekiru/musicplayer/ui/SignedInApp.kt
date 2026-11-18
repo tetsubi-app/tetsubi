@@ -136,6 +136,9 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
     val counter = remember { intArrayOf(0) }
     val downloads by session.downloads.collectAsState()
 
+    // Is there a newer release? Once per run, at most once a day (see UpdateChecker).
+    LaunchedEffect(Unit) { session.updates.checkAtLaunch() }
+
     // Offline, the playlist lists are the downloaded ones.
     LaunchedEffect(downloads, playlists) { downloads?.playlists?.all?.collect(playlists::downloadsChanged) }
 
@@ -235,6 +238,7 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                                     tab = Tab.LIBRARY
                                 },
                                 zoom = library.gridZoom,
+                                updates = session.updates,
                             )
                             Tab.LIBRARY -> LibraryScreen(
                                 api, library, onOpen = ::open, onOpenArtist = ::openArtist,

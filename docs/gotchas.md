@@ -32,7 +32,7 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **iPad builds must allow all four orientations.** The first upload was rejected until `UISupportedInterfaceOrientations~ipad` in `project.yml` included upside-down portrait; the iPhone list is unchanged.
 
-**The build number must rise before every upload, and the widget must carry the same version and build as the app.** `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` are set once at the top of `project.yml` and both the iOS app and `Tetsubi-Widget` read them; the Android `versionCode` and `versionName` are kept in step by hand.
+**The build number must rise before every upload, and the widget must carry the same version and build as the app.** `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` are set once at the top of `project.yml` and both the iOS app and `Tetsubi-Widget` read them; the Kotlin side's `tetsubi.versionName` and `tetsubi.versionCode` in `Kotlin/gradle.properties` are kept in step by hand.
 
 **An over-the-air install of a development build fails on an iPhone.** Development builds carry `get-task-allow`, so the phone reports "Unable to install" even with a valid profile that lists the device. Over-the-air installs need an Ad Hoc build signed with an Apple Distribution certificate; otherwise run from Xcode over USB, install with `devicectl`, or use TestFlight.
 
@@ -339,6 +339,18 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 **Cast and MediaRouter bring in an old Fragment.** Release lint flags it because permission requests need Fragment 1.3 or later; a newer Fragment is pinned in the version catalog.
 
 **The release signing key lives outside the repo.** `Kotlin/androidApp/build.gradle.kts` looks for `~/.android-keys/tetsubi-release.jks` (alias `tetsubi`) and reads the password from the macOS Keychain item "Tetsubi Android release key" (account `tetsubi-release`) or from `TETSUBI_KEYSTORE_PASSWORD`. Without them a release build is left unsigned. A lost key means no more updates, so back up both the file and the password.
+
+**The Kotlin version lives in one place: `Kotlin/gradle.properties`.** `tetsubi.versionName` and `tetsubi.versionCode` feed the Android `versionName`/`versionCode`, the desktop `packageVersion` (`<name>.<code>`, e.g. 1.0.5, because jpackage wants three numbers) and the shared code: `:shared:generateAppVersion` writes `AppVersion.NAME`/`BUILD` into `shared/build/generated`, which `AppInfo.VERSION` (the server header, user agents) and `AppInfo.BUILD` read. Before this, `AppInfo.VERSION` said 0.1.0 while the APK said 1.0. `AppVersionTest` checks the generated values against the file.
+
+### Update check and GitHub releases
+
+**Android and Linux look for a newer release on GitHub; iOS and the Mac do not, on purpose.** The Apple builds are updated through the App Store. When the signed-in app opens (once per run, at most once in 24 hours; any HTTP answer counts as a look, no answer does not) it asks `https://api.github.com/repos/tetsubi-app/tetsubi/releases/latest`, sending only `Accept: application/vnd.github+json` and `User-Agent: Tetsubi/<name>.<code>`. If `tag_name` is newer than the running `<name>.<code>`, Home shows a banner with Download (opens `html_url` in the browser, only if it is an http(s) address, else the releases page), What's new (the release notes) and Skip this version. Nothing is downloaded and failures are silent (logged). Settings ▸ Updates has the switch, Check now (ignores the switch and the 24 hours, and clears a skip) and its result. Code: `shared/.../data/update/UpdateCheck.kt`; settings keys `checkForUpdates`, `skippedUpdateVersion`, `lastUpdateCheck`.
+
+**Release tags are `v<versionName>.<versionCode>`, e.g. `v1.0.6`.** Tags are compared number by number after dropping the `v` and anything after the first character that is not a digit or a dot (`v1.1-beta` is 1.1); a missing part counts as 0. Raise `tetsubi.versionCode` before tagging, or people on the previous build are not told.
+
+**A Google Play build must switch the check off.** Play updates its own installs, and its policies restrict apps that update outside it. Set `UpdateCheck.ENABLED_IN_THIS_BUILD` to false for such a build: no request is made, no banner shows and the Settings rows are hidden.
+
+**A GitHub release needs the files attached.** Attach the signed release APK (`./gradlew :androidApp:assembleRelease`, see the signing item below) to the release; the banner only links to the release page. Linux packages (AppImage, deb, rpm) must be built on Linux, as jpackage only builds for the system it runs on.
 
 **A debug install must be removed before installing a release build.** The signatures differ, and uninstalling wipes the app's downloads.
 

@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import gg.dekiru.musicplayer.AppInfo
+import gg.dekiru.musicplayer.data.update.UpdateCheck
 import gg.dekiru.musicplayer.downloads.DownloadManager
 import gg.dekiru.musicplayer.downloads.DownloadSettings
 import gg.dekiru.musicplayer.playback.AudioFormat
@@ -41,6 +42,13 @@ object SettingsText {
     const val ART_CACHE = "Album art cache"
     const val CLEAR_IMAGE_CACHE = "Clear image cache"
 
+    // Android and Linux only (iOS and the Mac are updated through the App Store).
+    const val UPDATES = "Updates"
+    const val CHECK_FOR_UPDATES = "Check for updates when Tetsubi opens"
+    const val CHECK_NOW = "Check now"
+    const val UPDATES_FOOTER =
+        "Once a day Tetsubi asks GitHub whether a newer release exists. Nothing about you is sent and nothing is downloaded."
+
     const val ABOUT = "About"
     const val APP_NAME = "Tetsubi"
     const val TAGLINE = "A music player for Jellyfin"
@@ -67,8 +75,8 @@ object SettingsText {
         DEKIRU Sans — based on IBM Plex Sans by IBM Corp., SIL Open Font License 1.1.
     """.trimIndent()
 
-    /** The version row: "0.1.0". */
-    val version: String get() = AppInfo.VERSION
+    /** The version row: the version name and build number, "1.0 (5)". */
+    val version: String get() = UpdateCheck.displayVersion(AppInfo.VERSION, AppInfo.BUILD)
 
     /** Where the login is kept, under the server address (iOS names the keychain). */
     fun savedIn(platformName: String): String =

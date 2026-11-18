@@ -5,6 +5,13 @@ object AppInfo {
     /** `Client="…"` in the server header; the Jellyfin dashboard shows it. */
     const val CLIENT_NAME = "Tetsubi"
 
-    /** Kept in step with `versionName` in androidApp and the desktop package. */
-    const val VERSION = "0.1.0"
+    /**
+     * The version name, e.g. "1.0" (`versionName` on Android). It comes from
+     * `tetsubi.versionName` in Kotlin/gradle.properties through the generated
+     * [AppVersion], so Android, Linux and the shared code always agree.
+     */
+    const val VERSION = AppVersion.NAME
+
+    /** The build number, e.g. 5 (`versionCode` on Android; `tetsubi.versionCode`). */
+    const val BUILD = AppVersion.BUILD
 }

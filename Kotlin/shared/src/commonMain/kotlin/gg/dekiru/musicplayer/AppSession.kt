@@ -6,6 +6,7 @@ import gg.dekiru.musicplayer.data.artist.ArtistInfoClient
 import gg.dekiru.musicplayer.data.auth.Authenticator
 import gg.dekiru.musicplayer.data.settings.AppEnvironment
 import gg.dekiru.musicplayer.data.settings.FavoritesStore
+import gg.dekiru.musicplayer.data.update.UpdateChecker
 import gg.dekiru.musicplayer.downloads.DownloadManager
 import gg.dekiru.musicplayer.downloads.DownloadSettings
 import gg.dekiru.musicplayer.playback.PlaybackSettings
@@ -55,6 +56,9 @@ class AppSession(val authenticator: Authenticator, val environment: AppEnvironme
     val downloads: StateFlow<DownloadManager?> = _downloads.asStateFlow()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    /** The GitHub update check (Android and Linux): looked at once when the signed-in app opens. */
+    val updates = UpdateChecker(environment.preferences, scope, ::nowMillis)
 
     init {
         // The saved equaliser, from the first track.

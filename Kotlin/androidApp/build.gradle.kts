@@ -26,10 +26,10 @@ android {
         applicationId = "gg.dekiru.musicplayer"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        // In step with iOS: the same version and build number (project.yml MARKETING_VERSION /
-        // CURRENT_PROJECT_VERSION). Raise both before each release.
-        versionCode = 5
-        versionName = "1.0"
+        // From ../gradle.properties (tetsubi.versionName / tetsubi.versionCode), kept in
+        // step with iOS (project.yml MARKETING_VERSION / CURRENT_PROJECT_VERSION).
+        versionCode = providers.gradleProperty("tetsubi.versionCode").get().toInt()
+        versionName = providers.gradleProperty("tetsubi.versionName").get()
     }
 
     signingConfigs {
