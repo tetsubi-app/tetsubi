@@ -26,7 +26,11 @@ compose.desktop {
         // Skia (skiko) loads its native library through JNI; newer JDKs warn
         // about that, and later ones will refuse, unless it's allowed.
         jvmArgs += "--enable-native-access=ALL-UNNAMED"
+        // No shrinking for now: the ProGuard-shrunk 1.0.6 packages couldn't
+        // reach the server (Ktor/serialization code removed or renamed) and
+        // can't be tested on a Mac. Turn it back on only after a run on Linux.
         buildTypes.release.proguard {
+            isEnabled.set(false)
             configurationFiles.from(project.file("proguard-rules.pro"))
         }
         nativeDistributions {
