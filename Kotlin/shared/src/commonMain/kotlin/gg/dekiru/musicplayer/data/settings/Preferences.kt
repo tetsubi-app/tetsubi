@@ -38,6 +38,11 @@ class AppEnvironment(
     val network: NetworkMonitor = NetworkMonitor(),
     /** Keeps downloads going (Android: WorkManager). Null: they run in the app's scope. */
     val downloadRunner: DownloadRunner? = null,
+    /**
+     * The app's own data (the saved queue): Android `filesDir`, Linux
+     * `$XDG_DATA_HOME/gg.dekiru.musicplayer`. Defaults to the downloads folder's parent.
+     */
+    val dataDir: String = downloadsDir.trimEnd('/').substringBeforeLast('/'),
 ) {
     /** Whether the network is metered (mobile data, hotspot). */
     val isExpensiveNetwork: () -> Boolean = { network.isMetered }

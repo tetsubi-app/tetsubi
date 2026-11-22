@@ -27,4 +27,5 @@ fun desktopEnvironment(playerEngine: PlayerEngine = MpvEngine()) = AppEnvironmen
     downloadsDir = File(xdg("XDG_DATA_HOME", ".local/share"), "Downloads").absolutePath,
     preferences = DesktopPreferences(File(xdg("XDG_CONFIG_HOME", ".config"), "settings.properties")),
     playerEngine = playerEngine,
+    dataDir = xdg("XDG_DATA_HOME", ".local/share").absolutePath,
 )

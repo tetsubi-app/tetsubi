@@ -34,7 +34,8 @@ public enum PlaylistPlayRefusal: Error, Equatable, Sendable {
 
 // MARK: - RepeatMode
 
-public enum RepeatMode: Sendable, Equatable, CaseIterable {
+/// Raw values ("off", "all", "one") are the saved queue's format.
+public enum RepeatMode: String, Codable, Sendable, Equatable, CaseIterable {
     /// Default — the queue stops at the end.
     case off
     /// Loop the entire queue.
@@ -69,6 +70,10 @@ public struct PlaybackTrack: Sendable, Identifiable, Hashable {
     public var sampleRate: Int? = nil
     /// The source file's bit depth, e.g. 16; nil for lossy files or if unknown.
     public var bitDepth: Int? = nil
+    /// The source file's audio codec, lower-case ("alac", "aac", "flac"…),
+    /// from the server's media source; nil if unknown. Not the stream's:
+    /// on mobile data the stream is AAC whatever this says.
+    public var codec: String? = nil
     /// Server ID of `artist`, when known; Now Playing's artist line opens
     /// that artist's albums (`ArtistLink`). Nil for a download played from
     /// the Downloads tab, which saved only the name.
@@ -134,6 +139,7 @@ public struct PlaybackTrack: Sendable, Identifiable, Hashable {
                                               bitrate: track.mediaSource?.bitrate)
         self.sampleRate = track.mediaSource?.sampleRate
         self.bitDepth = track.mediaSource?.bitDepth
+        self.codec = track.mediaSource?.codecs?.lowercased()
     }
 
     /// "44.1kHz/16-bit", "48kHz" (no bit depth, as for lossy files), or

@@ -21,4 +21,5 @@ fun androidEnvironment(context: Context, engine: PlayerEngine) = AppEnvironment(
     playerEngine = engine,
     network = AndroidNetworkMonitor(context),
     downloadRunner = WorkManagerDownloadRunner(context),
+    dataDir = context.filesDir.absolutePath,
 )
