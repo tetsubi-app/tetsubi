@@ -25,6 +25,7 @@ object SettingsText {
     const val DEFAULT_FORMAT = "Default format"
     const val ORIGINAL_FORMAT = "Original (as served)"
     const val DOWNLOAD_OVER_MOBILE = "Download over mobile data"
+    const val DOWNLOADS_FOOTER = "When off, downloads wait for Wi‑Fi."
     const val DISK_USAGE = "Disk usage"
 
     const val PLAYBACK = "Playback"
@@ -74,6 +75,9 @@ object SettingsText {
 
         DEKIRU Sans — based on IBM Plex Sans by IBM Corp., SIL Open Font License 1.1.
     """.trimIndent()
+
+    /** "Download over mobile data" and its footer: Android only (the desktop has no metered networks). */
+    fun showsMobileData(platformName: String): Boolean = platformName == "Android"
 
     /** The version row: the version name and build number, "1.0 (5)". */
     val version: String get() = UpdateCheck.displayVersion(AppInfo.VERSION, AppInfo.BUILD)

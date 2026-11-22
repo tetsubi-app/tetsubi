@@ -61,7 +61,7 @@ fun ArtistScreen(
     val isDownloaded = rememberIsDownloaded(downloads)
     val downloaded by downloads.collectDownloaded()
     val downloadedAlbums = remember(downloaded) { HomeModel.downloadedRow(downloaded) }
-    val albums = model.shown(!online, downloadedAlbums, isDownloaded)
+    val albums = ArtistModel.ordered(model.shown(!online, downloadedAlbums, isDownloaded))
     val grid = rememberLazyGridState()
 
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
@@ -81,6 +81,7 @@ fun ArtistScreen(
                     api, albums, grid, onOpen, isDownloaded,
                     localArt = { album -> if (isDownloaded(album)) downloads.coverPath(album) else null },
                     zoom = zoom,
+                    showsYear = true,
                 )
                 online && !model.loaded -> LibrarySpinner()
                 else -> LibraryNote("No albums found.")

@@ -83,7 +83,14 @@ public struct LibraryView: View {
         // Pinned above the scrolling content.
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
-                LibraryTabBar(selection: Binding(get: { tab }, set: { viewModel?.tab = $0 })) {
+                LibraryTabBar(
+                    selection: Binding(get: { tab }, set: { viewModel?.tab = $0 }),
+                    // Albums tapped while it's showing: the next sort (as the menu's Sort).
+                    reselect: { tab in
+                        guard tab == .albums, let model = viewModel else { return nil }
+                        return model.cycleSort().rawValue
+                    }
+                ) {
                     // iPad: − and + before the options menu (the Mac has
                     // them in the title bar instead).
                     if GridZoom.buttonsInTabRow(wide: isWide), showsZoomableGrid {
@@ -144,9 +151,16 @@ public struct LibraryView: View {
                 emptyState(model: model)
             } else {
                 indexed(model: model) { proxy in
-                    switch model.displayMode {
-                    case .grid: gridView(model: model, proxy: proxy)
-                    case .list: listView(model: model, proxy: proxy)
+                    Group {
+                        switch model.displayMode {
+                        case .grid: gridView(model: model, proxy: proxy)
+                        case .list: listView(model: model, proxy: proxy)
+                        }
+                    }
+                    // A new sort starts at the top. Otherwise the list keeps the
+                    // album that was at the top in view, wherever it now sorts.
+                    .onChange(of: model.sortOption) { _, _ in
+                        if let first = model.sortedAlbums.first?.id { proxy.scrollTo(first, anchor: .top) }
                     }
                 }
                 .modifier(PullToShuffle(model: model))

@@ -46,6 +46,13 @@ class SettingsModelTest {
     }
 
     @Test
+    fun mobileDataDownloadsRowIsAndroidOnlyWithTheIosFooter() {
+        assertTrue(SettingsText.showsMobileData("Android"))
+        assertFalse(SettingsText.showsMobileData("Linux"))
+        assertEquals("When off, downloads wait for Wi\u2011Fi.", SettingsText.DOWNLOADS_FOOTER)
+    }
+
+    @Test
     fun qualityMenuOffersTheOriginalFirst() {
         assertEquals(
             listOf("Original (as served)", "High (320 kbps AAC)", "Normal (256 kbps AAC)", "Data saver (128 kbps AAC)"),
@@ -59,7 +66,7 @@ class SettingsModelTest {
         assertFalse(m.maniacMode)
         assertEquals(StreamingQuality.KBPS256, m.cellularQuality)
         assertFalse(m.normalizeVolume)
-        assertTrue(m.downloadOverCellular)
+        assertFalse(m.downloadOverCellular)
         assertNull(m.defaultFormat)
     }
 
@@ -69,6 +76,7 @@ class SettingsModelTest {
         m.changeManiacMode(true)
         m.changeCellularQuality(StreamingQuality.KBPS128)
         m.changeNormalizeVolume(true)
+        m.changeDownloadOverCellular(true)
         m.changeDownloadOverCellular(false)
         m.changeDefaultFormat(AudioFormat.FLAC)
         assertEquals("true", prefs.getString("playback.maniacMode"))
@@ -119,7 +127,11 @@ class SettingsModelTest {
     @Test
     fun downloadOverMobileDataGoesThroughTheManager() = runTest {
         val manager = DownloadManager(FakeServer { json("") }.api(), tempDir(), downloadSettings, backgroundScope)
-        model(downloads = manager).changeDownloadOverCellular(false)
+        val m = model(downloads = manager)
+        m.changeDownloadOverCellular(true)
+        assertTrue(manager.settings.allowCellular)
+        assertEquals("true", prefs.getString("downloads.allowCellular"))
+        m.changeDownloadOverCellular(false)
         assertFalse(manager.settings.allowCellular)
         assertEquals("false", prefs.getString("downloads.allowCellular"))
     }

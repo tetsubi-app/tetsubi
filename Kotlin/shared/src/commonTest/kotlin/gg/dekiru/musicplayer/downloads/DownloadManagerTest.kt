@@ -284,8 +284,23 @@ class DownloadManagerTest {
     }
 
     @Test
+    fun mobileDataIsOffByDefaultSoAMeteredDownloadWaits() = runTest {
+        val s = setup()
+        s.metered = true
+        s.manager.download(album("al1"))
+        settle()
+        assertEquals(DownloadStatus.WAITING_FOR_WIFI, s.manager.state("al1")?.status)
+        assertTrue(s.audio().isEmpty())
+        s.metered = false
+        s.manager.networkChanged()
+        settle()
+        assertTrue(s.manager.isDownloaded("al1"))
+    }
+
+    @Test
     fun mobileDataOnDownloadsOnAMeteredNetwork() = runTest {
         val s = setup()
+        DownloadSettings(s.prefs).allowCellular = true
         s.metered = true
         s.manager.download(album("al1"))
         settle()
@@ -310,6 +325,7 @@ class DownloadManagerTest {
     @Test
     fun turningMobileDataOffStopsUntilWifiAndRestartsTheRunner() = runTest {
         val s = setup()
+        DownloadSettings(s.prefs).allowCellular = true
         val gate = s.gate("al1-t1")
         s.metered = true
         s.manager.download(album("al1"))

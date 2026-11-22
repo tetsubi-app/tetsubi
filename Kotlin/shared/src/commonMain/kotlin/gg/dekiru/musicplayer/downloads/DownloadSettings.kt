@@ -11,9 +11,12 @@ class DownloadSettings(private val preferences: Preferences) {
         get() = DownloadManifest.formatFromName(preferences.getString("downloads.defaultFormat"))
         set(value) = preferences.putString("downloads.defaultFormat", DownloadManifest.formatName(value))
 
-    /** "Download over mobile data". Default on; when off, downloads wait for Wi‑Fi. */
+    /**
+     * "Download over mobile data". Default off (a saved choice is kept); when
+     * off, downloads wait for Wi‑Fi (an unmetered network) and start by themselves.
+     */
     var allowCellular: Boolean
-        get() = preferences.getString("downloads.allowCellular")?.toBooleanStrictOrNull() ?: true
+        get() = preferences.getString("downloads.allowCellular")?.toBooleanStrictOrNull() ?: false
         set(value) = preferences.putString("downloads.allowCellular", value.toString())
 
     /**

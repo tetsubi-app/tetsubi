@@ -100,7 +100,7 @@ public struct SettingsView: View {
 
             // Format picker when a download manager is available.
             if let mgr = downloadManager {
-                Section("Downloads") {
+                Section {
                     HStack {
                         Text("Default format")
                         Spacer()
@@ -123,6 +123,8 @@ public struct SettingsView: View {
                     Toggle("Download over mobile data", isOn: $downloadOverCellular)
                         .onChange(of: downloadOverCellular) { _, on in
                             PlaybackSettings.downloadOverCellular = on
+                            // Running and waiting songs follow the new choice now.
+                            mgr.mobileDataSettingChanged()
                         }
                     HStack {
                         Text("Disk usage")
@@ -130,6 +132,10 @@ public struct SettingsView: View {
                         Text(DownloadPaths.formatBytes(mgr.totalDiskUsage))
                             .font(.plex(.subheadline).monospacedDigit())
                     }
+                } header: {
+                    Text("Downloads")
+                } footer: {
+                    Text("When off, downloads wait for Wi\u{2011}Fi.")
                 }
                 .listRowBackground(Self.groupBackground)
             }

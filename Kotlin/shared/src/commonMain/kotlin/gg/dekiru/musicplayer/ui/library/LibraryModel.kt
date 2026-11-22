@@ -23,7 +23,12 @@ import kotlin.random.Random
 /** The three Library sections (as `LibraryTab` on iOS). */
 enum class LibraryTab(val title: String) { ALBUMS("Albums"), ARTISTS("Artists"), FAVOURITES("Favourites"), PLAYLISTS("Playlists") }
 
-enum class LibrarySort(val title: String) { NAME("Name"), ARTIST("Artist"), YEAR("Year"), DATE_ADDED("Date Added"), RANDOM("Random") }
+enum class LibrarySort(val title: String) {
+    NAME("Name"), ARTIST("Artist"), YEAR("Year"), DATE_ADDED("Date Added"), RANDOM("Random");
+
+    /** The sort after this one, in the menu's order, round again after Random: tapping the selected Albums tab steps through them. */
+    val next: LibrarySort get() = entries[(ordinal + 1) % entries.size]
+}
 
 enum class LibraryFilter(val title: String) { ALL("All"), DOWNLOADED("Downloaded") }
 
@@ -161,6 +166,12 @@ class LibraryModel(
         if (sortOption != LibrarySort.RANDOM || after.id != sortedAlbums.lastOrNull()?.id || sortedAlbums.size >= randomFull.size) return
         randomLimit += RANDOM_PAGE
         sortedAlbums = randomFull.take(randomLimit)
+    }
+
+    /** Steps to the next sort (the selected Albums tab tapped again): remembered as the menu's choice, and Random deals a new shuffle. */
+    fun cycleSort(): LibrarySort {
+        sortOption = sortOption.next
+        return sortOption
     }
 
     /** New shuffles dealt by hand (the screen goes back to the top on each). */
@@ -489,5 +500,22 @@ class ArtistModel(val artist: JellyfinArtist, private val api: JellyfinApi, priv
         !offline -> albums
         albums.isNotEmpty() -> albums.filter(isDownloaded)
         else -> downloaded.filter { it.artistName.equals(artist.name, ignoreCase = true) }
+    }
+
+    companion object {
+        /**
+         * The page's order: newest release first (the Library's Year sort:
+         * full release date, else Jan 1 of the year, unknown last); the
+         * same date goes by title.
+         */
+        fun ordered(albums: List<JellyfinAlbum>): List<JellyfinAlbum> =
+            LibraryModel.sort(LibraryModel.sort(albums, LibrarySort.NAME), LibrarySort.YEAR)
+
+        /**
+         * The year under each title in place of the artist, as "More by"
+         * shows it: the production year, else the release date's year;
+         * null when unknown.
+         */
+        fun yearText(album: JellyfinAlbum): String? = (album.productionYear ?: album.releaseDate?.year)?.toString()
     }
 }

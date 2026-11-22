@@ -73,9 +73,11 @@ public enum PlaybackSettings {
         set { defaults.set(newValue, forKey: normalizeKey) }
     }
 
-    /// Whether album downloads may use cellular data. Default on.
+    /// "Download over mobile data": whether downloads may use cellular data
+    /// or a hotspot. Default off (a saved choice is kept); when off they wait
+    /// for Wi‑Fi (`DownloadNetworkRule`).
     public static var downloadOverCellular: Bool {
-        get { defaults.object(forKey: cellularDownloadsKey) as? Bool ?? true }
+        get { defaults.object(forKey: cellularDownloadsKey) as? Bool ?? false }
         set { defaults.set(newValue, forKey: cellularDownloadsKey) }
     }
 

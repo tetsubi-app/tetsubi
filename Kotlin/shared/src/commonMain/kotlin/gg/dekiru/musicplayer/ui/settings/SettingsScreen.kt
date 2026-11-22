@@ -132,11 +132,15 @@ fun SettingsScreen(session: AppSession, api: JellyfinApi) {
                         options = SettingsText.formatOptions.map { it.second },
                         onSelect = { model.changeDefaultFormat(SettingsText.formatOptions[it].first) },
                     )
-                    Divider()
-                    ToggleRow(SettingsText.DOWNLOAD_OVER_MOBILE, model.downloadOverCellular, model::changeDownloadOverCellular)
+                    // Android only: the desktop has no metered networks, so downloads always run there.
+                    if (SettingsText.showsMobileData(platformName)) {
+                        Divider()
+                        ToggleRow(SettingsText.DOWNLOAD_OVER_MOBILE, model.downloadOverCellular, model::changeDownloadOverCellular)
+                    }
                     Divider()
                     ValueRow(SettingsText.DISK_USAGE, DownloadsText.formatBytes(downloaded.sumOf { it.sizeBytes }))
                 }
+                if (SettingsText.showsMobileData(platformName)) Footer(SettingsText.DOWNLOADS_FOOTER)
             }
 
             Header(SettingsText.PLAYBACK)

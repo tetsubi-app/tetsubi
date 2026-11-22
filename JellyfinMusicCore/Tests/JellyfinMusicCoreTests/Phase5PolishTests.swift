@@ -21,10 +21,12 @@ final class PlaybackSettingsTests: XCTestCase {
         }
         XCTAssertEqual(PlaybackSettings.cellularQuality, .kbps256)
         XCTAssertFalse(PlaybackSettings.normalizeVolume)
-        XCTAssertTrue(PlaybackSettings.downloadOverCellular)
+        XCTAssertFalse(PlaybackSettings.downloadOverCellular, "mobile data is off until switched on")
         PlaybackSettings.cellularQuality = .kbps128
-        PlaybackSettings.downloadOverCellular = false
+        PlaybackSettings.downloadOverCellular = true
         XCTAssertEqual(PlaybackSettings.cellularQuality, .kbps128)
+        XCTAssertTrue(PlaybackSettings.downloadOverCellular)
+        PlaybackSettings.downloadOverCellular = false
         XCTAssertFalse(PlaybackSettings.downloadOverCellular)
         XCTAssertNil(StreamingQuality.original.bitrate)
         // "Streaming over mobile data" drives the cap; Original (as served) has none.

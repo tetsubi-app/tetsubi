@@ -530,4 +530,24 @@ class LibraryModelTest {
         assertEquals(listOf("b1", "n1"), model.shown(offline = false, downloads) { false }.map { it.id })
         assertEquals(listOf("n1"), model.shown(offline = true, downloads) { it.id == "n1" }.map { it.id })
     }
+
+    @Test
+    fun anArtistsPageShowsTheYearWhereOtherGridsShowTheArtist() {
+        assertEquals("1994", ArtistModel.yearText(album("A", year = 1994, date = "1993-12-31T00:00:00.0000000Z")))
+        assertEquals("1987", ArtistModel.yearText(album("A", date = "1987-03-09T00:00:00.0000000Z")))
+        assertNull(ArtistModel.yearText(album("A")), "nothing when the year is unknown")
+    }
+
+    @Test
+    fun anArtistsPageIsNewestReleaseFirstThenByTitle() {
+        val albums = listOf(
+            album("Unknown", id = "u"),
+            album("Old", year = 1980, id = "old"),
+            album("Bravo", year = 2001, id = "b"),
+            album("Late 2001", date = "2001-11-05T00:00:00.0000000Z", id = "full"),
+            album("Alpha", year = 2001, id = "a"),
+            album("New", year = 2020, id = "new"),
+        )
+        assertEquals(listOf("new", "full", "a", "b", "old", "u"), ArtistModel.ordered(albums).map { it.id })
+    }
 }

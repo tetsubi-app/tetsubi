@@ -60,6 +60,7 @@ import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
  * [zoom]): the shared cards-per-row, each cover filling its column, the
  * text growing with it. [onAppear] runs as each album comes into view.
  * [footer]: full width after the last row, scrolling with the grid.
+ * [showsYear]: each album's year in place of the artist (an artist's page).
  */
 @Composable
 fun LibraryAlbumGrid(
@@ -75,10 +76,11 @@ fun LibraryAlbumGrid(
     footer: (@Composable () -> Unit)? = null,
     fixedColumns: Int? = null,
     widensWithoutZoom: Boolean = false,
+    showsYear: Boolean = false,
 ) {
     CardGridView(albums, { it.id }, state, trailingEdge, zoom, footer, fixedColumns, widensWithoutZoom) { album, grid ->
         LaunchedEffect(album.id, albums.size) { onAppear(album) }
-        GridCell(api, album, grid, isDownloaded(album), localArt(album)) { onOpen(album) }
+        GridCell(api, album, grid, isDownloaded(album), localArt(album), showsYear = showsYear) { onOpen(album) }
     }
 }
 
@@ -158,11 +160,13 @@ private fun <T> CardGridView(
 /**
  * One album card; on wide layouts the cover fills the column and the text,
  * gaps, tick and corners scale with it. [titleLines]: 1 on the Random page.
+ * [showsYear]: the release year under the title instead of the artist
+ * (nothing when unknown), on an artist's page.
  */
 @Composable
 internal fun GridCell(
     api: JellyfinApi, album: JellyfinAlbum, grid: CardGrid, downloaded: Boolean, localArt: String?,
-    titleLines: Int = 2, onClick: () -> Unit,
+    titleLines: Int = 2, showsYear: Boolean = false, onClick: () -> Unit,
 ) {
     val t = grid.textScale
     Column(
@@ -178,10 +182,19 @@ internal fun GridCell(
             album.displayName, color = Color.White, fontSize = (12 * t).sp, fontWeight = FontWeight.Bold, maxLines = titleLines,
             overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
         )
-        Text(
-            album.artistName, color = TetsubiColors.albumArtistText, fontSize = (11 * t).sp, maxLines = 1,
-            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-        )
+        if (showsYear) {
+            ArtistModel.yearText(album)?.let {
+                Text(
+                    it, color = TetsubiColors.albumYearText, fontSize = (11 * t).sp, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        } else {
+            Text(
+                album.artistName, color = TetsubiColors.albumArtistText, fontSize = (11 * t).sp, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 

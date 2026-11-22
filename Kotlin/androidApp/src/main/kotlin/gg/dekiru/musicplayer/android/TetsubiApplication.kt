@@ -32,7 +32,8 @@ class TetsubiApplication : Application(), SingletonImageLoader.Factory, Download
     val session: AppSession by lazy {
         AppSession(
             Authenticator(AndroidSecretStore(this), androidDeviceName(this)),
-            androidEnvironment(this, engine),
+            // The player tries a dropped converted stream again as soon as the network is back.
+            androidEnvironment(this, engine).also { engine.watchNetwork(it.network.state) },
         )
     }
 

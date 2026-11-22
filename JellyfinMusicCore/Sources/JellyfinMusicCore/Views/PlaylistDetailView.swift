@@ -670,8 +670,11 @@ public struct PlaylistDetailView: View {
             let paused = state.status == .paused
             let failed = state.status == .failed
             PulsingProgressBar(progress: state.progress, isPaused: paused || failed)
+            let waiting = DownloadNetworkRule.isWaitingForWiFi(
+                status: state.status, allowCellular: PlaybackSettings.downloadOverCellular,
+                isExpensive: NetworkMonitor.shared.isExpensive)
             HStack {
-                Text(failed ? "Download failed" : paused ? "Paused" : "Downloading")
+                Text(DownloadNetworkRule.statusText(failed: failed, paused: paused, waitingForWiFi: waiting))
                     .font(.plex(.caption))
                 Text("\(state.completedTracks)/\(state.expectedTrackCount) songs")
                     .font(.plex(.caption2))

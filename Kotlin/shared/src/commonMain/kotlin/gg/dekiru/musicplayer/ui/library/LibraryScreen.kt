@@ -1,5 +1,7 @@
 package gg.dekiru.musicplayer.ui.library
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +51,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -141,6 +151,17 @@ fun LibraryScreen(
     val playlistGrid = rememberLazyGridState()
     val playlistList = rememberLazyListState()
 
+    // A new Albums sort (menu or tapping "Albums") starts at the top. Otherwise the grid keeps
+    // the album that was at the top in view, wherever it now sorts, and seems to jump.
+    var lastSort by remember { mutableStateOf(model.sortOption) }
+    LaunchedEffect(model.sortOption) {
+        if (model.sortOption != lastSort) {
+            lastSort = model.sortOption
+            albumGrid.scrollToItem(0)
+            albumList.scrollToItem(0)
+        }
+    }
+
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
         val wide = isWideLayout()
         // The zoom buttons only while the tab shows a grid they change.
@@ -150,7 +171,12 @@ fun LibraryScreen(
             LibraryTab.FAVOURITES -> model.favouritesOptions.displayMode == LibraryDisplayMode.GRID
             LibraryTab.PLAYLISTS -> false
         }
-        LibraryTabBar(model.tab, onSelect = { model.tab = it }, accessoryWidth = if (wide) wideAccessoryWidth else accessoryWidth) {
+        LibraryTabBar(
+            model.tab, onSelect = { model.tab = it },
+            // Albums tapped while it's showing: the next sort (as the menu's Sort).
+            onReselect = { if (it == LibraryTab.ALBUMS) model.cycleSort().title else null },
+            accessoryWidth = if (wide) wideAccessoryWidth else accessoryWidth,
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (wide && zoomable) GridZoomButtons(model.gridZoom)
                 when (model.tab) {
@@ -186,11 +212,30 @@ fun LibraryScreen(
     }
 }
 
-/** The large tab row (as iOS `LibraryTabBar`); [accessory] sits at the right, its room ([accessoryWidth]) always kept. */
+/** A word shown under a tab for a moment after its label was tapped again (Albums: the new sort). */
+private data class TabFlash(val tab: LibraryTab, val text: String, val id: Int, val visible: Boolean = true)
+
+/**
+ * The large tab row (as iOS `LibraryTabBar`); [accessory] sits at the right, its room ([accessoryWidth]) always kept.
+ * [onReselect]: the selected tab's label tapped again; returns a word to show under it for a moment, or null.
+ */
 @Composable
-private fun LibraryTabBar(selected: LibraryTab, onSelect: (LibraryTab) -> Unit, accessoryWidth: Dp, accessory: @Composable () -> Unit) {
+private fun LibraryTabBar(
+    selected: LibraryTab,
+    onSelect: (LibraryTab) -> Unit,
+    onReselect: (LibraryTab) -> String?,
+    accessoryWidth: Dp,
+    accessory: @Composable () -> Unit,
+) {
+    var flash by remember { mutableStateOf<TabFlash?>(null) }
+    LaunchedEffect(flash?.id) {
+        val shown = flash?.takeIf { it.visible } ?: return@LaunchedEffect
+        delay(1_500)
+        flash = shown.copy(visible = false)
+    }
+    // Above the content below, which the word hangs over.
     Row(
-        Modifier.fillMaxWidth().background(TetsubiColors.background.copy(alpha = 0.6f)).padding(start = 16.dp, end = 16.dp, top = 8.dp),
+        Modifier.zIndex(1f).fillMaxWidth().background(TetsubiColors.background.copy(alpha = 0.6f)).padding(start = 16.dp, end = 16.dp, top = 8.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
         BoxWithConstraints(Modifier.weight(1f)) {
@@ -199,25 +244,66 @@ private fun LibraryTabBar(selected: LibraryTab, onSelect: (LibraryTab) -> Unit, 
             Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.SpaceAround) {
                 for (tab in LibraryTab.entries) {
                     val isSelected = tab == selected
-                    Column(
-                        Modifier.width(IntrinsicSize.Max).selectable(isSelected, role = Role.Tab) { onSelect(tab) },
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            tab.title, color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
-                            fontSize = labelSize, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                        Box(
-                            Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(50))
-                                .background(if (isSelected) TetsubiColors.pink else Color.Transparent),
-                        )
+                    Box(contentAlignment = Alignment.BottomCenter) {
+                        Column(
+                            Modifier.width(IntrinsicSize.Max).selectable(isSelected, role = Role.Tab) {
+                                if (!isSelected) {
+                                    onSelect(tab)
+                                } else {
+                                    onReselect(tab)?.let { flash = TabFlash(tab, it, (flash?.id ?: 0) + 1) }
+                                }
+                            },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                tab.title, color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
+                                fontSize = labelSize, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                            Box(
+                                Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(50))
+                                    .background(if (isSelected) TetsubiColors.pink else Color.Transparent),
+                            )
+                        }
+                        TabCaption(flash?.takeIf { it.tab == tab })
                     }
                 }
             }
         }
         // Lined up with the labels, above the underline.
         Box(Modifier.width(accessoryWidth).padding(bottom = 9.dp), contentAlignment = Alignment.CenterEnd) { accessory() }
+    }
+}
+
+/**
+ * [flash]'s word just below its tab, over the content, fading in and out.
+ * It takes no room, so the labels don't move. TalkBack says "Sorted by …"
+ * (a live region whose description changes).
+ */
+@Composable
+private fun TabCaption(flash: TabFlash?) {
+    val visible = flash?.visible == true
+    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(if (visible) 150 else 400), label = "caption")
+    val announced = flash?.text?.takeIf { visible }
+    Box(
+        Modifier
+            .clearAndSetSemantics {
+                liveRegion = LiveRegionMode.Polite
+                if (announced != null) contentDescription = "Sorted by $announced"
+            }
+            .layout { measurable, _ ->
+                val caption = measurable.measure(Constraints())
+                layout(0, 0) { caption.place(-caption.width / 2, 6.dp.roundToPx()) }
+            }
+            .graphicsLayer { this.alpha = alpha },
+    ) {
+        if (flash != null && alpha > 0f) {
+            Text(
+                flash.text, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(TetsubiColors.background.copy(alpha = 0.85f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
     }
 }
 

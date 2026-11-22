@@ -134,16 +134,35 @@ class DownloadBasicsTest {
         val prefs = InMemoryPreferences()
         val settings = DownloadSettings(prefs)
         assertNull(settings.defaultFormat)
-        assertTrue(settings.allowCellular)
+        assertFalse(settings.allowCellular, "mobile data is off until switched on")
         settings.defaultFormat = AudioFormat.ALAC
         assertEquals("alac", prefs.getString("downloads.defaultFormat"))
         assertEquals(AudioFormat.ALAC, settings.defaultFormat)
         settings.defaultFormat = null
         assertEquals("original", prefs.getString("downloads.defaultFormat"))
         assertNull(settings.defaultFormat)
+        settings.allowCellular = true
+        assertEquals("true", prefs.getString("downloads.allowCellular"))
+        assertTrue(settings.allowCellular)
         settings.allowCellular = false
         assertEquals("false", prefs.getString("downloads.allowCellular"))
         assertFalse(settings.allowCellular)
+    }
+
+    @Test
+    fun aSavedMobileDataChoiceIsKept() {
+        val on = InMemoryPreferences().apply { putString("downloads.allowCellular", "true") }
+        assertTrue(DownloadSettings(on).allowCellular)
+        val off = InMemoryPreferences().apply { putString("downloads.allowCellular", "false") }
+        assertFalse(DownloadSettings(off).allowCellular)
+    }
+
+    @Test
+    fun downloadsRunOnWifiOrWithMobileDataOn() {
+        assertTrue(DownloadManager.mayDownload(allowCellular = false, metered = false))
+        assertFalse(DownloadManager.mayDownload(allowCellular = false, metered = true))
+        assertTrue(DownloadManager.mayDownload(allowCellular = true, metered = true))
+        assertTrue(DownloadManager.mayDownload(allowCellular = true, metered = false))
     }
 
     // Local search (as iOS testLocalSearchMatchesAllWordsIgnoringAccents)

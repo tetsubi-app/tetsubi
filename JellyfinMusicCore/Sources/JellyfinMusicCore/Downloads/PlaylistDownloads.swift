@@ -719,6 +719,24 @@ public final class PlaylistDownloads {
         ownSeconds[playlistID] = nil
     }
 
+    /// "Download over mobile data" was switched: songs whose request
+    /// carries the other choice are started again with the new one (see
+    /// `DownloadManager.mobileDataSettingChanged`).
+    func mobileDataSettingChanged(allow: Bool) {
+        for (id, running) in tasks {
+            for (trackID, task) in running {
+                guard let download = task as? URLSessionDownloadTask,
+                      let original = download.originalRequest, let url = original.url,
+                      DownloadNetworkRule.needsRestart(requestAllowsExpensive: original.allowsExpensiveNetworkAccess,
+                                                       allowCellular: allow),
+                      let info = DownloadTaskInfo(taskDescription: download.taskDescription) else { continue }
+                // `start` reads the new setting; the old task's cancel notice is ignored.
+                tasks[id]?[trackID] = backend.start(info, url)
+                download.cancel()
+            }
+        }
+    }
+
     private func cancelTasks(_ id: String) {
         for task in (tasks[id] ?? [:]).values { task.cancel() }
         tasks[id] = nil

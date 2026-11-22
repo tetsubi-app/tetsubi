@@ -126,6 +126,9 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate {
             config.isDiscretionary = false
         } else {
             config = .default
+            // As a background session does: a request that may not use this
+            // network (mobile data off) waits instead of failing.
+            config.waitsForConnectivity = true
         }
         // Idle timeout only; transcoded streams can take a while to start.
         config.timeoutIntervalForRequest = 300
@@ -198,6 +201,14 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate {
         let cancelledByUser = (error as? URLError)?.code == .cancelled
             && nsError.userInfo[NSURLErrorBackgroundTaskCancelledReasonKey] == nil
 
+        // On mobile data with mobile data off: made again to wait for Wi‑Fi,
+        // not counted as a retry (it would fail the album after five).
+        if !cancelledByUser, DownloadNetworkRule.isWaitingForAllowedNetwork(error),
+           let retry = makeRetryTask(after: task, error: nsError, info: info, in: session, counts: false) {
+            DispatchQueue.main.async { [weak self] in self?.onRetry?(retry.info, retry.task) }
+            return
+        }
+
         if !cancelledByUser,
            (info.retries ?? 0) < Self.maxRetries,
            let retry = makeRetryTask(after: task, error: nsError, info: info, in: session) {
@@ -221,7 +232,8 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate {
         after task: URLSessionTask,
         error: NSError,
         info: DownloadTaskInfo,
-        in session: URLSession
+        in session: URLSession,
+        counts: Bool = true
     ) -> (info: DownloadTaskInfo, task: URLSessionDownloadTask)? {
         let newTask: URLSessionDownloadTask
         if let resumeData = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
@@ -234,7 +246,7 @@ final class DownloadSessionDelegate: NSObject, URLSessionDownloadDelegate {
             return nil
         }
         var next = info
-        next.retries = (info.retries ?? 0) + 1
+        if counts { next.retries = (info.retries ?? 0) + 1 }
         newTask.taskDescription = next.encoded
         newTask.resume()
         return (next, newTask)
@@ -668,6 +680,29 @@ public final class DownloadManager {
             }
         }
         print("[DownloadManager] Resumed album \(albumID) (\(trackIDs.count) track(s)).")
+    }
+
+    /// "Download over mobile data" was switched. A song's request carries
+    /// the choice it was made with, so songs still on their way with the
+    /// other one are made again: switched on, the ones waiting for Wi‑Fi
+    /// start on mobile data; switched off, none carries on over mobile data.
+    /// A song part-way through starts again from its beginning.
+    public func mobileDataSettingChanged() {
+        let allow = PlaybackSettings.downloadOverCellular
+        for (trackID, task) in tasks {
+            guard let original = task.originalRequest,
+                  DownloadNetworkRule.needsRestart(requestAllowsExpensive: original.allowsExpensiveNetworkAccess,
+                                                   allowCellular: allow) else { continue }
+            var request = original
+            request.allowsExpensiveNetworkAccess = allow
+            let replacement = session.downloadTask(with: request)
+            replacement.taskDescription = task.taskDescription
+            // Tracked first, so the old task's cancel notice is ignored.
+            tasks[trackID] = replacement
+            replacement.resume()
+            task.cancel()
+        }
+        playlists.mobileDataSettingChanged(allow: allow)
     }
 
     /// Whether an album download is paused.

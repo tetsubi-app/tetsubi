@@ -548,7 +548,7 @@ class DownloadManager(
         runner.start(this)
     }
 
-    internal fun networkAllowed(): Boolean = settings.allowCellular || !isExpensiveNetwork()
+    internal fun networkAllowed(): Boolean = mayDownload(settings.allowCellular, isExpensiveNetwork())
 
     internal fun markWaiting() {
         for (id in queue) modify(id) { it.copy(status = DownloadStatus.WAITING_FOR_WIFI) }
@@ -638,6 +638,15 @@ class DownloadManager(
     }
 
     companion object {
+        /**
+         * Whether downloads may run now: always with "Download over mobile
+         * data" on, otherwise only on an unmetered network (Wi‑Fi). The
+         * desktop never reports a metered network, so it always may.
+         * When not, queued albums wait ("Waiting for Wi‑Fi") and carry on
+         * by themselves once [networkChanged] reports an unmetered network.
+         */
+        fun mayDownload(allowCellular: Boolean, metered: Boolean): Boolean = allowCellular || !metered
+
         /**
          * Runs [FlacRepair] on every finished `.flac` file under `dir` (album
          * and playlist folders). Returns how many were repaired.

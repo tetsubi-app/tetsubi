@@ -10,6 +10,13 @@ public enum LibrarySortOption: String, CaseIterable, Identifiable, Sendable {
     case dateAdded = "Date Added"
     case random   = "Random"
     public var id: String { rawValue }
+
+    /// The sort after this one, in the menu's order, round again after
+    /// Random: tapping the selected Albums tab steps through them.
+    public var next: LibrarySortOption {
+        let all = Self.allCases
+        return all[(all.firstIndex(of: self)! + 1) % all.count]
+    }
 }
 
 public enum LibraryFilter: String, CaseIterable, Identifiable, Sendable {
@@ -60,6 +67,14 @@ public final class LibraryViewModel {
             applyFilterAndSort()
         }
     }
+    /// Steps to the next sort (the selected Albums tab tapped again):
+    /// remembered as the menu's choice, and Random deals a new shuffle.
+    @discardableResult
+    public func cycleSort() -> LibrarySortOption {
+        sortOption = sortOption.next
+        return sortOption
+    }
+
     public var filter: LibraryFilter = .all {
         didSet {
             defaults.set(filter.rawValue, forKey: Self.filterKey)

@@ -405,8 +405,9 @@ public struct DownloadsView: View {
 
             PulsingProgressBar(progress: state.progress,
                                isPaused: state.status == .paused || state.status == .failed)
-            let waitingForWiFi = state.status == .downloading
-                && NetworkMonitor.shared.isExpensive && !PlaybackSettings.downloadOverCellular
+            let waitingForWiFi = DownloadNetworkRule.isWaitingForWiFi(
+                status: state.status, allowCellular: PlaybackSettings.downloadOverCellular,
+                isExpensive: NetworkMonitor.shared.isExpensive)
             Text(state.status == .failed ? "Failed · \(Int(state.progress * 100))%"
                  : state.status == .paused ? "Paused · \(Int(state.progress * 100))%"
                  : waitingForWiFi ? "Waiting for Wi‑Fi · \(Int(state.progress * 100))%"
@@ -479,8 +480,9 @@ public struct DownloadsView: View {
 
             PulsingProgressBar(progress: state.progress,
                                isPaused: state.status == .paused || state.status == .failed)
-            let waitingForWiFi = state.status == .downloading
-                && NetworkMonitor.shared.isExpensive && !PlaybackSettings.downloadOverCellular
+            let waitingForWiFi = DownloadNetworkRule.isWaitingForWiFi(
+                status: state.status, allowCellular: PlaybackSettings.downloadOverCellular,
+                isExpensive: NetworkMonitor.shared.isExpensive)
             Text(state.status == .failed ? "Failed · \(Int(state.progress * 100))%"
                  : state.status == .paused ? "Paused · \(Int(state.progress * 100))%"
                  : waitingForWiFi ? "Waiting for Wi‑Fi · \(Int(state.progress * 100))%"

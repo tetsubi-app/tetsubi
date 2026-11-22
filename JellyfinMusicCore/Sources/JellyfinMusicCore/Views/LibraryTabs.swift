@@ -16,12 +16,41 @@ let libraryTabAccessoryWidth: CGFloat = 36
 
 struct LibraryTabBar<Accessory: View>: View {
     @Binding var selection: LibraryTab
+    /// The selected tab's label tapped again: returns a word to show under
+    /// it for a moment (Albums: the new sort's name), or nil for nothing.
+    var reselect: (LibraryTab) -> String? = { _ in nil }
     /// Right-hand controls (the options menus; on iPad the grid's − and +
     /// too). Their width is always kept, so the tab labels don't move when
     /// some are hidden; they sit at the right end.
     @ViewBuilder var accessory: () -> Accessory
 
     @Environment(\.isWideLayout) private var isWide
+
+    /// What `reselect` last said, shown under its tab and faded out.
+    @State private var flash: Flash?
+    @State private var flashCount = 0
+
+    private struct Flash: Equatable {
+        let tab: LibraryTab
+        let text: String
+        let id: Int
+    }
+
+    private func tapped(_ tab: LibraryTab) {
+        guard selection == tab, let text = reselect(tab) else {
+            selection = tab
+            return
+        }
+        flashCount += 1
+        let id = flashCount
+        withAnimation(.easeOut(duration: 0.15)) { flash = Flash(tab: tab, text: text, id: id) }
+        AccessibilityNotification.Announcement("Sorted by \(text)").post()
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard flash?.id == id else { return }
+            withAnimation(.easeOut(duration: 0.4)) { flash = nil }
+        }
+    }
 
     /// One button's width, or three where the − and + buttons join it.
     private var accessoryWidth: CGFloat {
@@ -51,7 +80,7 @@ struct LibraryTabBar<Accessory: View>: View {
         HStack(spacing: 0) {
             ForEach(LibraryTab.allCases) { tab in
                 Button {
-                    selection = tab
+                    tapped(tab)
                 } label: {
                     VStack(spacing: 6.scaled) {
                         Text(tab.rawValue)
@@ -71,6 +100,23 @@ struct LibraryTabBar<Accessory: View>: View {
                     }
                     .frame(maxWidth: .infinity)
                     .contentShape(Rectangle())
+                    // Just below the row, over the content: the labels don't move.
+                    .overlay(alignment: .bottom) {
+                        if let flash, flash.tab == tab {
+                            Text(flash.text)
+                                .font(.plex(.caption).weight(.semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, 8.scaled)
+                                .padding(.vertical, 2.scaled)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .alignmentGuide(.bottom) { $0[.top] - 6.scaled }
+                                .transition(.opacity)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    }
                 }
                 .buttonStyle(.plain)
             }
@@ -90,6 +136,9 @@ struct AlbumGridCard: View {
     let metrics: LibraryView.GridMetrics
     let isDownloaded: Bool
     var titleLines: Int = 2
+    /// The release year under the title instead of the artist (an
+    /// artist's page, where the name would only repeat).
+    var showsYear: Bool = false
 
     var body: some View {
         let t = metrics.textScale
@@ -108,13 +157,44 @@ struct AlbumGridCard: View {
                 .lineLimit(titleLines)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, alignment: .center)
-            Text(album.artistName)
-                .font(.plex(.caption2, times: t))
-                .foregroundStyle(Color.albumArtistText)
-                .lineLimit(1)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, alignment: .center)
+            if showsYear {
+                if let year = ArtistPage.yearText(album) {
+                    Text(year)
+                        .font(.plex(.caption2, times: t))
+                        .foregroundStyle(Color.albumYearText)
+                        .lineLimit(1)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            } else {
+                Text(album.artistName)
+                    .font(.plex(.caption2, times: t))
+                    .foregroundStyle(Color.albumArtistText)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
+    }
+}
+
+/// An artist's album page: newest first, with each album's year where
+/// other grids show the artist.
+enum ArtistPage {
+    /// Newest release first (Library's Year sort: full release date, else
+    /// Jan 1 of the year, unknown last); the same date goes by title.
+    static func ordered(_ albums: [JellyfinAlbum]) -> [JellyfinAlbum] {
+        LibraryViewModel.sort(LibraryViewModel.sort(albums, by: .name), by: .year)
+    }
+
+    /// The year under an album's title, as "More by" shows it: the
+    /// production year, else the year of the release date; nil if unknown.
+    static func yearText(_ album: JellyfinAlbum) -> String? {
+        if let year = album.productionYear { return String(year) }
+        guard let date = album.releaseDate else { return nil }
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        return String(utc.component(.year, from: date))
     }
 }
 
@@ -142,6 +222,8 @@ struct AlbumGridView: View {
     /// Padding on the right too; off while the A–Z strip leaves that room
     /// (as Library ▸ Albums, so three covers still fit on a phone).
     var trailingEdge: Bool = true
+    /// Each album's year in place of the artist (an artist's page).
+    var showsYear: Bool = false
 
     @Environment(\.isWideLayout) private var isWideLayout
     @Environment(\.displayScale) private var displayScale
@@ -173,7 +255,7 @@ struct AlbumGridView: View {
                             AlbumGridCard(album: album,
                                           request: api?.imageURLRequest(for: album.id, size: metrics.imageSize),
                                           metrics: metrics, isDownloaded: isDownloaded(album),
-                                          titleLines: titleLines)
+                                          titleLines: titleLines, showsYear: showsYear)
                         }
                         .buttonStyle(.plain)
                         .id(album.id)   // for the A–Z strip's jumps
@@ -539,7 +621,8 @@ struct ArtistGridCard: View {
     }
 }
 
-/// One artist's albums; offline, their downloaded albums only.
+/// One artist's albums, newest first, each with its year; offline, their
+/// downloaded albums only.
 struct ArtistAlbumsView: View {
     let api: JellyfinAPI?
     let artist: JellyfinArtist
@@ -561,7 +644,7 @@ struct ArtistAlbumsView: View {
             } else if albums.isEmpty {
                 Text("No albums found.").font(.plex(.footnote)).foregroundStyle(.secondary).padding()
             } else {
-                AlbumGridView(api: api, albums: albums, zooms: true)
+                AlbumGridView(api: api, albums: ArtistPage.ordered(albums), zooms: true, showsYear: true)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
