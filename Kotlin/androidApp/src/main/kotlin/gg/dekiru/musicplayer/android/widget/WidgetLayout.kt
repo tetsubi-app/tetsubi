@@ -14,6 +14,11 @@ package gg.dekiru.musicplayer.android.widget
  * album line, then the times, then the artist are left out rather than
  * cut off. Sizes are dp, text sp (`fontScale` is the device's text size
  * setting, so lines are measured as they'll be drawn).
+ *
+ * On a phone ([twoLineTimes]) the medium's text is smaller and the times
+ * take two lines, "Duration: …" then "Ends: …": on one line the finish
+ * time was cut off beside the art. Tablets keep one line and the bigger
+ * text.
  */
 data class WidgetLayout(
     /** The medium layout (else small). */
@@ -33,9 +38,24 @@ data class WidgetLayout(
     val showArtist: Boolean,
     val showAlbum: Boolean,
     val showTimes: Boolean,
-    /** Small only: "Duration: …" on its own line above the finish time (medium has both on one line). */
+    /**
+     * "Duration: …" on its own line above the finish time ([showTimes]):
+     * the medium on a phone. Never on the small size (just the finish time),
+     * nor a tablet's medium (both on one line).
+     */
     val showDuration: Boolean = false,
+    /** Medium on a phone: the duration and the finish time on two lines, with smaller text. */
+    val twoLineTimes: Boolean = false,
 ) {
+    /**
+     * Which of the medium's lines of times (from `WidgetContent.Track.mediumTimeLines`)
+     * fit: on a phone, short of room, the finish time is kept over the duration.
+     */
+    fun mediumTimes(lines: List<String>): List<String> {
+        val room = (if (showTimes) 1 else 0) + (if (twoLineTimes && showDuration) 1 else 0)
+        return lines.takeLast(room)
+    }
+
     companion object {
         /** The art's corners, as a share of its side. */
         const val ART_CORNER = 0.1f
@@ -47,8 +67,21 @@ data class WidgetLayout(
         const val MEDIUM_MIN_WIDTH = 200f
         const val WIDE = 1.5f
 
-        fun of(width: Float, height: Float, fontScale: Float = 1f, skips: Boolean = true): WidgetLayout =
-            if (width >= MEDIUM_MIN_WIDTH && width >= height * WIDE) medium(width, height, fontScale, skips) else small(width, height, fontScale)
+        /** A widget this wide (dp), or any widget on a device whose smallest width is this or more, keeps the tablet's medium layout. */
+        const val TABLET_WIDTH = 600f
+
+        /**
+         * Whether a medium widget `widgetWidth` dp wide, on a device whose
+         * smallest width is `smallestScreenWidth` dp, gets the phone's two
+         * lines of times and smaller text. The Pad's 4×2 is only 512 dp wide,
+         * so the device's size decides as well as the widget's.
+         */
+        fun isPhone(widgetWidth: Float, smallestScreenWidth: Int): Boolean =
+            widgetWidth < TABLET_WIDTH && smallestScreenWidth < TABLET_WIDTH
+
+        /** `phone`: see [isPhone]; it only changes the medium layout. */
+        fun of(width: Float, height: Float, fontScale: Float = 1f, skips: Boolean = true, phone: Boolean = false): WidgetLayout =
+            if (width >= MEDIUM_MIN_WIDTH && width >= height * WIDE) medium(width, height, fontScale, skips, phone) else small(width, height, fontScale)
 
         /**
          * Small: the art fills the widget (as iOS), play/pause at the top right,
@@ -88,15 +121,16 @@ data class WidgetLayout(
             )
         }
 
-        private fun medium(width: Float, height: Float, fontScale: Float, skips: Boolean): WidgetLayout {
+        private fun medium(width: Float, height: Float, fontScale: Float, skips: Boolean, phone: Boolean): WidgetLayout {
             val padding = (height * 0.1f).coerceIn(12f, 26f)
             val innerH = height - 2 * padding
             val gap = (height * 0.09f).coerceIn(12f, 24f)
             val art = minOf(innerH, width * 0.42f).coerceAtLeast(24f)
             val column = width - 2 * padding - art - gap
-            val title = (height * 0.1f).coerceIn(14f, 26f)
-            val secondary = (title * 0.84f).coerceIn(12f, 22f)
-            val times = (title * 0.7f).coerceIn(11f, 18f)
+            // A phone: five lines beside the art, so smaller (at most 16, 14 and 12 sp).
+            val title = if (phone) (height * 0.09f).coerceIn(13f, 16f) else (height * 0.1f).coerceIn(14f, 26f)
+            val secondary = if (phone) (title * 0.875f).coerceIn(12f, 14f) else (title * 0.84f).coerceIn(12f, 22f)
+            val times = if (phone) (title * 0.75f).coerceIn(11f, 12f) else (title * 0.7f).coerceIn(11f, 18f)
             var play = (height * 0.25f).coerceIn(36f, 76f)
             var skip = play * 0.9f
             var buttonGap = play * 0.35f
@@ -108,7 +142,8 @@ data class WidgetLayout(
                 skip *= scale
                 buttonGap *= scale
             }
-            // The lines that fit above the buttons, leaving out the album, then the times, then the artist.
+            // The lines that fit above the buttons, leaving out the album, then (a phone) the
+            // duration's own line, then the times, then the artist.
             val room = innerH - play - 4f
             val titleH = title * fontScale * LINE
             val secondaryH = secondary * fontScale * LINE
@@ -116,8 +151,11 @@ data class WidgetLayout(
             var showArtist = true
             var showAlbum = true
             var showTimes = true
-            fun used() = titleH + (if (showArtist) secondaryH else 0f) + (if (showAlbum) secondaryH else 0f) + (if (showTimes) timesH else 0f)
+            var showDuration = phone
+            fun used() = titleH + (if (showArtist) secondaryH else 0f) + (if (showAlbum) secondaryH else 0f) +
+                (if (showTimes) timesH else 0f) + (if (showDuration) timesH else 0f)
             if (used() > room) showAlbum = false
+            if (used() > room) showDuration = false
             if (used() > room) showTimes = false
             if (used() > room) showArtist = false
             return WidgetLayout(
@@ -125,6 +163,7 @@ data class WidgetLayout(
                 play = play, skip = skip, buttonGap = buttonGap,
                 titleSp = title, secondarySp = secondary, timesSp = times,
                 showArtist = showArtist, showAlbum = showAlbum, showTimes = showTimes,
+                showDuration = showDuration, twoLineTimes = phone,
             )
         }
     }

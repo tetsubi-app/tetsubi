@@ -10,7 +10,8 @@ import TetsubiWidgetData
 /// play/pause at the top right. Medium: art on the
 /// left; title, artist, album, duration and finish time; previous,
 /// play/pause and next (no skips in Maniac
-/// Mode). Dark, like the app's mini player, tinted with the art's key
+/// Mode); on an iPhone the type is smaller and the duration and finish time
+/// take a line each (`WidgetDisplay.MediumStyle`). Dark, like the app's mini player, tinted with the art's key
 /// colour (Tetsubi's blue when the art has none). No progress bar.
 struct NowPlayingWidgetView: View {
     let entry: NowPlayingEntry
@@ -28,7 +29,8 @@ struct NowPlayingWidgetView: View {
         switch entry.display {
         case .track(let track):
             if family == .systemMedium {
-                MediumTrackView(track: track, art: entry.art)
+                MediumTrackView(track: track, art: entry.art,
+                                style: .of(isPhone: UIDevice.current.userInterfaceIdiom == .phone))
             } else {
                 SmallTrackView(track: track, art: entry.art)
             }
@@ -135,39 +137,46 @@ private struct FullArtView: View {
 private struct MediumTrackView: View {
     let track: WidgetDisplay.Track
     let art: UIImage?
+    let style: WidgetDisplay.MediumStyle
 
     var body: some View {
         HStack(spacing: 14) {
             ArtView(art: art, cornerRadius: 12)
                 .aspectRatio(1, contentMode: .fit)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: style.lineSpacing) {
+                VStack(alignment: .leading, spacing: style.lineSpacing) {
                     Text(track.title)
-                        .font(.tetsubi(size: 16, weight: .semibold))
+                        .font(.tetsubi(size: style.titleSize, weight: .semibold))
                     if !track.artist.isEmpty {
                         Text(track.artist)
-                            .font(.tetsubi(size: 13))
+                            .font(.tetsubi(size: style.secondarySize))
                             .foregroundStyle(Color.white.opacity(0.85))
                     }
                     if !track.album.isEmpty {
                         Text(track.album)
-                            .font(.tetsubi(size: 13))
+                            .font(.tetsubi(size: style.secondarySize))
                             .foregroundStyle(Color.white.opacity(0.65))
                     }
                 }
                 .lineLimit(1)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(track.accessibilityLabel)
-                QueueTimesLine(track: track)
-                Spacer(minLength: 6)
+                if style.twoLineTimes {
+                    QueueTimesLines(track: track, size: style.timesSize)
+                } else {
+                    QueueTimesLine(track: track)
+                }
+                Spacer(minLength: style.minGap)
                 HStack(spacing: 22) {
                     if track.showsSkips {
-                        SkipButton(intent: PreviousTrackIntent(), symbol: "backward.fill", label: "Previous")
+                        SkipButton(intent: PreviousTrackIntent(), symbol: "backward.fill", label: "Previous",
+                                   height: style.playDiameter)
                     }
-                    PlayPauseButton(track: track, diameter: 44)
+                    PlayPauseButton(track: track, diameter: style.playDiameter)
                     if track.showsSkips {
-                        SkipButton(intent: NextTrackIntent(), symbol: "forward.fill", label: "Next")
+                        SkipButton(intent: NextTrackIntent(), symbol: "forward.fill", label: "Next",
+                                   height: style.playDiameter)
                     }
                 }
             }
@@ -176,7 +185,7 @@ private struct MediumTrackView: View {
     }
 }
 
-/// Now Playing's line under the album: "Duration: 51m 06s   Ends: 13:42"
+/// An iPad's line under the album, as Now Playing's: "Duration: 51m 06s   Ends: 13:42"
 /// (just the duration once the finish time isn't known; nothing when the
 /// length isn't known).
 private struct QueueTimesLine: View {
@@ -184,7 +193,7 @@ private struct QueueTimesLine: View {
 
     var body: some View {
         if let line = track.timesLine() {
-            // A narrow widget (iPhone SE) with a long album and a 12-hour
+            // A narrow widget with a long album and a 12-hour
             // clock: smaller type, then just the finish time.
             ViewThatFits(in: .horizontal) {
                 times(line, size: 11)
@@ -203,6 +212,29 @@ private struct QueueTimesLine: View {
             .font(.tetsubi(size: size))
             .foregroundStyle(Color.white.opacity(0.55))
             .lineLimit(1)
+    }
+}
+
+/// An iPhone's times under the album: "Duration: 51m 06s", then "Ends: 13:42"
+/// on a line of its own (on one line the finish time was cut off). Just the
+/// duration once the finish time isn't known; nothing when the length isn't known.
+private struct QueueTimesLines: View {
+    let track: WidgetDisplay.Track
+    let size: Double
+
+    var body: some View {
+        let lines = track.timesLines(twoLines: true)
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(lines, id: \.self) { line in
+                    Text(line)
+                        .font(.tetsubi(size: size))
+                        .foregroundStyle(Color.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.top, 1)
+        }
     }
 }
 
@@ -284,12 +316,13 @@ private struct SkipButton<Intent: AppIntent>: View {
     let intent: Intent
     let symbol: String
     let label: String
+    var height: Double = 44
 
     var body: some View {
         Button(intent: intent) {
             Image(systemName: symbol)
                 .font(.system(size: 20, weight: .semibold))
-                .frame(width: 32, height: 44)
+                .frame(width: 32, height: height)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

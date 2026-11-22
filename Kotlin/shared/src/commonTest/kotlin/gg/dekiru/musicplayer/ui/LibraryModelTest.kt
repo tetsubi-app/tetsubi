@@ -192,6 +192,23 @@ class LibraryModelTest {
     }
 
     @Test
+    fun fixedColumnsFillTheirColumnsOnAnyWidth() {
+        val phone3 = LibraryModel.fixedCardGrid(393f - 8, 3, displayScale = 3f)
+        assertEquals(3, phone3.columns)
+        assertEquals(12f, phone3.spacing)
+        assertEquals((385f - 24) / 3, phone3.cardWidth, 0.01f)
+        val phone5 = LibraryModel.fixedCardGrid(360f - 8, 5)
+        assertEquals(5, phone5.columns)
+        assertEquals((352f - 48) / 5, phone5.cardWidth, 0.01f)
+        assertEquals(1f, phone5.textScale) // the phone's text, cut short
+        val desktop5 = LibraryModel.fixedCardGrid(1000f, 5)
+        assertEquals((1000f - 48) / 5 / 120f, desktop5.textScale, 0.001f)
+        assertEquals(3f, LibraryModel.fixedCardGrid(3000f, 3).textScale) // at most ×3
+        // Wide with a chosen count is the same layout.
+        assertEquals(LibraryModel.cardGrid(1000f, wide = true, chosen = 4), LibraryModel.fixedCardGrid(1000f, 4))
+    }
+
+    @Test
     fun textScalesWithTheCardBetweenOneAndThree() {
         assertEquals(1f, LibraryModel.cardGrid(600f, wide = true, chosen = 10).textScale) // tiny cards: never smaller
         assertEquals(2f, LibraryModel.cardGrid(3 * 240f + 2 * 12, wide = true, chosen = 3).textScale, 0.001f)

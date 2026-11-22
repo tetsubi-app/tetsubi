@@ -123,11 +123,6 @@ public struct LibraryView: View {
             viewModel?.downloadsChanged()
             viewModel?.networkChanged(online: NetworkMonitor.shared.isConnected)
         }
-        .navigationDestination(for: JellyfinArtist.self) { artist in
-            ArtistAlbumsView(api: api, artist: artist)
-                .appTheme()
-                .gridZoomToolbar()
-        }
     }
 
     private func showRequestedTab() {
@@ -256,6 +251,18 @@ public struct LibraryView: View {
         }
         let range = gridColumnRange
         let columns = min(max(chosen ?? auto.columns, range.lowerBound), range.upperBound)
+        return gridMetrics(width: width, scale: scale, columns: columns, displayScale: displayScale)
+    }
+
+    /// Exactly `columns` across on any device (Recently Played: as many as
+    /// the export's size), each cover filling its column with the wide
+    /// layout's 12pt gap. The text grows with the card as on wide layouts,
+    /// but never below a phone's (narrow cards keep the phone's text and
+    /// cut it short), at most 3×.
+    nonisolated static func gridMetrics(width: CGFloat, scale: CGFloat = 1, columns: Int,
+                                        displayScale: CGFloat = 2) -> GridMetrics {
+        let columns = max(1, columns)
+        let art = gridArtSize * scale
         let gap = 12 * scale
         let card = max(1, (width - gap * CGFloat(columns - 1)) / CGFloat(columns))
         let textScale = min(max(card / art, 1), 3)

@@ -15,6 +15,11 @@ public struct AppRootView: View {
     @State private var selectedTab: AppTab = .home
     /// A Library tab to show next (Home's Playlists ›).
     @State private var libraryTabRequest: LibraryTab?
+    /// Each tab's pushed pages, so Now Playing's artist line can push an
+    /// artist onto the tab in front.
+    @State private var paths: [AppTab: NavigationPath] = [:]
+    /// Now Playing's artist line: shown once the sheet has closed.
+    @State private var artistAfterNowPlaying: JellyfinArtist?
 
     /// Shared with CarPlay (and the Mac window); see `AppSession`.
     private var session: AppSession { AppSession.shared }
@@ -75,7 +80,7 @@ public struct AppRootView: View {
         activeAPI: JellyfinAPI
     ) -> some View {
         TabView(selection: $selectedTab) {
-            NavigationStack {
+            NavigationStack(path: path(.home)) {
                 HomeView(api: activeAPI, player: player, downloadManager: downloadManager,
                          onShowPlaylists: {
                              libraryTabRequest = .playlists
@@ -88,7 +93,7 @@ public struct AppRootView: View {
             .tabItem { Label("Home", systemImage: "house") }
             .tag(AppTab.home)
 
-            NavigationStack {
+            NavigationStack(path: path(.library)) {
                 LibraryView(
                     api: activeAPI,
                     player: player,
@@ -102,7 +107,7 @@ public struct AppRootView: View {
             .tabItem { Label("Library", systemImage: "square.grid.2x2") }
             .tag(AppTab.library)
 
-            NavigationStack {
+            NavigationStack(path: path(.search)) {
                 SearchView(
                     api: activeAPI,
                     player: player,
@@ -115,7 +120,7 @@ public struct AppRootView: View {
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
             .tag(AppTab.search)
 
-            NavigationStack {
+            NavigationStack(path: path(.downloads)) {
                 DownloadsView(downloadManager: downloadManager, player: player)
                 .appTheme()
                 .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
@@ -124,11 +129,12 @@ public struct AppRootView: View {
             .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
             .tag(AppTab.downloads)
 
-            NavigationStack {
+            NavigationStack(path: path(.settings)) {
                 SettingsView(
                     onSignOut: {
                         DispatchQueue.main.async {
                             session.signOut()
+                            self.paths = [:]   // no pages from the old server
                             self.showLogin = true
                         }
                     },
@@ -143,7 +149,15 @@ public struct AppRootView: View {
             .tag(AppTab.settings)
         }
         .nowPlayingAccessory(player: player)
-        .nowPlayingSheet(player: player)
+        .nowPlayingSheet(player: player, onShowArtist: { artist in
+            // Close Now Playing, then push the artist on the tab in front.
+            artistAfterNowPlaying = artist
+            player?.isNowPlayingPresented = false
+        }, onDismiss: {
+            guard let artist = artistAfterNowPlaying else { return }
+            artistAfterNowPlaying = nil
+            paths[selectedTab, default: NavigationPath()].append(artist)
+        })
         // "Add to Playlist…", the Mac's "New Playlist…", and their notices
         // (Now Playing shows its own while it's in front).
         .playlistEventsHost(isActive: !(player?.isNowPlayingPresented ?? false)) {
@@ -163,6 +177,12 @@ public struct AppRootView: View {
         }
     }
 
+    /// A tab's navigation path.
+    private func path(_ tab: AppTab) -> Binding<NavigationPath> {
+        Binding(get: { paths[tab] ?? NavigationPath() },
+                set: { paths[tab] = $0 })
+    }
+
     private struct AlbumDestination: ViewModifier {
         let api: JellyfinAPI
         let player: PlayerManager?
@@ -177,6 +197,12 @@ public struct AppRootView: View {
                     PlaylistDetailView(api: api, playlist: playlist, player: player,
                                        downloadManager: downloadManager)
                         .appTheme()
+                }
+                // Library's Artists, and the artist line on an album page and in Now Playing.
+                .navigationDestination(for: JellyfinArtist.self) { artist in
+                    ArtistAlbumsView(api: api, artist: artist)
+                        .appTheme()
+                        .gridZoomToolbar()
                 }
         }
     }
@@ -200,14 +226,17 @@ private extension View {
     }
 
     /// The single full-screen Now Playing sheet, opened by the bar or by
-    /// playing an album (`PlayerManager.isNowPlayingPresented`).
-    func nowPlayingSheet(player: PlayerManager?) -> some View {
+    /// playing an album (`PlayerManager.isNowPlayingPresented`). Its artist
+    /// line calls `onShowArtist`; `onDismiss` runs once the sheet has gone.
+    func nowPlayingSheet(player: PlayerManager?,
+                         onShowArtist: @escaping (JellyfinArtist) -> Void,
+                         onDismiss: @escaping () -> Void) -> some View {
         sheet(isPresented: Binding(
             get: { player?.isNowPlayingPresented ?? false },
             set: { player?.isNowPlayingPresented = $0 }
-        )) {
+        ), onDismiss: onDismiss) {
             if let player {
-                NowPlayingView(manager: player) {
+                NowPlayingView(manager: player, onShowArtist: onShowArtist) {
                     player.isNowPlayingPresented = false
                 }
                 .presentationCornerRadius(20)

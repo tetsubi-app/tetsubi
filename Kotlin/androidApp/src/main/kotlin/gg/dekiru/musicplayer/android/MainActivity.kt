@@ -22,6 +22,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import gg.dekiru.musicplayer.App
 import gg.dekiru.musicplayer.downloads.DownloadNotice
+import gg.dekiru.musicplayer.ui.recent.GridSave
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -38,6 +39,12 @@ class MainActivity : ComponentActivity() {
     // Downloads run whatever the answer; it only decides whether the notification shows.
     private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
+    // Recently Played ▸ Save: registered here, not by the screen, so the
+    // picker's answer arrives even if the activity is rebuilt while it's open.
+    private val saveGrid = registerForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+        GridSave.documentChosen(applicationContext, uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Navy splash with the disc, then the app (Android 12+ style, back to 8.0).
         installSplashScreen()
@@ -46,6 +53,7 @@ class MainActivity : ComponentActivity() {
         val app = application as TetsubiApplication
         app.startWidgetFeed()
         val session = app.session
+        GridSave.attach(this) { name -> saveGrid.launch(name) }
         setContent { App(session) }
         askForNotificationsOnFirstDownload()
         openNowPlayingIfAsked(intent)
@@ -83,6 +91,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        GridSave.detach(this)
+        super.onDestroy()
     }
 
     override fun onStart() {

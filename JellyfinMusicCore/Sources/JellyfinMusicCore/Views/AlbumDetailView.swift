@@ -31,6 +31,9 @@ public final class AlbumDetailViewModel {
     public private(set) var moreByArtist: [JellyfinAlbum] = []
     /// "About <artist>" (MusicBrainz + Wikipedia); nil until loaded or if none.
     public private(set) var artistInfo: ArtistInfo?
+    /// The album artist the artist line opens; nil while looking a
+    /// name-only artist up, and when the line isn't tappable (`ArtistLink`).
+    public private(set) var artistLink: JellyfinArtist?
     public private(set) var errorMessage: String?
     /// Opened offline: tracks come from downloads, and the favourite check,
     /// "More by" and "About" aren't asked for.
@@ -63,6 +66,9 @@ public final class AlbumDetailViewModel {
         // Build the art request once up-front so the view can render
         // without waiting on the track-list fetch.
         self.albumArtRequest = api.imageURLRequest(for: album.id, size: 600)
+        if case .artist(let artist) = ArtistLink.resolve(name: album.artistName, id: album.artistId) {
+            self.artistLink = artist
+        }
     }
 
     /// Whether this page shows more than one disc.
@@ -105,6 +111,7 @@ public final class AlbumDetailViewModel {
     /// Offline, only the tracks are loaded (from downloads).
     public func load() {
         isOffline = !isOnline()
+        findArtistLink()
         if isOffline {
             fetchTracks()
             return
@@ -139,6 +146,18 @@ public final class AlbumDetailViewModel {
                 let shown = Set(self.discs.map(\.id))
                 self.moreByArtist = Array(DiscGrouping.merge(found.filter { !shown.contains($0.id) }).prefix(12))
             }
+        }
+    }
+
+    /// An album that only knows its artist's name: look the artist up (online).
+    private func findArtistLink() {
+        guard artistLink == nil,
+              case .lookup = ArtistLink.resolve(name: album.artistName, id: album.artistId) else { return }
+        let name = album.artistName
+        let online = !isOffline
+        Task { @MainActor [weak self, api] in
+            let found = await ArtistLink.find(name: name, id: nil, online: online) { await api.albumArtists(matching: $0) }
+            self?.artistLink = found
         }
     }
 
@@ -485,9 +504,7 @@ public struct AlbumDetailView: View {
                 Text(viewModel.album.displayName)
                     .font(.plex(.title2).bold())
                 if !viewModel.album.artistName.isEmpty {
-                    Text(viewModel.album.artistName)
-                        .font(.plex(.headline))
-                        .foregroundStyle(Color.albumArtistText)
+                    artistLine
                 }
                 if let year = viewModel.album.productionYear {
                     Text(String(year))
@@ -496,6 +513,22 @@ public struct AlbumDetailView: View {
                 }
                 Spacer()
             }
+        }
+    }
+
+    /// The artist under the title; opens the artist's albums when it can
+    /// (`ArtistLink`), looking just the same either way.
+    @ViewBuilder
+    private var artistLine: some View {
+        let text = Text(viewModel.album.artistName)
+            .font(.plex(.headline))
+            .foregroundStyle(Color.albumArtistText)
+        if let artist = viewModel.artistLink {
+            NavigationLink(value: artist) { text }
+                .artistLinkStyle(viewModel.album.artistName)
+                .accessibilityIdentifier("AlbumDetailView.artistLink")
+        } else {
+            text
         }
     }
 

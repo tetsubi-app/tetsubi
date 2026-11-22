@@ -308,6 +308,7 @@ class PlayerController(
             trackNumber = track.number,
             title = track.title,
             artist = album.artistName.ifEmpty { disc.artist },
+            albumArtistId = album.artistId.takeIf { album.artistName.isNotEmpty() },
             album = album.displayName,
             albumId = album.id,
             durationSeconds = track.durationSeconds,

@@ -12,6 +12,8 @@ Tetsubi is made by DEKIRU Ltd. It isn't affiliated with Jellyfin. Made with AI.
 - Home: On This Day (albums released on today's date), Favourites, Recently Played, Recently Added, Random Albums.
 - Library, artist pages, search, favourites, and Jellyfin playlists (browse, play, make, edit). Albums and favourites sort by name, artist, release date or date added/favourited.
 - On wider screens (Mac, iPad, Android tablets, Linux), zoom buttons choose 3 to 10 album cards per row; covers and text grow with them.
+- Recently Played: a page of the albums you played last, with an export of a 3×3, 4×4 or 5×5 cover grid (1200×1200 PNG, optional album and artist labels) to the clipboard or a file.
+- Tap an artist's name on an album or in Now Playing to see all their albums. Now Playing grows with the window on Mac, iPad, Android tablets and Linux, in two columns when there's room.
 - Gapless album playback with lock-screen and media-key controls, an equaliser and a visualiser.
 - Downloads for offline listening, in the original format or converted.
 - Home-screen widgets; CarPlay and Siri on iOS; Android Auto, voice and Google Cast on Android.

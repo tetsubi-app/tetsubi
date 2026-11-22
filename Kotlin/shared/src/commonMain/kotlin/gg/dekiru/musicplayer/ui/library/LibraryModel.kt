@@ -381,10 +381,22 @@ class LibraryModel(
             val auto = gridLayout(width)
             if (!wide) return CardGrid(auto.columns, auto.spacing, GRID_ART, 1f, IMAGE_SIZES.first())
             val columns = chosen?.coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS) ?: auto.columns.coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
+            return fixedCardGrid(width, columns, displayScale, scale)
+        }
+
+        /**
+         * Exactly [columns] across on any device (Recently Played: as many as
+         * the export's size), each card filling its column with the wide
+         * layout's gap, as iOS `gridMetrics(width:columns:)`. The text scales
+         * with the card as on wide layouts but never below a phone's (narrow
+         * cards keep the phone's text and cut it short), at most ×3.
+         */
+        fun fixedCardGrid(width: Float, columns: Int, displayScale: Float = 1f, scale: Float = 1f): CardGrid {
+            val n = maxOf(1, columns)
             val spacing = WIDE_SPACING * scale
-            val card = maxOf(0f, (width - spacing * (columns - 1)) / columns)
+            val card = maxOf(0f, (width - spacing * (n - 1)) / n)
             val textScale = (card / (GRID_ART * scale)).coerceIn(1f, MAX_TEXT_SCALE)
-            return CardGrid(columns, spacing, card, textScale, imageSize(card * displayScale))
+            return CardGrid(n, spacing, card, textScale, imageSize(card * displayScale))
         }
 
         /** Home's card (cover and text width) on phones, as iOS `AlbumCardView.width`. */

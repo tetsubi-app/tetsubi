@@ -64,6 +64,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
+import gg.dekiru.musicplayer.data.api.JellyfinError
+import gg.dekiru.musicplayer.data.models.ArtistLink
+import gg.dekiru.musicplayer.data.models.JellyfinArtist
+import gg.dekiru.musicplayer.ui.components.artistLink
 import gg.dekiru.musicplayer.data.settings.Preferences
 import gg.dekiru.musicplayer.playback.CastRoute
 import gg.dekiru.musicplayer.playback.PlaybackTrack
@@ -123,6 +127,8 @@ fun NowPlayingScreen(
     isOnline: Boolean = true,
     /** Where the quality text's choice (sample rate or format and bitrate) is remembered. */
     preferences: Preferences? = null,
+    /** The artist line: close Now Playing and show that artist's albums. Null: plain text. */
+    onOpenArtist: ((JellyfinArtist) -> Unit)? = null,
 ) {
     BackHandler { player.isNowPlayingOpen = false }
     val accent = rememberArtAccent(api, player.currentTrack?.artItemId, player.currentTrack?.localArtPath)
@@ -156,7 +162,7 @@ fun NowPlayingScreen(
                     if (effects != null && showBars) {
                         SpectrumBars(effects, player.isPlaying, accent, Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(64.dp))
                     }
-                    Titles(player, track, castName, accent, qualityDetail)
+                    Titles(player, track, castName, accent, qualityDetail, rememberArtistTap(api, track, isOnline, onOpenArtist))
                     player.lastError?.let { ErrorText(it) }
                     Seek(player, accent)
                     Controls(player)
@@ -256,12 +262,42 @@ private fun BoxScope.CornerButtons(player: PlayerController, onAddToPlaylist: ((
     }
 }
 
+/**
+ * What a tap on the artist line does (as iOS): the track's album artist by
+ * ID, or found by name on the server (online); null when there's none, or
+ * for "Various Artists" ([ArtistLink]).
+ */
+@Composable
+private fun rememberArtistTap(api: JellyfinApi, track: PlaybackTrack, isOnline: Boolean, onOpenArtist: ((JellyfinArtist) -> Unit)?): (() -> Unit)? {
+    val resolved = remember(track.artist, track.albumArtistId) { ArtistLink.resolve(track.artist, track.albumArtistId) }
+    val found by produceState<JellyfinArtist?>(null, resolved, isOnline, onOpenArtist != null) {
+        value = null
+        if (resolved is ArtistLink.Lookup && onOpenArtist != null) {
+            value = ArtistLink.find(resolved.name, null, isOnline) { term ->
+                try {
+                    api.searchArtists(term, limit = 10)
+                } catch (e: JellyfinError) {
+                    emptyList()
+                }
+            }
+        }
+    }
+    val artist = (resolved as? ArtistLink.Artist)?.artist ?: found.takeIf { resolved is ArtistLink.Lookup }
+    return if (artist != null && onOpenArtist != null) ({ onOpenArtist(artist) }) else null
+}
+
 @OptIn(ExperimentalTime::class)
 @Composable
-private fun Titles(player: PlayerController, track: PlaybackTrack, castName: String?, accent: Color?, qualityDetail: QualityDetailSetting) {
+private fun Titles(
+    player: PlayerController, track: PlaybackTrack, castName: String?, accent: Color?, qualityDetail: QualityDetailSetting,
+    onArtist: (() -> Unit)?,
+) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(track.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
-        Text(track.artist, color = TetsubiColors.albumArtistText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            track.artist, color = TetsubiColors.albumArtistText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.artistLink(track.artist, onArtist),
+        )
         Text(track.album, color = TetsubiColors.albumYearText, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (castName != null) {
             Text(

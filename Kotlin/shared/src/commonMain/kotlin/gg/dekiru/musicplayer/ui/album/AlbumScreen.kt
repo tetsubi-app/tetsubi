@@ -55,6 +55,8 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.models.DiscGrouping
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
+import gg.dekiru.musicplayer.data.models.JellyfinArtist
+import gg.dekiru.musicplayer.ui.components.artistLink
 import gg.dekiru.musicplayer.data.models.JellyfinTrack
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
@@ -97,6 +99,8 @@ fun AlbumScreen(
     onBack: () -> Unit,
     /** "Add to Playlist…" for these track IDs: a track's menu, a disc's, and the album's own (every track). */
     onAddToPlaylist: ((List<String>) -> Unit)? = null,
+    /** The artist line: that artist's albums, on this tab. */
+    onOpenArtist: ((JellyfinArtist) -> Unit)? = null,
 ) {
     LaunchedEffect(model) { model.load() }
     val manager = model.downloadManager
@@ -125,7 +129,7 @@ fun AlbumScreen(
                     onAddToPlaylist = onAddToPlaylist?.takeIf { model.tracks.isNotEmpty() }?.let { add -> { add(model.tracks.map { it.id }) } },
                 )
             }
-            item { Header(api, model, artSize = if (wide) 240.dp else 160.dp, localArt = manager.coverPath(model.album)) }
+            item { Header(api, model, artSize = if (wide) 240.dp else 160.dp, localArt = manager.coverPath(model.album), onOpenArtist) }
             item { Actions(model, player, manager, dl) }
             tracks(model, player, manager, dl, onAddToPlaylist)
             if (model.moreByArtist.isNotEmpty()) {
@@ -180,13 +184,20 @@ private fun AddToPlaylistMenu(label: String, onAddToPlaylist: () -> Unit) {
 }
 
 @Composable
-private fun Header(api: JellyfinApi, model: AlbumModel, artSize: androidx.compose.ui.unit.Dp, localArt: String?) {
+private fun Header(api: JellyfinApi, model: AlbumModel, artSize: androidx.compose.ui.unit.Dp, localArt: String?, onOpenArtist: ((JellyfinArtist) -> Unit)?) {
     val album = model.album
     Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Bottom) {
         AlbumArt(api, album.id, size = artSize, cornerRadius = 12.dp, maxWidth = 600, localPath = localArt)
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(album.displayName, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            if (album.artistName.isNotEmpty()) Text(album.artistName, color = TetsubiColors.albumArtistText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            if (album.artistName.isNotEmpty()) {
+                // Opens the artist's albums when it can (ArtistLink); looks the same either way.
+                val artist = model.artistLink
+                Text(
+                    album.artistName, color = TetsubiColors.albumArtistText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.artistLink(album.artistName, if (artist != null && onOpenArtist != null) ({ onOpenArtist(artist) }) else null),
+                )
+            }
             album.productionYear?.let { Text(it.toString(), color = TetsubiColors.albumYearText, fontSize = 12.sp) }
         }
     }

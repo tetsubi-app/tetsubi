@@ -131,11 +131,13 @@ private fun WidgetView(shown: WidgetContent, art: Bitmap?) {
         is WidgetContent.Track -> shown.description
         is WidgetContent.Message -> shown.text
     }
+    val configuration = context.resources.configuration
     val layout = WidgetLayout.of(
         size.width.value,
         size.height.value,
-        fontScale = context.resources.configuration.fontScale,
+        fontScale = configuration.fontScale,
         skips = (shown as? WidgetContent.Track)?.showSkips ?: true,
+        phone = WidgetLayout.isPhone(size.width.value, configuration.smallestScreenWidthDp),
     )
     Box(
         background(BASE)
@@ -155,8 +157,12 @@ private fun WidgetView(shown: WidgetContent, art: Bitmap?) {
             is WidgetContent.Track -> {
                 // The device's 12/24-hour setting.
                 val clock = DateFormat.getTimeFormat(context)
-                val times = { medium: Boolean -> shown.times(medium) { clock.format(java.util.Date(it)) } }
-                if (layout.medium) MediumView(shown, art, accent, layout, times(true)) else SmallView(shown, art, accent, layout, times(false), shown.timeLines { clock.format(java.util.Date(it)) })
+                val format = { at: Long -> clock.format(java.util.Date(at)) }
+                if (layout.medium) {
+                    MediumView(shown, art, accent, layout, layout.mediumTimes(shown.mediumTimeLines(layout.twoLineTimes, format)))
+                } else {
+                    SmallView(shown, art, accent, layout, shown.timeLines(format))
+                }
             }
         }
     }
@@ -210,7 +216,7 @@ private fun MessageView(text: String, side: Dp) {
 
 /** Small: the art fills the widget; play/pause at the top right; the lines that fit over a dark fade at the bottom. */
 @Composable
-private fun SmallView(track: WidgetContent.Track, art: Bitmap?, accent: Color, layout: WidgetLayout, times: String?, timeLines: Pair<String?, String?>) {
+private fun SmallView(track: WidgetContent.Track, art: Bitmap?, accent: Color, layout: WidgetLayout, timeLines: Pair<String?, String?>) {
     Box(GlanceModifier.fillMaxSize()) {
         if (art != null) {
             Image(ImageProvider(art), contentDescription = null, contentScale = ContentScale.Crop, modifier = GlanceModifier.fillMaxSize())
@@ -254,9 +260,13 @@ private val fade: Bitmap by lazy {
     bitmap
 }
 
-/** Medium: art the full height on the left; title, artist, album, the times and the buttons beside it. */
+/**
+ * Medium: art the full height on the left; title, artist, album, the times and
+ * the buttons beside it. `times`: one line ("Duration: …   Ends: …"), or on a
+ * phone the duration and the finish time on lines of their own.
+ */
 @Composable
-private fun MediumView(track: WidgetContent.Track, art: Bitmap?, accent: Color, layout: WidgetLayout, times: String?) {
+private fun MediumView(track: WidgetContent.Track, art: Bitmap?, accent: Color, layout: WidgetLayout, times: List<String>) {
     Row(GlanceModifier.fillMaxSize().padding(layout.padding.dp), verticalAlignment = Alignment.CenterVertically) {
         Art(art, layout.art.dp, layout.artCorner.dp)
         Spacer(GlanceModifier.width(layout.gap.dp))
@@ -268,8 +278,8 @@ private fun MediumView(track: WidgetContent.Track, art: Bitmap?, accent: Color, 
             if (layout.showAlbum && track.album.isNotBlank()) {
                 Text(track.album, style = TextStyle(color = ColorProvider(TERTIARY), fontSize = layout.secondarySp.sp), maxLines = 1)
             }
-            if (layout.showTimes && times != null) {
-                Text(times, style = TextStyle(color = ColorProvider(TERTIARY), fontSize = layout.timesSp.sp), maxLines = 1)
+            for (line in times) {
+                Text(line, style = TextStyle(color = ColorProvider(TERTIARY), fontSize = layout.timesSp.sp), maxLines = 1)
             }
             Spacer(GlanceModifier.defaultWeight())
             Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

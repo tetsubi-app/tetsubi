@@ -50,6 +50,7 @@ public struct PlaybackTrack: Sendable, Identifiable, Hashable {
     public let id: String
     public let trackNumber: Int
     public let title: String
+    /// The album artist (the track's first, else the album's).
     public let artist: String
     public let album: String
     public let albumId: String
@@ -68,6 +69,10 @@ public struct PlaybackTrack: Sendable, Identifiable, Hashable {
     public var sampleRate: Int? = nil
     /// The source file's bit depth, e.g. 16; nil for lossy files or if unknown.
     public var bitDepth: Int? = nil
+    /// Server ID of `artist`, when known; Now Playing's artist line opens
+    /// that artist's albums (`ArtistLink`). Nil for a download played from
+    /// the Downloads tab, which saved only the name.
+    public var albumArtistId: String? = nil
     /// Sample rate and bit depth for Now Playing, e.g. "44.1kHz/16-bit".
     public var sampleRateLabel: String? {
         Self.sampleRateLabel(sampleRate: sampleRate, bitDepth: bitDepth)
@@ -115,7 +120,9 @@ public struct PlaybackTrack: Sendable, Identifiable, Hashable {
         self.id = track.id
         self.trackNumber = track.trackNumber
         self.title = track.displayName
-        self.artist = track.artistName ?? album.artistName
+        let albumArtist = ArtistLink.albumArtist(trackArtists: track.albumArtists, album: album)
+        self.artist = albumArtist.name
+        self.albumArtistId = albumArtist.id
         self.album = album.displayName
         self.albumId = album.id
         self.duration = track.duration

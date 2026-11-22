@@ -69,7 +69,7 @@ public struct HomeView: View {
                         HomePlaylistsRow(api: api, playlists: shownPlaylists, metrics: cards)
                     }
 
-                    sectionHeader("Recently Played")
+                    sectionHeader("Recently Played", more: .recentlyPlayed)
                     albumRow("Recently Played", viewModel?.recentlyPlayed, empty: "No recently played music yet.", cards: cards)
 
                     sectionHeader("Recently Added")
@@ -89,6 +89,10 @@ public struct HomeView: View {
                         .gridZoomToolbar(FavouritesOptions.shared.displayMode == .grid)
                 case .random:
                     RandomAlbumsView(api: api)
+                        .appTheme()
+                case .recentlyPlayed:
+                    // No −/+: its columns follow the export's size.
+                    RecentlyPlayedView(api: api, initial: viewModel?.recentlyPlayed ?? [])
                         .appTheme()
                 }
             }
@@ -304,6 +308,7 @@ extension View {
 enum HomeMore: Hashable {
     case favourites
     case random
+    case recentlyPlayed
 }
 
 /// A page of random albums (Home ▸ Random Albums ›): three rows of three

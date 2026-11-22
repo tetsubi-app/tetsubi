@@ -124,11 +124,21 @@ struct AlbumGridView: View {
     let albums: [JellyfinAlbum]
     /// Shown centred under the grid (Random Albums' "Shake it").
     var footer: String? = nil
+    /// Anything else under the grid, scrolling with it (Recently Played's
+    /// Export grid section).
+    var footerContent: AnyView? = nil
     /// Lines for each album title (Random Albums uses 1 so four rows fit).
     var titleLines: Int = 2
     /// Follows the +/− card size on wide layouts. Off for Random Albums,
     /// whose 9-or-12 count is worked out from the fixed card size.
     var zooms: Bool = false
+    /// Exactly this many across on every device, covers filling their
+    /// columns, no +/− (Recently Played: the export's size). Overrides `zooms`.
+    var fixedColumns: Int? = nil
+    /// Without `zooms`: still the wide layout's automatic count and
+    /// column-filling covers on wide layouts, just not the +/− setting
+    /// (Recently Played with too few albums to export).
+    var widensWithoutZoom: Bool = false
     /// Padding on the right too; off while the A–Z strip leaves that room
     /// (as Library ▸ Albums, so three covers still fit on a phone).
     var trailingEdge: Bool = true
@@ -140,13 +150,20 @@ struct AlbumGridView: View {
     /// phone (`LibraryView.gridLayout`), downloaded tick on the cover; on
     /// a wide layout the shared cards-per-row setting.
     var body: some View {
-        let wide = zooms && isWideLayout
+        let wide = fixedColumns == nil && zooms && isWideLayout
         GeometryReader { geo in
             let edge = LibraryView.gridEdgePadding
             let trailing = trailingEdge ? edge : 0
-            let metrics = LibraryView.gridMetrics(width: geo.size.width - edge - trailing,
-                                                  scale: UIScale.shared.factor, wide: wide,
-                                                  chosen: GridZoom.shared.columns, displayScale: displayScale)
+            let width = geo.size.width - edge - trailing
+            let metrics: LibraryView.GridMetrics = if let fixedColumns {
+                LibraryView.gridMetrics(width: width, scale: UIScale.shared.factor, columns: fixedColumns,
+                                        displayScale: displayScale)
+            } else {
+                // The +/− setting is read only by grids that follow it.
+                LibraryView.gridMetrics(width: width, scale: UIScale.shared.factor,
+                                        wide: wide || (widensWithoutZoom && isWideLayout),
+                                        chosen: wide ? GridZoom.shared.columns : nil, displayScale: displayScale)
+            }
             ScrollView {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: metrics.spacing, alignment: .top),
                                          count: metrics.columns),
@@ -170,6 +187,12 @@ struct AlbumGridView: View {
                         .font(.plex(.footnote))
                         .foregroundStyle(Color.albumYearText)
                         .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.bottom, 24)
+                }
+                if let footerContent {
+                    footerContent
+                        .padding(.leading, edge)
+                        .padding(.trailing, trailing)
                         .padding(.bottom, 24)
                 }
             }

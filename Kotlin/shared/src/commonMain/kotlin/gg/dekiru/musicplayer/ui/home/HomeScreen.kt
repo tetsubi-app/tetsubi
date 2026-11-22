@@ -103,6 +103,8 @@ fun HomeScreen(
     playlists: PlaylistsModel? = null,
     onOpenPlaylist: (JellyfinPlaylist) -> Unit = {},
     onMorePlaylists: () -> Unit = {},
+    /** Recently Played's ›: the Recently Played page. */
+    onMoreRecentlyPlayed: () -> Unit = {},
     zoom: GridZoom? = null,
     updates: UpdateChecker? = null,
     /** Why nothing can play here (Linux without libmpv), shown as a banner; null: nothing to say. */
@@ -197,7 +199,7 @@ fun HomeScreen(
                         section("Playlists", onMorePlaylists)
                         item(key = "row-Playlists") { PlaylistRow(api, playlists, playlistRow, onOpenPlaylist, size) }
                     }
-                    albumSection("Recently Played", model.recentlyPlayed, model.isLoading, "No recently played music yet.", api, onOpen, isDownloaded, size)
+                    albumSection("Recently Played", model.recentlyPlayed, model.isLoading, "No recently played music yet.", api, onOpen, isDownloaded, size, onMoreRecentlyPlayed)
                     albumSection("Recently Added", model.recentlyAdded, model.isLoading, "No recently added music.", api, onOpen, isDownloaded, size)
                     item { androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp)) }
                 }

@@ -31,6 +31,14 @@ sealed interface WidgetContent {
         /** What a screen reader says for the widget: "<title> by <artist>". */
         val description: String get() = if (artist.isBlank()) title else "$title by $artist"
 
+        /** "Duration: 51m 06s", Now Playing's words; null when the length isn't known. */
+        val durationText: String?
+            get() = if (queueSeconds > 0) "Duration: ${formatAlbumDuration(queueSeconds)}" else null
+
+        /** "Ends: 13:42", written by `clock`; null when the finish time or the length isn't known. */
+        fun finishText(clock: (Long) -> String): String? =
+            if (queueSeconds > 0) finishAt?.let { "Ends: ${clock(it)}" } else null
+
         /**
          * The line of times, in Now Playing's words, with the finish time
          * written by `clock` (the device's 12/24-hour format). Medium:
@@ -39,17 +47,22 @@ sealed interface WidgetContent {
          * the length isn't known.
          */
         fun times(medium: Boolean, clock: (Long) -> String): String? {
-            if (queueSeconds <= 0) return null
-            val duration = "Duration: ${formatAlbumDuration(queueSeconds)}"
-            val finish = finishAt?.let { "Ends: ${clock(it)}" } ?: return duration
+            val duration = durationText ?: return null
+            val finish = finishText(clock) ?: return duration
             return if (medium) "$duration   $finish" else finish
         }
 
+        /**
+         * The medium widget's lines of times under the album. `twoLines` (a
+         * phone, where one line was cut off): "Duration: …" and "Ends: …" on
+         * lines of their own; else both on one line as [times]. Without a
+         * finish time, the duration alone; empty when the length isn't known.
+         */
+        fun mediumTimeLines(twoLines: Boolean, clock: (Long) -> String): List<String> =
+            if (twoLines) listOfNotNull(durationText, finishText(clock)) else listOfNotNull(times(true, clock))
+
         /** The small widget's two lines, when it has room: "Duration: …" (null when the length isn't known) and the finish time (null when out of date or unknown). */
-        fun timeLines(clock: (Long) -> String): Pair<String?, String?> {
-            if (queueSeconds <= 0) return null to null
-            return "Duration: ${formatAlbumDuration(queueSeconds)}" to finishAt?.let { "Ends: ${clock(it)}" }
-        }
+        fun timeLines(clock: (Long) -> String): Pair<String?, String?> = durationText to finishText(clock)
     }
 
     companion object {

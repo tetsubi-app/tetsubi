@@ -175,6 +175,17 @@ class WidgetTest {
     }
 
     @Test
+    fun aPhonesMediumHasTheDurationAndFinishOnLinesOfTheirOwn() {
+        val snapshot = WidgetSnapshot.next(null, timed, accentRGB = null, artFile = null, now = 100_000)
+        val shown = WidgetContent.of(snapshot, playerAlive = true, now = 160_000) as WidgetContent.Track
+        assertEquals("Duration: 51m 06s", shown.durationText)
+        assertEquals("Ends: T700000", shown.finishText { "T$it" })
+        assertEquals(listOf("Duration: 51m 06s", "Ends: T700000"), shown.mediumTimeLines(twoLines = true) { "T$it" })
+        // A tablet: one line, as before.
+        assertEquals(listOf("Duration: 51m 06s   Ends: T700000"), shown.mediumTimeLines(twoLines = false) { "T$it" })
+    }
+
+    @Test
     fun pausedFinishesTheTimeLeftAfterNow() {
         val snapshot = WidgetSnapshot.next(null, timed.copy(isPlaying = false), accentRGB = null, artFile = null, now = 100_000)
         // A minute later the finish time is a minute later.
@@ -189,6 +200,9 @@ class WidgetTest {
         assertNull(shown.finishAt)
         assertEquals("Duration: 51m 06s", shown.times(medium = true) { "T$it" })
         assertEquals("Duration: 51m 06s", shown.times(medium = false) { "T$it" })
+        assertNull(shown.finishText { "T$it" })
+        assertEquals(listOf("Duration: 51m 06s"), shown.mediumTimeLines(twoLines = true) { "T$it" })
+        assertEquals(listOf("Duration: 51m 06s"), shown.mediumTimeLines(twoLines = false) { "T$it" })
     }
 
     @Test
@@ -198,6 +212,9 @@ class WidgetTest {
         assertNull(shown.finishAt)
         assertNull(shown.times(medium = true) { "T$it" })
         assertNull(shown.times(medium = false) { "T$it" })
+        assertNull(shown.durationText)
+        assertEquals(emptyList(), shown.mediumTimeLines(twoLines = true) { "T$it" })
+        assertEquals(emptyList(), shown.mediumTimeLines(twoLines = false) { "T$it" })
     }
 
     @Test

@@ -116,6 +116,8 @@ kotlin {
             implementation(libs.androidx.appcompat)
             // Downloads go on with the app closed (foreground work).
             implementation(libs.androidx.work.runtime)
+            // Recently Played's "Save": the Storage Access Framework's Create Document from Compose.
+            implementation(libs.androidx.activity.compose)
         }
         getByName("desktopMain").dependencies {
             implementation(libs.kotlinx.coroutines.swing)

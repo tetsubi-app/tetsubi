@@ -81,6 +81,8 @@ import gg.dekiru.musicplayer.ui.home.AlbumListModel
 import gg.dekiru.musicplayer.ui.home.AlbumListScreen
 import gg.dekiru.musicplayer.ui.home.HomeModel
 import gg.dekiru.musicplayer.ui.home.HomeScreen
+import gg.dekiru.musicplayer.ui.recent.RecentlyPlayedModel
+import gg.dekiru.musicplayer.ui.recent.RecentlyPlayedScreen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -95,6 +97,7 @@ private sealed class Entry(val key: String, val scope: CoroutineScope)
 private class AlbumEntry(key: String, val model: AlbumModel, scope: CoroutineScope) : Entry(key, scope)
 private class ListEntry(key: String, val model: AlbumListModel, scope: CoroutineScope) : Entry(key, scope)
 private class ArtistEntry(key: String, val model: ArtistModel, scope: CoroutineScope) : Entry(key, scope)
+private class RecentEntry(key: String, val model: RecentlyPlayedModel, scope: CoroutineScope) : Entry(key, scope)
 private class PlaylistPageEntry(key: String, val model: PlaylistModel, scope: CoroutineScope) : Entry(key, scope)
 
 /** The tabs along the bottom, in the order of iOS `AppRootView`. */
@@ -157,6 +160,11 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
     fun openList(list: AlbumList) {
         val entryScope = childScope()
         stacks.getValue(tab) += ListEntry("list-${counter[0]++}-${list.name}", AlbumListModel(list, api, session.favorites, entryScope), entryScope)
+    }
+
+    fun openRecentlyPlayed() {
+        val entryScope = childScope()
+        stacks.getValue(tab) += RecentEntry("recent-${counter[0]++}", RecentlyPlayedModel(api, entryScope), entryScope)
     }
 
     fun openArtist(artist: JellyfinArtist) {
@@ -237,6 +245,7 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                                     library.tab = LibraryTab.PLAYLISTS
                                     tab = Tab.LIBRARY
                                 },
+                                onMoreRecentlyPlayed = ::openRecentlyPlayed,
                                 zoom = library.gridZoom,
                                 updates = session.updates,
                                 playerUnavailable = session.environment.playerEngine.unavailableReason,
@@ -254,7 +263,7 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                             Tab.DOWNLOADS -> DownloadsScreen(api, downloads, playing, onOpenPlaylist = ::openPlaylist)
                             Tab.SETTINGS -> SettingsScreen(session, api)
                         }
-                        is AlbumEntry -> AlbumScreen(api, top.model, playing, onOpen = ::open, onBack = ::back, onAddToPlaylist = addToPlaylist::start)
+                        is AlbumEntry -> AlbumScreen(api, top.model, playing, onOpen = ::open, onBack = ::back, onAddToPlaylist = addToPlaylist::start, onOpenArtist = ::openArtist)
                         is ArtistEntry -> ArtistScreen(
                             api, top.model, onOpen = ::open, onBack = ::back,
                             network = session.environment.network.state, downloads = downloads, zoom = library.gridZoom,
@@ -263,6 +272,11 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                             api, top.model, playing, onOpenAlbum = ::open, onBack = ::back,
                             isOnline = network.online, onAddToPlaylist = addToPlaylist::start, onDeleted = { leave(top) },
                             manager = downloads,
+                        )
+                        is RecentEntry -> RecentlyPlayedScreen(
+                            api, top.model, session.environment.preferences, onOpen = ::open, onBack = ::back,
+                            network = session.environment.network.state, downloads = downloads,
+                            homeRow = home.recentlyPlayed,
                         )
                         is ListEntry -> AlbumListScreen(
                             api, top.model, onOpen = ::open, onBack = ::back, downloads = downloads,
@@ -287,6 +301,11 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                     effects = session.environment.playerEngine.audioEffects, effectsSettings = session.effectsSettings,
                     cast = session.environment.playerEngine.cast, isOnline = network.online,
                     preferences = session.environment.preferences,
+                    // Close Now Playing; the artist goes on the open tab, as an album would.
+                    onOpenArtist = { artist ->
+                        playing.isNowPlayingOpen = false
+                        openArtist(artist)
+                    },
                 )
             }
         }

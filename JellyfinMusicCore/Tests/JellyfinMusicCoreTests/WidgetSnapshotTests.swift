@@ -224,6 +224,35 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertNil(track(playing(queue: 0, remaining: 0), at: now)?.timesLine())
     }
 
+    func testIPhoneMediumHasTheDurationAndFinishOnLinesOfTheirOwn() {
+        let utc = TimeZone(identifier: "UTC")!
+        let gb = Locale(identifier: "en_GB")
+        let shown = track(playing(until: now.addingTimeInterval(100), remaining: 20_520), at: now)
+        XCTAssertEqual(shown?.timesLines(twoLines: true, locale: gb, timeZone: utc),
+                       ["Duration: 51m 06s", "Ends: 13:42"])
+        // An iPad: the one line, as before.
+        XCTAssertEqual(shown?.timesLines(twoLines: false, locale: gb, timeZone: utc),
+                       ["Duration: 51m 06s   Ends: 13:42"])
+        // The finish not known: the duration alone; the length not known: nothing.
+        let stale = track(playing(until: now.addingTimeInterval(-1)), at: now)
+        XCTAssertEqual(stale?.timesLines(twoLines: true), ["Duration: 51m 06s"])
+        XCTAssertEqual(stale?.timesLines(twoLines: false), ["Duration: 51m 06s"])
+        let unknown = track(playing(queue: 0, remaining: 0), at: now)
+        XCTAssertEqual(unknown?.timesLines(twoLines: true), [])
+        XCTAssertEqual(unknown?.timesLines(twoLines: false), [])
+    }
+
+    func testIPhoneMediumIsSmallerWithTwoLinesOfTimesAndIPadKeepsOne() {
+        let phone = WidgetDisplay.MediumStyle.of(isPhone: true)
+        let pad = WidgetDisplay.MediumStyle.of(isPhone: false)
+        XCTAssertTrue(phone.twoLineTimes)
+        XCTAssertFalse(pad.twoLineTimes)
+        XCTAssertEqual([pad.titleSize, pad.secondarySize, pad.timesSize], [16, 13, 11])
+        XCTAssertLessThan(phone.titleSize, pad.titleSize)
+        XCTAssertLessThan(phone.secondarySize, pad.secondarySize)
+        XCTAssertLessThanOrEqual(phone.timesSize, pad.timesSize)
+    }
+
     func testPausedTimelineTicksEachMinuteForAnHour() throws {
         // 1900 s left: the finish (date + 1900) turns over a minute at
         // date = now + 20 s, then every 60 s.

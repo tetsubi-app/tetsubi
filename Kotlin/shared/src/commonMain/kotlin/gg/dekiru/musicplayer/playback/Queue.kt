@@ -1,5 +1,6 @@
 package gg.dekiru.musicplayer.playback
 
+import gg.dekiru.musicplayer.data.models.ArtistLink
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.models.JellyfinTrack
 import gg.dekiru.musicplayer.data.models.PlaylistEntry
@@ -28,26 +29,36 @@ data class PlaybackTrack(
     val sampleRate: Int? = null,
     /** The file's bit depth (e.g. 16); null for lossy files or if unknown. */
     val bitDepth: Int? = null,
+    /**
+     * Server ID of [artist] (the album artist), when known; Now Playing's
+     * artist line opens that artist's albums (`ArtistLink`). Null for a
+     * download opened from the Downloads tab, which knows only the name.
+     */
+    val albumArtistId: String? = null,
 ) {
     /** "44.1kHz/16-bit", "44.1kHz" (no bit depth), or null (sample rate unknown). */
     val sampleRateLabel: String? get() = sampleRateLabel(sampleRate, bitDepth)
 
     companion object {
-        fun from(track: JellyfinTrack, album: JellyfinAlbum, position: Int) = PlaybackTrack(
-            id = track.id,
-            // Some answers omit IndexNumber: fall back to the position in the queue.
-            trackNumber = track.trackNumber.takeIf { it > 0 } ?: (position + 1),
-            title = track.displayName,
-            artist = track.albumArtists?.firstOrNull()?.name ?: album.artistName,
-            album = album.displayName,
-            albumId = album.id,
-            durationSeconds = track.durationSeconds.toDouble(),
-            normalizationGain = track.normalizationGain,
-            qualityLabel = qualityLabel(AudioFormat.source(track), track.mediaSource?.bitrate),
-            artItemId = if (track.hasOwnArt) track.id else album.id,
-            sampleRate = track.mediaSource?.sampleRate,
-            bitDepth = track.mediaSource?.bitDepth,
-        )
+        fun from(track: JellyfinTrack, album: JellyfinAlbum, position: Int): PlaybackTrack {
+            val (artist, artistId) = ArtistLink.albumArtist(track.albumArtists, album)
+            return PlaybackTrack(
+                id = track.id,
+                // Some answers omit IndexNumber: fall back to the position in the queue.
+                trackNumber = track.trackNumber.takeIf { it > 0 } ?: (position + 1),
+                title = track.displayName,
+                artist = artist,
+                albumArtistId = artistId,
+                album = album.displayName,
+                albumId = album.id,
+                durationSeconds = track.durationSeconds.toDouble(),
+                normalizationGain = track.normalizationGain,
+                qualityLabel = qualityLabel(AudioFormat.source(track), track.mediaSource?.bitrate),
+                artItemId = if (track.hasOwnArt) track.id else album.id,
+                sampleRate = track.mediaSource?.sampleRate,
+                bitDepth = track.mediaSource?.bitDepth,
+            )
+        }
 
         /**
          * A playlist's track: its own album, album ID and picture, and its
@@ -59,6 +70,7 @@ data class PlaybackTrack(
             trackNumber = entry.track.trackNumber.takeIf { it > 0 } ?: (queueIndex + 1),
             title = entry.track.displayName,
             artist = entry.albumArtist.orEmpty(),
+            albumArtistId = entry.track.albumArtists?.firstOrNull()?.takeIf { it.name == entry.albumArtist }?.id,
             album = entry.albumName.orEmpty(),
             albumId = entry.albumId ?: entry.track.id,
             durationSeconds = entry.track.durationSeconds.toDouble(),

@@ -66,10 +66,50 @@ public enum WidgetDisplay: Equatable, Sendable {
                 .compactMap { $0 }.joined(separator: separator)
         }
 
+        /// The medium widget's lines of times under the album. `twoLines`
+        /// (an iPhone, where one line was cut off): "Duration: 51m 06s" and
+        /// "Ends: 13:42" on lines of their own; else `timesLine()`'s one
+        /// line. Just the duration once the finish isn't known; empty when
+        /// the length isn't known.
+        public func timesLines(twoLines: Bool, locale: Locale = .autoupdatingCurrent,
+                               timeZone: TimeZone = .autoupdatingCurrent) -> [String] {
+            guard twoLines else { return [timesLine(locale: locale, timeZone: timeZone)].compactMap { $0 } }
+            guard let durationText else { return [] }
+            return [durationText, finishText(locale: locale, timeZone: timeZone)].compactMap { $0 }
+        }
+
         /// What VoiceOver reads for the widget: "<title> by <artist>".
         public var accessibilityLabel: String {
             artist.isEmpty ? title : "\(title) by \(artist)"
         }
+    }
+
+    /// The medium widget's type and spacing (points). On an iPhone the
+    /// title, artist, album, duration and finish time all go beside the
+    /// art, so the type is a step smaller and the times take two lines
+    /// (on one, the finish time was cut off); an iPad keeps one line.
+    public struct MediumStyle: Equatable, Sendable {
+        public let titleSize: Double
+        /// The artist and album.
+        public let secondarySize: Double
+        public let timesSize: Double
+        /// Between the lines of text.
+        public let lineSpacing: Double
+        /// The least room between the text and the buttons.
+        public let minGap: Double
+        public let playDiameter: Double
+        /// "Duration: …" and "Ends: …" on lines of their own.
+        public let twoLineTimes: Bool
+
+        /// An iPad (and anything else that isn't an iPhone): as before.
+        public static let regular = MediumStyle(titleSize: 16, secondarySize: 13, timesSize: 11,
+                                                lineSpacing: 2, minGap: 6, playDiameter: 44, twoLineTimes: false)
+        /// An iPhone: five lines and the buttons fit the smallest medium
+        /// widget (321 × 148 pt, iPhone SE).
+        public static let phone = MediumStyle(titleSize: 14, secondarySize: 12, timesSize: 11,
+                                              lineSpacing: 0, minGap: 4, playDiameter: 40, twoLineTimes: true)
+
+        public static func of(isPhone: Bool) -> MediumStyle { isPhone ? .phone : .regular }
     }
 
     /// Decides what to show at `now`. No snapshot yet (the app hasn't run

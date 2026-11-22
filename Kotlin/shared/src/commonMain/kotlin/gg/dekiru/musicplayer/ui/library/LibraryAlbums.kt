@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -58,6 +59,7 @@ import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
  * three across on a phone, a green tick on downloaded albums. Wide (with
  * [zoom]): the shared cards-per-row, each cover filling its column, the
  * text growing with it. [onAppear] runs as each album comes into view.
+ * [footer]: full width after the last row, scrolling with the grid.
  */
 @Composable
 fun LibraryAlbumGrid(
@@ -70,8 +72,11 @@ fun LibraryAlbumGrid(
     trailingEdge: Boolean = true,
     onAppear: (JellyfinAlbum) -> Unit = {},
     zoom: GridZoom? = null,
+    footer: (@Composable () -> Unit)? = null,
+    fixedColumns: Int? = null,
+    widensWithoutZoom: Boolean = false,
 ) {
-    CardGridView(albums, { it.id }, state, trailingEdge, zoom) { album, grid ->
+    CardGridView(albums, { it.id }, state, trailingEdge, zoom, footer, fixedColumns, widensWithoutZoom) { album, grid ->
         LaunchedEffect(album.id, albums.size) { onAppear(album) }
         GridCell(api, album, grid, isDownloaded(album), localArt(album)) { onOpen(album) }
     }
@@ -105,6 +110,10 @@ internal fun LibraryArtistGrid(
 /**
  * The columns shared by album and artist grids ([LibraryModel.cardGrid]).
  * Wide with [zoom]: tells it how many columns show, for the zoom buttons.
+ * [fixedColumns]: exactly that many on every device, cards filling their
+ * columns, [zoom] neither read nor told (Recently Played: the export's
+ * size). [widensWithoutZoom]: without [zoom], wide layouts still get the
+ * automatic count with column-filling cards (Recently Played below 9 albums).
  */
 @Composable
 private fun <T> CardGridView(
@@ -113,15 +122,24 @@ private fun <T> CardGridView(
     state: LazyGridState,
     trailingEdge: Boolean,
     zoom: GridZoom?,
+    footer: (@Composable () -> Unit)? = null,
+    fixedColumns: Int? = null,
+    widensWithoutZoom: Boolean = false,
     cell: @Composable (T, CardGrid) -> Unit,
 ) {
     val bottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues().calculateBottomPadding()
-    val wide = zoom != null && isWideLayout()
+    val wideLayout = isWideLayout()
+    val wide = fixedColumns == null && zoom != null && wideLayout
     val density = LocalDensity.current.density
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // The A–Z strip already leaves room on the right: no trailing padding then (so three fit on a phone).
         val trailing = if (trailingEdge) LibraryModel.GRID_EDGE else 0f
-        val grid = LibraryModel.cardGrid(maxWidth.value - LibraryModel.GRID_EDGE - trailing, wide, zoom?.columns, density)
+        val width = maxWidth.value - LibraryModel.GRID_EDGE - trailing
+        val grid = if (fixedColumns != null) {
+            LibraryModel.fixedCardGrid(width, fixedColumns, density)
+        } else {
+            LibraryModel.cardGrid(width, wide || (widensWithoutZoom && wideLayout), if (wide) zoom?.columns else null, density)
+        }
         if (wide) SideEffect { zoom.shown = grid.columns }
         LazyVerticalGrid(
             columns = GridCells.Fixed(grid.columns),
@@ -132,6 +150,7 @@ private fun <T> CardGridView(
             modifier = Modifier.fillMaxSize(),
         ) {
             items(items, key = key) { item -> cell(item, grid) }
+            if (footer != null) item(key = "grid-footer", span = { GridItemSpan(maxLineSpan) }) { footer() }
         }
     }
 }

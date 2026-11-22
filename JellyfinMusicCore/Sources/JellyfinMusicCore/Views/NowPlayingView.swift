@@ -19,6 +19,13 @@ public struct NowPlayingView: View {
     let manager: PlayerManager
     /// Called when the user presses the up button to dismiss the sheet.
     let onDismiss: () -> Void
+    /// The artist line: close Now Playing and show this artist's albums.
+    /// Nil: the line is plain text.
+    let onShowArtist: ((JellyfinArtist) -> Void)?
+
+    /// A name-only album artist looked up on the server, for the track
+    /// whose `artistLookupKey` is `key`; `artist` nil if there's no match.
+    @State private var foundArtist: (key: String, artist: JellyfinArtist?)?
 
     /// Show the spectrum bars under the artwork. Remembered between launches.
     @AppStorage("nowPlaying.showVisualiser") private var showVisualiser = false
@@ -34,8 +41,11 @@ public struct NowPlayingView: View {
 
     // MARK: Init
 
-    public init(manager: PlayerManager, onDismiss: @escaping () -> Void) {
+    public init(manager: PlayerManager,
+                onShowArtist: ((JellyfinArtist) -> Void)? = nil,
+                onDismiss: @escaping () -> Void) {
         self.manager = manager
+        self.onShowArtist = onShowArtist
         self.onDismiss = onDismiss
     }
 
@@ -63,6 +73,7 @@ public struct NowPlayingView: View {
         .background(AppBackgroundView())
         .foregroundStyle(.white)
         .task(id: manager.currentTrack?.artKey) { await loadArtAccent() }
+        .task(id: artistLookupTaskID) { await lookUpArtist() }
         // The sheet and its notice show here while Now Playing is in front.
         .playlistEventsHost(isActive: true)
         #if os(iOS)
@@ -257,10 +268,7 @@ public struct NowPlayingView: View {
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-                Text(track.artist)
-                    .font(.plex(.headline, scale: s))
-                    .foregroundStyle(Color.albumArtistText)
-                    .lineLimit(1)
+                artistLine(track, s)
                 Text(track.album)
                     .font(.plex(.subheadline, scale: s))
                     .foregroundStyle(Color.albumYearText)
@@ -299,6 +307,55 @@ public struct NowPlayingView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    /// The artist under the title; when it can (`ArtistLink`), a tap closes
+    /// Now Playing and shows the artist's albums. It looks the same either way.
+    @ViewBuilder
+    private func artistLine(_ track: PlaybackTrack, _ s: CGFloat) -> some View {
+        let text = Text(track.artist)
+            .font(.plex(.headline, scale: s))
+            .foregroundStyle(Color.albumArtistText)
+            .lineLimit(1)
+        if let onShowArtist, let artist = artistLink(for: track) {
+            Button { onShowArtist(artist) } label: { text }
+                .artistLinkStyle(track.artist)
+                .accessibilityIdentifier("NowPlayingView.artistLink")
+        } else {
+            text
+        }
+    }
+
+    /// The artist the line opens: the track's album artist by ID, or the
+    /// match found by name (`lookUpArtist`); nil: not tappable.
+    private func artistLink(for track: PlaybackTrack) -> JellyfinArtist? {
+        switch ArtistLink.resolve(name: track.artist, id: track.albumArtistId) {
+        case .artist(let artist): return artist
+        case .lookup:
+            guard let found = foundArtist, found.key == Self.artistLookupKey(track) else { return nil }
+            return found.artist
+        case nil: return nil
+        }
+    }
+
+    private static func artistLookupKey(_ track: PlaybackTrack) -> String {
+        track.artist + "\u{1}" + (track.albumArtistId ?? "")
+    }
+
+    /// Changes when a name-only artist needs looking up (again on reconnecting).
+    private var artistLookupTaskID: String? {
+        guard let track = manager.currentTrack, onShowArtist != nil,
+              case .lookup = ArtistLink.resolve(name: track.artist, id: track.albumArtistId) else { return nil }
+        return Self.artistLookupKey(track) + (NetworkMonitor.shared.isConnected ? "\u{1}online" : "")
+    }
+
+    private func lookUpArtist() async {
+        guard artistLookupTaskID != nil, let track = manager.currentTrack else { return }
+        let key = Self.artistLookupKey(track)
+        if let found = foundArtist, found.key == key, found.artist != nil { return }
+        let artist = await manager.albumArtistLink(for: track)
+        guard !Task.isCancelled else { return }
+        foundArtist = (key, artist)
     }
 
     /// The info line's quality: the sample rate, or the format and bitrate

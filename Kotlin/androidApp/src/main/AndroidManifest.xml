@@ -83,6 +83,17 @@
             android:authorities="${applicationId}.artwork"
             android:exported="true" />
 
+        <!-- Recently Played ▸ Export grid ▸ Copy: the picture, from the cache, for the app that pastes it. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.exports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/export_paths" />
+        </provider>
+
         <!-- Downloads run as WorkManager foreground work of type dataSync. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"

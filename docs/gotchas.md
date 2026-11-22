@@ -130,6 +130,8 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **A widget cannot tick by itself.** While paused, the "Ends" time keeps up through minute-by-minute timeline entries for an hour; if the app is killed while playing, the widget shows Play and only the duration once `playingUntil` has passed.
 
+**On an iPhone the medium widget's times take two lines.** On one line ("Duration: …   Ends: …") the finish time was cut off; `WidgetDisplay.MediumStyle.phone` also steps the type down so five lines and the buttons fit the iPhone SE's 321 × 148 pt widget. The iPad keeps one line.
+
 **The widget bundles its own copies of the fonts.** The extension lists the four DEKIRU Sans files as resources and under `UIAppFonts`, because it does not load the package's font registration.
 
 **Use App Intents for Siri, not SiriKit.** `INPlayMediaIntent` needs the Siri entitlement and an Intents extension; `AudioPlaybackIntent`s in `Tetsubi-iOS/Siri/PlayAlbumIntents.swift` start music without opening the app.
@@ -407,6 +409,8 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 ### Widgets
 
 **Use `SizeMode.Exact` in Glance.** `SizeMode.Responsive` gave the nearest preset size, so the art came out tiny; `WidgetLayout` sizes everything from the real size.
+
+**On a phone the medium widget's times take two lines, with smaller text.** `WidgetLayout.isPhone` decides from the widget's width and the device's smallest width (both under 600 dp), because the Pad's 4×2 is only 512 dp wide.
 
 **HyperOS draws widgets smaller than it reports.** The Xiaomi launcher reports the real widget size (225 dp for a 2 by 2 cell on the test tablet) but draws widgets about 22% smaller.
 

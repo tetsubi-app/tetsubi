@@ -7,6 +7,7 @@ import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.api.JellyfinError
 import gg.dekiru.musicplayer.data.artist.ArtistInfo
 import gg.dekiru.musicplayer.data.artist.ArtistInfoClient
+import gg.dekiru.musicplayer.data.models.ArtistLink
 import gg.dekiru.musicplayer.data.models.DiscGrouping
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.models.JellyfinTrack
@@ -66,6 +67,13 @@ class AlbumModel(
         private set
     var artistInfo by mutableStateOf<ArtistInfo?>(null)
         private set
+
+    /**
+     * The album artist the artist line opens; null while a name-only artist
+     * is looked up, and when the line isn't tappable ([ArtistLink]).
+     */
+    var artistLink by mutableStateOf((ArtistLink.resolve(album.artistName, album.artistId) as? ArtistLink.Artist)?.artist)
+        private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
 
@@ -88,6 +96,7 @@ class AlbumModel(
     fun load() {
         if (loaded) return
         loaded = true
+        findArtistLink()
         if (!isOnline()) {
             loadTracks()
             return
@@ -123,6 +132,21 @@ class AlbumModel(
             }
             val shown = discs.map { it.id }.toSet()
             moreByArtist = DiscGrouping.merge(found.filter { it.id !in shown }).take(12)
+        }
+    }
+
+    /** An album that only knows its artist's name: look the artist up (online). */
+    private fun findArtistLink() {
+        if (artistLink != null || ArtistLink.resolve(album.artistName, album.artistId) !is ArtistLink.Lookup || !isOnline()) return
+        val name = album.artistName
+        scope.launch {
+            artistLink = ArtistLink.find(name, null, online = true) { term ->
+                try {
+                    api.searchArtists(term, limit = 10)
+                } catch (e: JellyfinError) {
+                    emptyList()
+                }
+            }
         }
     }
 

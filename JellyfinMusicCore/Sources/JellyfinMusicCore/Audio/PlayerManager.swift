@@ -1252,6 +1252,17 @@ extension PlayerManager {
 
 // MARK: - Small helpers on PlaybackTrack
 
+extension PlayerManager {
+    /// The artist Now Playing's artist line opens for `track`: its album
+    /// artist, looked up by name when only that is known (online only).
+    /// Nil: the line isn't tappable (`ArtistLink`).
+    public func albumArtistLink(for track: PlaybackTrack) async -> JellyfinArtist? {
+        let api = self.api
+        return await ArtistLink.find(name: track.artist, id: track.albumArtistId,
+                                     online: NetworkMonitor.shared.isConnected) { await api.albumArtists(matching: $0) }
+    }
+}
+
 private extension PlaybackTrack {
     /// What the file itself says replaces what the server said (a
     /// download may have been converted).
@@ -1280,6 +1291,7 @@ private extension PlaybackTrack {
         copy.sampleRate = sampleRate
         copy.bitDepth = bitDepth
         copy.artItemId = artItemId
+        copy.albumArtistId = albumArtistId
         copy.localArtURL = localArtURL
         return copy
     }
@@ -1301,6 +1313,7 @@ private extension PlaybackTrack {
         copy.sampleRate = sampleRate
         copy.bitDepth = bitDepth
         copy.artItemId = artItemId
+        copy.albumArtistId = albumArtistId
         copy.localArtURL = localArtURL
         return copy
     }
@@ -1323,6 +1336,7 @@ private extension PlaybackTrack {
         copy.sampleRate = sampleRate
         copy.bitDepth = bitDepth
         copy.artItemId = artItemId
+        copy.albumArtistId = albumArtistId
         copy.localArtURL = localArtURL
         return copy
     }
