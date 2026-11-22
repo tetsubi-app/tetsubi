@@ -9,6 +9,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -16,10 +17,15 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.TransferListener
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
@@ -59,13 +65,39 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         .setConnectTimeoutMs(15_000)
         .setReadTimeoutMs(30_000)
 
+    /**
+     * The track-start diagnostic line ([StreamStartLog]). Its handler, the
+     * waits and the stream events below are declared before [player], which
+     * uses them.
+     */
+    private val startLog = StreamStartLog({ SystemClock.elapsedRealtime() })
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val startCheckTask = Runnable { checkStart() }
+
+    /**
+     * Each stream's connection opening (the HTTP response, or a downloaded
+     * file opening), on the loading thread: handed to [startLog] on the main
+     * thread with the time it happened. Nothing per buffer.
+     */
+    private val streamOpened = object : TransferListener {
+        override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) = Unit
+        override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {
+            val at = SystemClock.elapsedRealtime()
+            val uri = dataSpec.uri.toString()
+            mainHandler.post { startLog.responded(uri, at) }
+        }
+        override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) = Unit
+        override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) = Unit
+    }
+
     /** The equaliser and visualiser, worked by [TetsubiAudioProcessor] in the audio output. */
     override val audioEffects = AudioEffects()
 
     val player: ExoPlayer = ExoPlayer.Builder(context)
         .setRenderersFactory(effectsRenderersFactory(context, audioEffects))
         .setMediaSourceFactory(
-            DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http)).setLoadErrorHandlingPolicy(ConvertedStreamErrorPolicy()),
+            DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http).setTransferListener(streamOpened))
+                .setLoadErrorHandlingPolicy(ConvertedStreamErrorPolicy()),
         )
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
@@ -104,7 +136,6 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
     /** Tries to get a converted stream back after its connection dropped. */
     private val reconnect = ReconnectState { SystemClock.elapsedRealtime() }
-    private val mainHandler = Handler(Looper.getMainLooper())
     private val retryTask = Runnable { retryStream() }
 
     /**
@@ -218,8 +249,10 @@ class Media3Engine(private val context: Context) : PlayerEngine {
      * point. While a dropped stream waits for its next try, the try comes now.
      */
     private fun seekWithin(index: Int, positionMs: Long) {
+        val from = active.currentMediaItemIndex
         moveWithin(index, positionMs)
         if (reconnect.active) retryStream()
+        if (!casting) beginStart(if (index == from) StreamStartLog.Reason.SEEK else StreamStartLog.Reason.SKIP)
     }
 
     private fun moveWithin(index: Int, positionMs: Long) {
@@ -275,6 +308,8 @@ class Media3Engine(private val context: Context) : PlayerEngine {
             restoreOtherTracks()
             val automatic = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
                 reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
+            // Skips and seeks are logged where they're asked for (seekWithin).
+            if (automatic && source === player) beginStart(StreamStartLog.Reason.NEXT, alreadyPlaying = player.isPlaying)
             listener?.onIndexChanged(source.currentMediaItemIndex, automatic)
         }
 
@@ -303,6 +338,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         override fun onPlayerError(error: PlaybackException) {
             if (!isActive) return
             if (source === player && reconnectAfter(error)) return
+            if (source === player) startLog.failed(error.errorCodeName)
             listener?.onError("Playback failed (${error.errorCodeName}).")
         }
     }
@@ -378,7 +414,10 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     private fun retryStream() {
         mainHandler.removeCallbacks(retryTask)
         if (!reconnect.active || casting) return
-        if (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0) player.prepare()
+        if (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0) {
+            player.prepare()
+            beginStart(StreamStartLog.Reason.RECONNECT)
+        }
     }
 
     /** Playing again, given up, or overtaken (a new queue, stop, Cast): no more tries. */
@@ -423,6 +462,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
     init {
         player.addListener(Events(player))
+        player.addAnalyticsListener(StartEvents())
         if (castConnection != null) {
             // The Cast framework must start on the main thread.
             if (Looper.myLooper() == Looper.getMainLooper()) startCast() else Handler(Looper.getMainLooper()).post(::startCast)
@@ -446,6 +486,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         // From here on the old player's events are ignored.
         _activePlayer.value = target
         endReconnect()
+        endStart()
         if (source === player) player.stop()
         startOffsets.clear()
         castEnded = false
@@ -486,6 +527,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         player.setMediaItems(queueItems.mapIndexed { i, item -> mediaItem(item, plan.urls[i], onCast = false) }, plan.startIndex, plan.startPositionMillis)
         player.prepare()
         player.playWhenReady = plan.playWhenReady
+        beginStart(StreamStartLog.Reason.PLAY)
     }
 
     override fun setAuthorization(header: String?) {
@@ -500,11 +542,13 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         startOffsets.clear()
         if (casting) {
             // The controller plays a new queue straight away; the receiver needs to know as it loads.
+            endStart()
             loadOnCast(PlaybackSnapshot(startIndex, 0, playWhenReady = true, repeat))
             return
         }
         player.setMediaItems(items.map { mediaItem(it, it.url, onCast = false) }, startIndex, 0)
         player.prepare()
+        beginStart(StreamStartLog.Reason.PLAY)
     }
 
     override fun replaceAfterCurrent(items: List<EngineItem>) {
@@ -533,7 +577,11 @@ class Media3Engine(private val context: Context) : PlayerEngine {
             if (castEnded) loadOnCast(PlaybackSnapshot(castEndedIndex, 0, playWhenReady = true, repeat)) else active.play()
             return
         }
-        if (player.playbackState == Player.STATE_IDLE) player.prepare()
+        if (player.playbackState == Player.STATE_IDLE) {
+            // After an error: loads the item again.
+            player.prepare()
+            beginStart(StreamStartLog.Reason.RESUME)
+        }
         // Ended: Play starts the queue again.
         if (player.playbackState == Player.STATE_ENDED) seekable.seekTo(0, 0)
         player.play()
@@ -560,6 +608,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
     override fun stop() {
         endReconnect()
+        endStart()
         player.stop()
         player.clearMediaItems()
         if (casting) {
@@ -574,6 +623,72 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     override val positionMillis: Long get() = if (casting && castEnded) 0 else seekable.currentPosition
     override val durationMillis: Long
         get() = if (casting && castEnded) 0 else seekable.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0
+
+    // The track-start diagnostic line (StreamStartLog)
+
+    /** ExoPlayer was asked for the current item's audio afresh: starts timing it. */
+    private fun beginStart(reason: StreamStartLog.Reason, alreadyPlaying: Boolean = false) {
+        val item = queueItems.getOrNull(player.currentMediaItemIndex) ?: return
+        val uri = player.currentMediaItem?.localConfiguration?.uri?.toString() ?: return
+        startLog.begin(item.id, StreamStartLog.kindOf(uri), reason, uri, alreadyPlaying)
+        scheduleStartCheck()
+    }
+
+    private fun endStart() {
+        startLog.cancel()
+        mainHandler.removeCallbacks(startCheckTask)
+    }
+
+    private fun scheduleStartCheck() {
+        mainHandler.removeCallbacks(startCheckTask)
+        startLog.millisUntilCheck()?.let { mainHandler.postDelayed(startCheckTask, it) }
+    }
+
+    private fun checkStart() {
+        val state = when (player.playbackState) {
+            Player.STATE_IDLE -> "idle"
+            Player.STATE_BUFFERING -> "buffering"
+            Player.STATE_READY -> "ready"
+            else -> "ended"
+        }
+        startLog.check(paused = !player.playWhenReady, state = state)
+        scheduleStartCheck()
+    }
+
+    private val eventWindow = Timeline.Window()
+
+    /** The stream of the item an ExoPlayer event is about. */
+    private fun sourceOf(eventTime: AnalyticsListener.EventTime): String? {
+        val timeline = eventTime.timeline
+        if (eventTime.windowIndex !in 0 until timeline.windowCount) return null
+        return timeline.getWindow(eventTime.windowIndex, eventWindow).mediaItem.localConfiguration?.uri?.toString()
+    }
+
+    /**
+     * ExoPlayer's milestones for [startLog]: the first audio of an item
+     * reaching the decoder (its format read, per item, also for the next
+     * item loaded ahead), playing, and the audio output starting to move
+     * (once after each load, seek or pause). None of these come per buffer.
+     */
+    private inner class StartEvents : AnalyticsListener {
+        override fun onAudioInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
+            sourceOf(eventTime)?.let { startLog.firstAudio(it) }
+        }
+
+        override fun onIsPlayingChanged(eventTime: AnalyticsListener.EventTime, isPlaying: Boolean) {
+            if (!startLog.pending) return
+            if (isPlaying) startLog.playing() else startLog.stoppedPlaying()
+            scheduleStartCheck()
+        }
+
+        override fun onAudioPositionAdvancing(eventTime: AnalyticsListener.EventTime, playoutStartSystemTimeMs: Long) {
+            startLog.soundStarted()
+        }
+
+        override fun onPlaybackStateChanged(eventTime: AnalyticsListener.EventTime, state: Int) {
+            if (state == Player.STATE_READY && !player.playWhenReady) startLog.readyWhilePaused()
+        }
+    }
 
     /**
      * `url`: the item's stream, or a restarted converted stream. On a Cast
