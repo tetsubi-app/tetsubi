@@ -43,6 +43,7 @@ private val cardWidth = LibraryModel.HOME_CARD.dp
  * An album card (as `AlbumCardView` on iOS): 140 dp art, title (2 lines),
  * artist, year; an optional badge ("30 years ago") over the art's corner,
  * and a green tick at the bottom right when the album is downloaded.
+ * A long press or right-click offers Play Next and Add to Queue.
  * With [size] (Home on wide layouts, [LibraryModel.homeRow]) the art is
  * that wide with no side margin (cards exactly the gap apart, as iOS) and
  * the text, gaps, badge, tick and corners scale with it.
@@ -61,10 +62,12 @@ fun AlbumCard(
 ) {
     val width = size?.cardWidth?.dp ?: cardWidth
     val t = size?.textScale ?: 1f
+    // Long press or right-click: Play Next, Add to Queue.
+    WithContextMenu(albumQueueActions(album)) { openMenu ->
     Column(
         Modifier
             .clip(RoundedCornerShape((8 * t).dp))
-            .clickable(role = Role.Button, onClick = onClick)
+            .menuClickable(onClick, openMenu)
             .then(homeCardPadding(size))
             .width(width),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -95,6 +98,7 @@ fun AlbumCard(
         CardText(album.displayName, Color.White, (12 * t).sp, width, bold = true, lines = titleLines)
         CardText(album.artistName, TetsubiColors.albumArtistText, (11 * t).sp, width)
         album.productionYear?.let { CardText(it.toString(), TetsubiColors.albumYearText, (11 * t).sp, width) }
+    }
     }
 }
 

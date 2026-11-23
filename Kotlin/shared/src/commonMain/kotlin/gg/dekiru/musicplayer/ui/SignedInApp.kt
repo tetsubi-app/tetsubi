@@ -2,6 +2,11 @@ package gg.dekiru.musicplayer.ui
 
 import gg.dekiru.musicplayer.data.models.JellyfinArtist
 import gg.dekiru.musicplayer.ui.components.GearIcon
+import gg.dekiru.musicplayer.ui.components.LocalPlayPrompt
+import gg.dekiru.musicplayer.ui.components.LocalPlayer
+import gg.dekiru.musicplayer.ui.components.PlayPrompt
+import gg.dekiru.musicplayer.ui.components.PlayPromptDialog
+import androidx.compose.runtime.CompositionLocalProvider
 import gg.dekiru.musicplayer.ui.components.GridTabIcon
 import gg.dekiru.musicplayer.ui.library.ArtistModel
 import gg.dekiru.musicplayer.ui.library.ArtistScreen
@@ -226,6 +231,9 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
     val keyboardUp = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val showBar = playing?.currentTrack != null && !keyboardUp
 
+    // Play Next / Add to Queue in the cards' menus, and the Play prompt (one for the app).
+    val playPrompt = remember { PlayPrompt() }
+    CompositionLocalProvider(LocalPlayer provides playing, LocalPlayPrompt provides playPrompt) {
     Box(Modifier.fillMaxSize()) {
         // The blurred album art while something is loaded.
         AlbumBackdrop(api, playing?.currentTrack?.artItemId, localPath = playing?.currentTrack?.localArtPath)
@@ -326,6 +334,9 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                 Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).widthIn(max = 720.dp),
             )
         }
+        // Replace queue · Play Next · Add to Queue, when Play would replace more than the playing album.
+        PlayPromptDialog(playPrompt)
+    }
     }
 }
 

@@ -69,6 +69,8 @@ class PlayerController(
     private val random: Random = Random,
     /** Saves the queue between runs (debounced); null: it isn't saved. */
     private val queueSaver: PlayQueueSaver? = null,
+    /** A clock in ms, for how long a track has been starting. */
+    private val clock: () -> Long = { gg.dekiru.musicplayer.nowMillis() },
 ) : EngineListener {
 
     /** What one entry plays: the track as shown, the engine's item, what the queue keeps, and its place in its album or playlist (-1: unknown). */
@@ -109,6 +111,34 @@ class PlayerController(
 
     var isPlaying by mutableStateOf(false)
         private set
+
+    /**
+     * The playing track is loading after Play, a skip, a seek or a
+     * reconnect and no sound has come yet (the engine's buffering). The
+     * Play/Pause buttons show a spinner and [togglePlayPause] does nothing,
+     * so a press while waiting can't pause what's about to start.
+     */
+    var isStarting by mutableStateOf(false)
+        private set
+
+    /** The start is a dropped stream reconnecting after it had played: presses pause. */
+    private var startIsReconnect = false
+
+    /** When the user last asked for sound: Play, a skip or a seek (a stall long after isn't a start). */
+    private var startedAt = 0L
+
+    /**
+     * Whether a Play/Pause press is ignored now: only in the first
+     * [IGNORE_PRESSES_MILLIS] of a track's start (not a reconnect), so an
+     * impatient press can't pause what's about to play, while one later
+     * still stops a start that's going nowhere.
+     */
+    val ignoresPlayPause: Boolean
+        get() = isStarting && !startIsReconnect && clock() - startedAt < IGNORE_PRESSES_MILLIS
+
+    private fun markStart() {
+        startedAt = clock()
+    }
 
     /** Seconds into the current track (updated twice a second while playing). */
     var position by mutableStateOf(0.0)
@@ -186,27 +216,36 @@ class PlayerController(
      */
     fun play(album: JellyfinAlbum, startTrackId: String? = null, openNowPlaying: Boolean = true) {
         if (!engine.isSupported) return
+        // A new Play starts clean: adds (and an earlier Play) still waiting for their tracks are
+        // dropped. It takes its own turn, so adds tapped after it land in the new queue.
+        addTurns.cancelAll()
+        val turn = addTurns.take()
         if (openNowPlaying) isNowPlayingOpen = true
         // Maniac Mode always starts at track 1.
         val start = if (maniacMode) null else startTrackId
         lastError = null
         loadJob?.cancel()
         downloadedDiscs(album)?.let { discs ->
-            playLocal(discs, album)
+            addTurns.finish(turn) { playLocal(discs, album) }
             return
         }
         isLoading = true
         loadJob = scope.launch {
-            val tracks = fetchAlbum(album).getOrElse {
-                fail(it.message ?: "Couldn't load the album.")
-                return@launch
+            try {
+                val tracks = fetchAlbum(album).getOrElse {
+                    if (!turn.isCancelled) fail(it.message ?: "Couldn't load the album.")
+                    return@launch
+                }
+                if (tracks.isEmpty()) {
+                    if (!turn.isCancelled) fail("This album has no tracks.")
+                    return@launch
+                }
+                val startIndex = start?.let { id -> tracks.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
+                val media = streamMedia(tracks, album)
+                addTurns.finish(turn) { startQueue(QueueGroup.album(album), media, startIndex, idsOf(album)) }
+            } finally {
+                addTurns.drop(turn)
             }
-            if (tracks.isEmpty()) {
-                fail("This album has no tracks.")
-                return@launch
-            }
-            val startIndex = start?.let { id -> tracks.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
-            startQueue(QueueGroup.album(album), streamMedia(tracks, album), startIndex, idsOf(album))
         }
     }
 
@@ -243,13 +282,15 @@ class PlayerController(
         }
         lastError = null
         loadJob?.cancel()
+        // A new Play starts clean: adds (and an earlier Play) still waiting for their tracks are dropped.
+        addTurns.cancelAll()
         if (entries.isEmpty()) {
             fail("This playlist has no songs.")
             return null
         }
         if (shuffled) changeShuffle(true)
         if (openNowPlaying) isNowPlayingOpen = true
-        startQueue(QueueGroup.playlist(playlist), media, forced, null)
+        addTurns.finish(addTurns.take()) { startQueue(QueueGroup.playlist(playlist), media, forced, null) }
         return null
     }
 
@@ -287,35 +328,99 @@ class PlayerController(
     /** Queues some of `album`'s tracks at the end of the queue (offline: the ones on this device). */
     fun addToQueue(album: JellyfinAlbum, tracks: List<JellyfinTrack>) = enqueue(album, tracks, next = false)
 
+    /** Queues a playlist (a card's menu: its songs are fetched; offline, its download's) after the playing album. */
+    fun playNext(playlist: JellyfinPlaylist) = enqueue(playlist, next = true)
+
+    /** Queues a playlist (a card's menu) at the end of the queue. */
+    fun addToQueue(playlist: JellyfinPlaylist) = enqueue(playlist, next = false)
+
+    /**
+     * Whether Play on an album or playlist should ask first (Replace queue,
+     * Play Next, Add to Queue): something from another album or playlist is
+     * queued after the playing one ([PlayQueue.asksBeforeReplacing]).
+     */
+    val asksBeforePlay: Boolean get() = playQueue.asksBeforeReplacing
+
+    /** Adds land in the order they were tapped ([AddTurns]). */
+    private val addTurns = AddTurns()
+
+    /** Fetches for `turn`; ending without resolving it (failed, cancelled) drops the turn. */
+    private fun launchInTurn(turn: AddTurns.Turn, block: suspend () -> Unit) {
+        scope.launch {
+            try {
+                block()
+            } finally {
+                addTurns.drop(turn)
+            }
+        }
+    }
+
+    /** Adds `media` now, after any adds still waiting for their tracks. */
+    private fun addInTurn(next: Boolean, group: QueueGroup, media: List<Media>, ids: AlbumIds?, after: () -> Unit = {}) =
+        addTurns.finish(addTurns.take()) {
+            add(next, group, media, ids)
+            after()
+        }
+
+    private fun enqueue(playlist: JellyfinPlaylist, next: Boolean) {
+        if (!engine.isSupported) return
+        if (!isOnline()) {
+            val saved = downloads()?.playlists?.saved(playlist.id)?.takeIf { it.isAvailableOffline }
+                ?: return say(NOTHING_DOWNLOADED, isError = true)
+            return enqueue(playlist, saved.manifest.toEntries(), next)
+        }
+        val turn = addTurns.take()
+        launchInTurn(turn) {
+            val entries = try {
+                api.playlistTracks(playlist.id)
+            } catch (e: JellyfinError) {
+                if (!turn.isCancelled) say(PLAYLIST_NOT_LOADED, isError = true)
+                return@launchInTurn
+            }
+            if (turn.isCancelled) return@launchInTurn
+            if (entries.isEmpty()) return@launchInTurn say(PLAYLIST_EMPTY, isError = true)
+            val media = playlistMedia(playlist, entries)
+            if (media.isEmpty()) return@launchInTurn say(NOTHING_DOWNLOADED, isError = true)
+            addTurns.finish(turn) { add(next, QueueGroup.playlist(playlist), media, null) }
+        }
+    }
+
     private fun enqueue(album: JellyfinAlbum, next: Boolean) {
         if (!engine.isSupported) return
         val group = QueueGroup.album(album)
         downloadedDiscs(album)?.let { discs ->
-            add(next, group, localMedia(discs, album), idsOf(album))
-            lookUpCastUrls(discs)
+            addInTurn(next, group, localMedia(discs, album), idsOf(album)) { lookUpCastUrls(discs) }
             return
         }
         if (!isOnline()) {
             val manager = downloads()
             val discs = album.allDiscs.mapNotNull { manager?.downloadedAlbum(it.id) }
-            if (discs.isEmpty()) return say(NOT_DOWNLOADED_NOTICE, isError = true)
-            add(next, group, localMedia(discs, album), idsOf(album))
+            if (discs.isEmpty()) return say(ALBUM_NOT_QUEUED, isError = true)
+            addInTurn(next, group, localMedia(discs, album), idsOf(album))
             return
         }
-        scope.launch {
+        val turn = addTurns.take()
+        launchInTurn(turn) {
             val tracks = fetchAlbum(album).getOrElse {
-                say(it.message ?: "Couldn't load the album.", isError = true)
-                return@launch
+                if (!turn.isCancelled) say(ALBUM_NOT_QUEUED, isError = true)
+                return@launchInTurn
             }
-            add(next, group, streamMedia(tracks, album), idsOf(album))
+            val media = streamMedia(tracks, album)
+            addTurns.finish(turn) { add(next, group, media, idsOf(album)) }
         }
     }
 
+    /**
+     * A playlist's entries (all of them, or a song's own menu: those songs,
+     * still as part of the playlist), each at its place in the playlist.
+     */
     private fun enqueue(playlist: JellyfinPlaylist, entries: List<PlaylistEntry>, next: Boolean) {
         if (!engine.isSupported) return
-        val media = playlistMedia(playlist, entries)
-        if (entries.isNotEmpty() && media.isEmpty()) return say(NOTHING_DOWNLOADED, isError = true)
-        add(next, QueueGroup.playlist(playlist), media, null)
+        val media = playlistMedia(playlist, entries, byPosition = true)
+        if (entries.isNotEmpty() && media.isEmpty()) {
+            return say(if (entries.size == 1) SONG_NOT_QUEUED else NOTHING_DOWNLOADED, isError = true)
+        }
+        addInTurn(next, QueueGroup.playlist(playlist), media, null)
     }
 
     private fun enqueue(album: JellyfinAlbum, tracks: List<JellyfinTrack>, next: Boolean) {
@@ -330,9 +435,9 @@ class PlayerController(
             val (pt, item) = file?.let { localEntry(described, it, track) } ?: streamEntry(track, described, cap)
             Media(pt, item, QueueTrack.from(track, album, i), i)
         }
-        if (tracks.isNotEmpty() && media.isEmpty()) return say(NOT_DOWNLOADED_NOTICE, isError = true)
+        if (tracks.isNotEmpty() && media.isEmpty()) return say(SONG_NOT_QUEUED, isError = true)
         val group = QueueGroup.tracks(media.map { it.queueTrack }) ?: return
-        add(next, group, media, null)
+        addInTurn(next, group, media, null)
     }
 
     /** Adds `media` from `group` after the playing album or at the end; an empty queue plays it (Now Playing stays as it is). */
@@ -487,11 +592,13 @@ class PlayerController(
     }
 
     /** A playlist's songs: from this device when they're here, else streamed; offline, only those here. */
-    private fun playlistMedia(playlist: JellyfinPlaylist, entries: List<PlaylistEntry>): List<Media> {
+    private fun playlistMedia(playlist: JellyfinPlaylist, entries: List<PlaylistEntry>, byPosition: Boolean = false): List<Media> {
         val local = downloads()?.playlists?.resolver(playlist.id) ?: { null }
         val online = isOnline()
         val cap = cap()
-        return entries.withIndex().mapNotNull { (place, entry) ->
+        return entries.withIndex().mapNotNull { (index, entry) ->
+            // `byPosition`: each entry's own place in the playlist (some of its songs queued); else its index here.
+            val place = if (byPosition) entry.position else index
             val file = local(entry.track.id)
             if (file == null && !online) return@mapNotNull null
             val described = PlaybackTrack.from(entry, place)
@@ -720,20 +827,29 @@ class PlayerController(
         return playQueue.entriesInPlayOrder.filter { (it.id == current || isPlayable(it)) && it.id in engineItems }.map { it.id }
     }
 
-    /** Gives the engine the queue from the playing entry (at `startMillis`), and plays it or leaves it paused. */
+    /**
+     * Gives the engine the queue from the playing entry (at `startMillis`),
+     * and plays it, or leaves it paused without opening any stream
+     * ([PlayerEngine.cue]): the first Play opens it.
+     */
     private fun loadEngine(play: Boolean, startMillis: Long = 0) {
         val current = playQueue.currentEntryId ?: return
         val order = wantedEngineOrder()
         engineOrder = order
         val index = order.indexOf(current).coerceAtLeast(0)
         duration = currentTrack?.durationSeconds ?: 0.0
-        if (!play) engine.pause()
         engine.setRepeatMode(repeatMode)
-        engine.setQueue(order.map(engineItems::getValue), index)
-        if (startMillis > 0) engine.seekTo(startMillis)
+        val items = order.map(engineItems::getValue)
+        if (play) {
+            engine.setQueue(items, index)
+            if (startMillis > 0) engine.seekTo(startMillis)
+        } else {
+            engine.cue(items, index, startMillis)
+        }
         applyNormalization()
         isLoading = false
         if (play) {
+            markStart()
             engine.play()
             reportStarted()
             startTicking()
@@ -774,7 +890,7 @@ class PlayerController(
         if (currentTrack == null) return
         // A restored queue whose entry couldn't be loaded then: load it now.
         if (engineOrder.isEmpty()) {
-            loadEngine(play = true)
+            loadEngine(play = true, startMillis = (position * 1000).toLong())
             return
         }
         // After a failed track, Play tries it again (the engine reloads it); that's a new play.
@@ -785,10 +901,19 @@ class PlayerController(
         }
         // After the queue finished and went back to the start, or after a restore, this play is a new one.
         if (reportedTrack == null) reportStarted()
+        markStart()
         engine.play()
     }
 
-    fun togglePlayPause() = if (isPlaying) pause() else resume()
+    /**
+     * Play or Pause. Nothing in the first seconds of a track's start
+     * ([ignoresPlayPause]); later in a start, or while reconnecting, it
+     * pauses (ending the tries; Play then resumes at the held point).
+     */
+    fun togglePlayPause() {
+        if (ignoresPlayPause) return
+        if (isPlaying || isStarting) pause() else resume()
+    }
 
     /** The next entry ([PlayQueue.next]: Repeat All goes round the whole queue). */
     fun skipToNext() {
@@ -820,6 +945,7 @@ class PlayerController(
             loadEngine(play = true)
             return
         }
+        markStart()
         engine.skipTo(index)
         engine.play()
         // The engine reports the change (onIndexChanged) and the report follows from there.
@@ -828,6 +954,7 @@ class PlayerController(
     fun seek(seconds: Double) {
         if (maniacMode || currentTrack == null) return
         val clamped = seconds.coerceIn(0.0, if (duration > 0) duration else seconds)
+        markStart()
         engine.seekTo((clamped * 1000).toLong())
         position = clamped
     }
@@ -901,6 +1028,7 @@ class PlayerController(
      */
     fun stop() {
         stopped = true
+        addTurns.cancelAll()
         queueSaver?.cancel()
         reportStopped(atEnd = false)
         loadJob?.cancel()
@@ -915,6 +1043,7 @@ class PlayerController(
         forgetAll()
         playQueue = PlayQueue(shuffle = shuffle, repeatMode = repeatMode)
         isPlaying = false
+        isStarting = false
         position = 0.0
         duration = 0.0
     }
@@ -963,8 +1092,10 @@ class PlayerController(
      * Puts back a saved queue at launch, paused at the same entry and point:
      * each entry from its downloaded file when it's here, else streamed. An
      * entry that can't play (offline and not downloaded) is skipped: the
-     * next that can is current, from its start. Nothing is reported until
-     * Play. Ignored once something is queued.
+     * next that can is current, from its start. No stream is opened (the
+     * network may not be up yet at launch) and nothing is reported until
+     * Play, which opens the track at the saved point. Ignored once
+     * something is queued.
      */
     fun restore(snapshot: PlayQueueSnapshot) {
         if (!engine.isSupported || playQueue.currentEntry != null || isLoading || stopped) return
@@ -1022,6 +1153,11 @@ class PlayerController(
         if (isPlaying) startTicking() else scheduleSave()
     }
 
+    override fun onStartingChanged(starting: Boolean, reconnecting: Boolean) {
+        startIsReconnect = reconnecting
+        isStarting = starting
+    }
+
     /** Set while going back to the first entry after the queue ended, so that move isn't reported as a play. */
     private var rewinding = false
 
@@ -1056,6 +1192,7 @@ class PlayerController(
         reportStopped(atEnd = false)
         engine.pause()
         isPlaying = false
+        isStarting = false
         trackFailed = currentTrack != null
         lastError = currentTrack?.let {
             "Couldn't play “${it.title}”. Check the connection to your server, then press Play to try again."
@@ -1104,8 +1241,17 @@ class PlayerController(
         /** Offline, none of the playlist's songs are on this device. */
         const val NOTHING_DOWNLOADED = "None of this playlist's songs are downloaded."
 
-        /** Offline, nothing of the album (or songs) to queue is on this device. */
-        const val NOT_DOWNLOADED_NOTICE = "Not downloaded, and you're offline."
+        /** An album couldn't be queued: its tracks couldn't be fetched, or offline it isn't downloaded. */
+        const val ALBUM_NOT_QUEUED = "Couldn't add this album. Check the connection, or download it first."
+
+        /** A song couldn't be queued (offline and not downloaded). */
+        const val SONG_NOT_QUEUED = "Couldn't add this song. Check the connection, or download it first."
+
+        /** A playlist card's songs couldn't be fetched. */
+        const val PLAYLIST_NOT_LOADED = "Couldn't load this playlist. Check the connection, then try again."
+
+        /** A playlist card with no songs. */
+        const val PLAYLIST_EMPTY = "This playlist is empty."
 
         /** The confirmations. */
         const val PLAYING_NEXT = "Playing next"
@@ -1113,6 +1259,9 @@ class PlayerController(
 
         /** How long a downloaded album waits, while casting, for the server to say what its files are. */
         private const val CAST_LOOKUP_TIMEOUT_MS = 8_000L
+
+        /** How long into a track's start Play/Pause presses are ignored. */
+        const val IGNORE_PRESSES_MILLIS = 10_000L
 
         /** Half-second ticks between saves of the point in the track. */
         private const val SAVE_EVERY_TICKS = 20

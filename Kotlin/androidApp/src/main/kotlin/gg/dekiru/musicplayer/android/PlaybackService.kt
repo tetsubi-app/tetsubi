@@ -64,6 +64,9 @@ class PlaybackService : MediaLibraryService() {
             .setBitmapLoader(ArtworkLoader(this) { engine.authorization })
             .build()
         this.session = session
+        // A restored queue is held unprepared until Play (no stream opens at launch): its
+        // notification and lock-screen player still show it, as they did when it was prepared.
+        setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_ALWAYS)
         // Maniac Mode on/off: swap in a player with (or without) skip and seek; the car's pages lose (or gain) Shuffle.
         scope.launch {
             engine.skipEnabled.drop(1).collect {

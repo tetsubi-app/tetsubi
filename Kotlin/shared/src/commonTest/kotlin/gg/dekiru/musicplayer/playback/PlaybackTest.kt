@@ -41,14 +41,82 @@ class FakeEngine(override val isSupported: Boolean = true, override val cast: Ca
     override fun setAuthorization(header: String?) { authHeader = header }
     /** How many times a whole new queue was loaded (an edit that interrupts playback would be one). */
     var loads = 0
-    override fun setQueue(items: List<EngineItem>, startIndex: Int) { this.items = items; index = startIndex; loads++ }
+    override fun setQueue(items: List<EngineItem>, startIndex: Int) { this.items = items; index = startIndex; loads++; opened = true }
+
+    /** Whether the current item's stream was opened (Media3 prepared): a cued queue isn't until Play. */
+    var opened = false
+
+    /** How many times a queue was cued (held, nothing opened), and the point it was cued at. */
+    var cues = 0
+    var cuedAt = -1L
+
+    /** Where the stream opened on the first Play after a cue (-1: not yet). */
+    var openedAt = -1L
+
+    override fun cue(items: List<EngineItem>, startIndex: Int, startMillis: Long) {
+        this.items = items
+        index = startIndex
+        cues++
+        cuedAt = startMillis
+        positionMillis = startMillis
+        opened = false
+        if (playing) pause()
+    }
+
+    /**
+     * False: Play doesn't make a sound until [soundStarts] (a slow stream):
+     * the engine says it's starting meanwhile, as Media3 does while buffering.
+     */
+    var startsInstantly = true
+    var starting = false
+        private set
+
+    /** A dropped stream (that had played) waits to reconnect, as Media3's reconnect does; still "playing". */
+    var reconnecting = false
+        private set
+
+    fun streamDrops() {
+        reconnecting = true
+        starting = true
+        listener?.onStartingChanged(true, reconnecting = true)
+    }
+
+    /** The slow stream's sound came. */
+    fun soundStarts() {
+        starting = false
+        reconnecting = false
+        listener?.onStartingChanged(false)
+        playing = true
+        listener?.onIsPlayingChanged(true)
+    }
     override fun replaceAfterCurrent(items: List<EngineItem>) { this.items = this.items.take(index + 1) + items }
     override fun replaceAroundCurrent(before: List<EngineItem>, after: List<EngineItem>) {
         items = before + items[index] + after
         index = before.size
     }
-    override fun play() { playing = true; listener?.onIsPlayingChanged(true) }
-    override fun pause() { playing = false; listener?.onIsPlayingChanged(false) }
+    override fun play() {
+        if (!opened) {
+            opened = true
+            openedAt = positionMillis
+        }
+        if (startsInstantly) {
+            playing = true
+            listener?.onIsPlayingChanged(true)
+        } else if (!playing && !starting) {
+            starting = true
+            listener?.onStartingChanged(true)
+        }
+    }
+    override fun pause() {
+        if (starting) {
+            // Pausing ends a reconnect's tries.
+            starting = false
+            reconnecting = false
+            listener?.onStartingChanged(false)
+        }
+        playing = false
+        listener?.onIsPlayingChanged(false)
+    }
     override fun seekTo(millis: Long) { seeks += millis; positionMillis = millis }
     override fun skipTo(index: Int) { this.index = index; listener?.onIndexChanged(index, automatic = false) }
     override fun setRepeatMode(mode: RepeatMode) { repeat = mode }

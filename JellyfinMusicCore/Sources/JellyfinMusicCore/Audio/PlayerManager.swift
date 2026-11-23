@@ -55,7 +55,27 @@ public final class PlayerManager {
         didSet {
             nowPlaying.updateState(isPlaying: isPlaying, elapsedTime: position)
             widgetChanged()
+            updateStarting()
         }
+    }
+    /// The playing track is loading after Play, a skip or a seek and no
+    /// sound has come yet (AVPlayer `.waitingToPlayAtSpecifiedRate`, or a
+    /// restored track waiting to reach its point). The Play/Pause buttons
+    /// show a spinner then, and `togglePlayPause` does nothing, so a press
+    /// while waiting can't pause what's about to start.
+    public private(set) var isStarting: Bool = false
+    /// When the user last asked for sound: Play, a skip or a seek.
+    private var startedAt = Date.distantPast
+    /// The clock for `ignoresPlayPause` (tests move it on).
+    var now: () -> Date = Date.init
+    /// How long into a track's start Play/Pause presses are ignored.
+    nonisolated static let ignorePressesSeconds: TimeInterval = 10
+    /// Whether a Play/Pause press is ignored now: only in the first
+    /// `ignorePressesSeconds` of a start, and not once the start has been
+    /// retried (`watchStart`), so an impatient press can't pause what's
+    /// about to play while a later one still stops a start going nowhere.
+    public var ignoresPlayPause: Bool {
+        isStarting && startRetries == 0 && now().timeIntervalSince(startedAt) < Self.ignorePressesSeconds
     }
     public private(set) var position: TimeInterval = 0
     public private(set) var duration: TimeInterval = 0
@@ -104,6 +124,9 @@ public final class PlayerManager {
     private let stream: StreamURLBuilder
     /// Keeps the queue and decides what the AVQueuePlayer holds.
     private let controller = PlayQueueController()
+    /// Play Next / Add to Queue apply in the order they were asked for,
+    /// even when a later one's tracks arrive first.
+    private let addOrder = QueueAddOrder()
 
     private var player: AVQueuePlayer = AVQueuePlayer()
     /// The underlying player, for the Mac's AirPlay picker.
@@ -119,7 +142,22 @@ public final class PlayerManager {
     private var itemFailureObservers: [ObjectIdentifier: (NSObjectProtocol, NSKeyValueObservation)] = [:]
     /// A restored queue starts partway into its track: the item and where,
     /// applied once the item is ready (an item can't seek before that).
-    private var pendingStartSeek: (item: ObjectIdentifier, seconds: Double)?
+    /// `play`: the item starts playing once it's there (a restored queue's
+    /// first Play), rather than from 0:00 for a moment.
+    private var pendingStartSeek: (item: ObjectIdentifier, seconds: Double, play: Bool)? {
+        didSet { updateStarting() }
+    }
+    /// A paused load held back: the entries and the point, with no player
+    /// item made and no connection opened until Play (`resume`). A restored
+    /// queue is held so at launch, when the route to the server may not be
+    /// up yet; so is any queue loaded paused.
+    private var deferredLoad: (entryIds: [String], position: Double)?
+    /// Watches a converted stream's start (see `watchStart`).
+    private var startWatch: Task<Void, Never>?
+    /// Tries made by `watchStart` for the playing item so far (internal for tests).
+    var startRetries = 0
+    /// AVPlayer's waiting state, for `isStarting`.
+    private var timeControlObservation: NSKeyValueObservation?
     /// Track with an open server playback report (streamed tracks only).
     private var reportedTrack: PlaybackTrack?
     /// What each queue entry plays and shows, by entry id: the track's
@@ -186,6 +224,9 @@ public final class PlayerManager {
         nowPlaying.onStart    = { [weak self] _ in self?.restartCurrentTrack() }
         installTimeObserver()
         installLifecycleObservers()
+        timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.updateStarting() }
+        }
         // `installItemEndObserver` is called per item as it's queued — no
         // global observer needed here.
         isConfigured = true
@@ -355,7 +396,7 @@ public final class PlayerManager {
         }
         let group = QueueGroup(id: sourceId, kind: .album, title: albumTitle,
                                artist: artistName.isEmpty ? nil : artistName, artItemId: albumIDs.first)
-        place(items, group: group, how: .replace(startIndex: nil))
+        addOrder.finish(addOrder.replace()) { [self] in place(items, group: group, how: .replace(startIndex: nil)) }
     }
 
     /// A downloaded album's tracks from its files (several discs back to back).
@@ -570,6 +611,27 @@ public final class PlayerManager {
         return controller.queue.entries.filter { $0.batchId == current.batchId }.map(\.track.albumId)
     }
 
+    /// Pressing Play on an album or playlist should ask Replace queue /
+    /// Play Next / Add to Queue (`PlayQueue.needsPlayPrompt`).
+    public var needsPlayPrompt: Bool { controller.queue.needsPlayPrompt }
+
+    /// Now Playing's end times: "Album ends 13:02 · Queue ends 15:40" (widest
+    /// first; see `QueueEndTimes`), from `now`.
+    public func endTimesVariants(now: Date, format: (Date) -> String) -> [String] {
+        let queue = controller.queue
+        let kind = queue.currentEntry?.group.kind ?? .album
+        return QueueEndTimes.variants(
+            groupLabel: QueueEndTimes.groupLabel(kind: kind, count: queue.currentGroupCount),
+            groupEnd: format(now.addingTimeInterval(currentGroupRemaining)),
+            queueEnd: format(now.addingTimeInterval(queueRemaining)),
+            moreQueued: queue.hasMoreThanCurrentGroup)
+    }
+
+    /// The track shown for a queue entry (Now Playing's queue).
+    public func track(forEntry entry: QueueEntry) -> PlaybackTrack {
+        media[entry.id] ?? restoredTrack(entry)
+    }
+
     /// Whether the current entry was queued from an album (not a playlist
     /// or single tracks).
     var currentGroupIsAlbum: Bool { controller.queue.currentEntry?.group.kind == .album }
@@ -599,17 +661,22 @@ public final class PlayerManager {
         }
         isLoading = true
         lastError = nil
+        // Pending Play Next / Add to Queue are dropped; adds from now on wait for this.
+        let turn = addOrder.replace()
         // Maniac Mode always starts at track 1.
         let startIndex = maniacMode ? 0 : startIndex
         api.tracksForAlbum(album.id) { [weak self] result in
             DispatchQueue.main.async {
+                guard let self else { return }
                 switch result {
                 case .success(let tracks):
-                    self?.startQueue(tracks: tracks, album: album,
-                                     forcedStartIndex: startIndex > 0 ? startIndex : nil, format: format)
+                    self.addOrder.finish(turn) {
+                        self.startQueue(tracks: tracks, album: album,
+                                        forcedStartIndex: startIndex > 0 ? startIndex : nil, format: format)
+                    }
                 case .failure(let err):
                     print("[PlayerManager] tracksForAlbum failed: \(err.errorDescription ?? "\(err)")")
-                    self?.onFail(.unknown)
+                    if self.addOrder.finish(turn, nil) { self.onFail(.unknown) }
                 }
             }
         }
@@ -629,9 +696,12 @@ public final class PlayerManager {
         if discs.count <= 1 {
             let only = discs.first ?? album
             if let trackID {
+                let turn = addOrder.replace()
                 api.tracksForAlbum(only.id) { [weak self] result in
                     DispatchQueue.main.async {
-                        guard case .success(let tracks) = result,
+                        // Not when another Play came first.
+                        guard self?.addOrder.isPending(turn) == true,
+                              case .success(let tracks) = result,
                               let track = tracks.first(where: { $0.id == trackID }) else { return }
                         self?.play(track, in: only, format: format)
                     }
@@ -650,15 +720,18 @@ public final class PlayerManager {
 
         isLoading = true
         lastError = nil
+        let turn = addOrder.replace()
         fetchTracks(discs: discs) { [weak self] tracks in
             guard let self else { return }
             guard let tracks, !tracks.isEmpty else {
                 print("[PlayerManager] No tracks for discs \(discs.map(\.id))")
-                self.onFail(.unknown)
+                if self.addOrder.finish(turn, nil) { self.onFail(.unknown) }
                 return
             }
             let start = trackID.flatMap { id in tracks.firstIndex { $0.id == id } }
-            self.startQueue(tracks: tracks, album: album, forcedStartIndex: start, format: format)
+            self.addOrder.finish(turn) {
+                self.startQueue(tracks: tracks, album: album, forcedStartIndex: start, format: format)
+            }
         }
     }
 
@@ -674,16 +747,20 @@ public final class PlayerManager {
     ) {
         isLoading = true
         lastError = nil
+        let turn = addOrder.replace()
         api.tracksForAlbum(album.id) { [weak self] result in
             DispatchQueue.main.async {
+                guard let self else { return }
                 switch result {
                 case .success(let tracks):
                     // Maniac Mode always starts at track 1.
-                    let start = (self?.maniacMode ?? false) ? nil : tracks.firstIndex { $0.id == track.id }
-                    self?.startQueue(tracks: tracks, album: album, forcedStartIndex: start, format: format)
+                    let start = self.maniacMode ? nil : tracks.firstIndex { $0.id == track.id }
+                    self.addOrder.finish(turn) {
+                        self.startQueue(tracks: tracks, album: album, forcedStartIndex: start, format: format)
+                    }
                 case .failure(let err):
                     print("[PlayerManager] tracksForAlbum(\(track.id)) failed: \(err.errorDescription ?? "\(err)")")
-                    self?.onFail(.unknown)
+                    if self.addOrder.finish(turn, nil) { self.onFail(.unknown) }
                 }
             }
         }
@@ -717,7 +794,9 @@ public final class PlayerManager {
         case .success(let (items, first)):
             lastError = nil
             streamFormat = format
-            place(items, group: Self.group(for: playlist), how: .replace(startIndex: first))
+            addOrder.finish(addOrder.replace()) { [self] in
+                place(items, group: Self.group(for: playlist), how: .replace(startIndex: first))
+            }
             return nil
         }
     }
@@ -808,25 +887,33 @@ public final class PlayerManager {
                             how: Placement, completion: ((Bool) -> Void)?) {
         let discs = discs.isEmpty ? [album] : discs
         let group = Self.group(for: album)
+        // Its turn is taken now, at the tap; it's placed once earlier adds are.
+        let turn = addOrder.reserve()
         if Self.allDownloaded(discs) {
             let items = localItems(albumIDs: discs.map(\.id), albumTitle: album.displayName,
                                    artistName: album.artistName)
-            completion?(place(items, group: group, how: how))
+            addOrder.finish(turn) { [self] in completion?(place(items, group: group, how: how)) }
             return
         }
         guard NetworkMonitor.shared.isConnected else {
+            addOrder.finish(turn, nil)
             completion?(false)
             return
         }
         fetchTracks(discs: discs) { [weak self] tracks in
-            guard let self, let tracks, !tracks.isEmpty else {
-                completion?(false)
+            guard let self else { return }
+            guard let tracks, !tracks.isEmpty else {
+                // A failed fetch gives up its turn without holding up later
+                // adds (no notice if a Play cancelled it meanwhile).
+                if self.addOrder.finish(turn, nil) { completion?(false) }
                 return
             }
-            self.streamFormat = format
-            let sources = tracks.map { QueueSource(track: $0, album: album) }
-            completion?(self.place(self.items(sources: sources, order: Array(sources.indices)),
-                                   group: group, how: how))
+            self.addOrder.finish(turn) {
+                self.streamFormat = format
+                let sources = tracks.map { QueueSource(track: $0, album: album) }
+                completion?(self.place(self.items(sources: sources, order: Array(sources.indices)),
+                                       group: group, how: how))
+            }
         }
     }
 
@@ -837,8 +924,11 @@ public final class PlayerManager {
         case .failure(let refusal):
             return refusal
         case .success(let (items, _)):
-            streamFormat = format
-            place(items, group: Self.group(for: playlist), how: how)
+            guard !items.isEmpty else { return nil }
+            addOrder.finish(addOrder.reserve()) { [self] in
+                streamFormat = format
+                place(items, group: Self.group(for: playlist), how: how)
+            }
             return nil
         }
     }
@@ -847,12 +937,57 @@ public final class PlayerManager {
                              how: Placement) -> Bool {
         guard let first = tracks.first else { return false }
         let online = NetworkMonitor.shared.isConnected
-        let sources = tracks.map { QueueSource(track: $0, album: album) }
-        let order = sources.indices.filter { online || sources[$0].localURL != nil }
         streamFormat = format
+        // Rows built from a download (ids "<album>/<file>") play their files;
+        // the rest stream, so offline they're left out.
+        var localByAlbum: [String: [QueueItem]] = [:]
+        var queued: [QueueItem] = []
+        for track in tracks {
+            if Self.isLocalOnly(track.id) {
+                let albumID = track.albumId ?? String(track.id.prefix { $0 != "/" })
+                if localByAlbum[albumID] == nil {
+                    localByAlbum[albumID] = localItems(albumIDs: [albumID], albumTitle: track.album ?? album.displayName,
+                                                       artistName: album.artistName)
+                }
+                if let item = localByAlbum[albumID]?.first(where: { $0.playback.id == track.id }) {
+                    queued.append(item)
+                }
+            } else if online {
+                let source = QueueSource(track: track, album: album)
+                queued.append(contentsOf: items(sources: [source], order: [0]))
+            }
+        }
         let group = QueueGroup(id: first.id, kind: .tracks, title: first.displayName,
-                               artist: album.artistName.isEmpty ? nil : album.artistName, artItemId: album.id)
-        return place(items(sources: sources, order: order), group: group, how: how)
+                               artist: album.artistName.isEmpty ? nil : album.artistName,
+                               artItemId: Self.isLocalOnly(first.id) ? first.albumId ?? album.id : album.id)
+        guard !queued.isEmpty else { return false }
+        addOrder.finish(addOrder.reserve()) { [self] in place(queued, group: group, how: how) }
+        return true
+    }
+
+    /// Queues downloaded albums (every disc, in order) from disk after the
+    /// current album or playlist; `sourceId` is the merged entry's id.
+    @discardableResult
+    public func playNext(downloadedAlbumIDs albumIDs: [String], sourceId: String,
+                         albumTitle: String = "", artistName: String = "") -> Bool {
+        queueDownloaded(albumIDs, sourceId: sourceId, albumTitle: albumTitle, artistName: artistName, how: .playNext)
+    }
+
+    /// Queues downloaded albums from disk at the end of the queue.
+    @discardableResult
+    public func addToQueue(downloadedAlbumIDs albumIDs: [String], sourceId: String,
+                           albumTitle: String = "", artistName: String = "") -> Bool {
+        queueDownloaded(albumIDs, sourceId: sourceId, albumTitle: albumTitle, artistName: artistName, how: .addToQueue)
+    }
+
+    private func queueDownloaded(_ albumIDs: [String], sourceId: String, albumTitle: String, artistName: String,
+                                 how: Placement) -> Bool {
+        let items = localItems(albumIDs: albumIDs, albumTitle: albumTitle, artistName: artistName)
+        let group = QueueGroup(id: sourceId, kind: .album, title: albumTitle,
+                               artist: artistName.isEmpty ? nil : artistName, artItemId: albumIDs.first)
+        guard !items.isEmpty else { return false }
+        addOrder.finish(addOrder.reserve()) { [self] in place(items, group: group, how: how) }
+        return true
     }
 
     // MARK: - Image requests
@@ -1044,6 +1179,7 @@ public final class PlayerManager {
             updateNowPlayingForCurrent()
             if play {
                 reportStarted()
+                startedAt = now()
                 isPlaying = true
             } else {
                 isPlaying = false
@@ -1055,6 +1191,8 @@ public final class PlayerManager {
             position = 0
             updateNowPlayingForCurrent()
             reportStarted()
+            startRetries = 0
+            watchStart()
         case .ended:
             reportStopped(atEnd: false)
             syncFromQueue()
@@ -1166,6 +1304,7 @@ public final class PlayerManager {
     }
 
     public func pause() {
+        startWatch?.cancel()
         player.pause()
         isPlaying = false
         nowPlaying.updateState(isPlaying: false, elapsedTime: position)
@@ -1183,12 +1322,24 @@ public final class PlayerManager {
         // After the album finished and went back to the start (or a
         // restored queue), this play is a new one.
         if reportedTrack == nil { reportStarted() }
-        player.play()
+        startedAt = now()
+        if let deferred = deferredLoad {
+            // Held paused (a restored queue): its items are made now, at the point.
+            startLoad(entryIds: deferred.entryIds, position: deferred.position, play: true)
+        } else {
+            // An item still on its way to its point starts once it's there (`itemReady`).
+            if pendingStartSeek?.play != true { player.play() }
+            watchStart()
+        }
         isPlaying = true
         nowPlaying.updateState(isPlaying: true, elapsedTime: position)
     }
 
+    /// Play or Pause. Nothing in the first seconds of a track's start
+    /// (`ignoresPlayPause`); later in a start, or once it has been retried,
+    /// it pauses (ending the retries; Play then carries on from the point).
     public func togglePlayPause() {
+        if ignoresPlayPause { return }
         if isPlaying { pause() } else { resume() }
     }
 
@@ -1202,7 +1353,7 @@ public final class PlayerManager {
         // Skip to start of current track if we've already played > 3s,
         // otherwise step back.
         if position > 3 {
-            player.seek(to: .zero) { _ in }
+            if deferredLoad != nil { deferredLoad?.position = 0 } else { player.seek(to: .zero) { _ in } }
             position = 0
             widgetChanged()
             return
@@ -1211,13 +1362,22 @@ public final class PlayerManager {
     }
 
     public func seek(toTime t: TimeInterval) {
-        guard !maniacMode, let item = player.currentItem else { return }
+        guard !maniacMode else { return }
         let clamped = max(0, min(t, duration > 0 ? duration : t))
-        if item.status == .readyToPlay {
-            item.seek(to: CMTime(seconds: clamped, preferredTimescale: CMTimeScale(1000))) { _ in }
+        startedAt = now()
+        if deferredLoad != nil {
+            // Nothing opened yet: Play opens it there.
+            deferredLoad?.position = clamped
         } else {
-            // An item can't seek until it's ready; it does once it is.
-            pendingStartSeek = (ObjectIdentifier(item), clamped)
+            guard let item = player.currentItem else { return }
+            if item.status == .readyToPlay {
+                item.seek(to: CMTime(seconds: clamped, preferredTimescale: CMTimeScale(1000))) { _ in }
+            } else {
+                // An item can't seek until it's ready; it does once it is (and starts then, if it was to).
+                let id = ObjectIdentifier(item)
+                let play = pendingStartSeek?.item == id && pendingStartSeek?.play == true
+                pendingStartSeek = (id, clamped, play)
+            }
         }
         position = clamped
         nowPlaying.updateState(isPlaying: isPlaying, elapsedTime: clamped)
@@ -1233,6 +1393,12 @@ public final class PlayerManager {
 
     public func restartCurrentTrack() {
         guard !maniacMode else { return }
+        if deferredLoad != nil {
+            deferredLoad?.position = 0
+            position = 0
+            resume()
+            return
+        }
         player.seek(to: .zero) { _ in }
         position = 0
         player.play()
@@ -1321,8 +1487,8 @@ public final class PlayerManager {
             // The closure is `@Sendable`, but we're `@MainActor`, so
             // hop back to main explicitly.
             Task { @MainActor in
-                // A restored track waits for its seek; keep its position shown.
-                guard self.pendingStartSeek == nil else { return }
+                // A restored track waits for Play or for its seek; keep its position shown.
+                guard self.pendingStartSeek == nil, self.deferredLoad == nil else { return }
                 let secs = time.seconds
                 self.position = secs
                 if self.duration <= 0,
@@ -1378,20 +1544,89 @@ extension PlayerManager: QueueEngine {
 
     /// Replaces the AVQueuePlayer's items with `entryIds`' (the first plays
     /// now), from `position` into the first.
+    ///
+    /// Paused, nothing is made yet (`deferredLoad`): no player item, so no
+    /// connection to the server, until Play. A restored queue at launch is
+    /// loaded this way, as the route to the server may not be up yet.
     public func load(entryIds: [String], position: Double, play: Bool) {
+        startRetries = 0
+        startLoad(entryIds: entryIds, position: position, play: play)
+    }
+
+    private func startLoad(entryIds: [String], position: Double, play: Bool) {
         player.pause()
         removeAllItems()
         pendingStartSeek = nil
+        startWatch?.cancel()
+        deferredLoad = nil
+        guard play else {
+            if !entryIds.isEmpty { deferredLoad = (entryIds, position) }
+            return
+        }
         append(entryIds, after: nil)
         if position > 0, let first = enqueuedItems.first {
-            pendingStartSeek = (ObjectIdentifier(first), position)
+            // Starts once it's at the point (an item can't seek before it's ready).
+            pendingStartSeek = (ObjectIdentifier(first), position, true)
+        } else {
+            player.play()
         }
-        if play { player.play() }
+        watchStart()
+    }
+
+    /// `isStarting` from the player's state.
+    private func updateStarting() {
+        let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+        let starting = isPlaying && (waiting || pendingStartSeek?.play == true)
+        if starting != isStarting { isStarting = starting }
+    }
+
+    /// The first response a stream gets before it's asked for again: a
+    /// stream the server converts (HLS from `/universal`) only. AVPlayer
+    /// itself waits for the system's request timeout (about a minute) and
+    /// then fails the item; just after launch the route to the server may
+    /// not carry the very first request. Direct streams and files: nil.
+    nonisolated static func firstResponseLimit(for url: URL?) -> TimeInterval? {
+        guard let url, !url.isFileURL, url.path.hasSuffix("/universal") else { return nil }
+        return firstResponseSeconds
+    }
+    nonisolated static let firstResponseSeconds: TimeInterval = 8
+    /// After this many tries AVPlayer is left to it (a slow server, not a dead request).
+    nonisolated static let maxStartRetries = 3
+
+    /// A converted stream that has had no answer at all `firstResponseLimit`
+    /// after Play is made again from the same point, as Android's reconnect
+    /// does.
+    private func watchStart() {
+        startWatch?.cancel()
+        guard let item = player.currentItem, item.status != .readyToPlay,
+              let entryId = playQueue.currentEntryId,
+              let limit = Self.firstResponseLimit(for: (item.asset as? AVURLAsset)?.url) else { return }
+        startWatch = Task { @MainActor [weak self, weak item] in
+            try? await Task.sleep(nanoseconds: UInt64(limit * 1_000_000_000))
+            guard !Task.isCancelled, let self, let item else { return }
+            self.startTimedOut(item, entryId: entryId)
+        }
+    }
+
+    private func startTimedOut(_ item: AVPlayerItem, entryId: String) {
+        // Ready, answered (it's only slow), paused, moved on, or tried enough: left alone.
+        let answered = !(item.accessLog()?.events.isEmpty ?? true)
+        guard player.currentItem === item, item.status != .readyToPlay, !answered, isPlaying,
+              playQueue.currentEntryId == entryId, startRetries < Self.maxStartRetries,
+              let index = currentEnqueuedIndex else { return }
+        startRetries += 1
+        print("[PlayerManager] no answer from the converted stream in \(Int(Self.firstResponseSeconds)) s: trying again")
+        let at = pendingStartSeek.flatMap { $0.item == ObjectIdentifier(item) ? $0.seconds : nil } ?? position
+        startLoad(entryIds: Array(enqueuedEntryIds[index...]), position: at, play: true)
     }
 
     /// Keeps the playing item (and any items after it that stay the same,
     /// so the next track's preloading isn't lost) and replaces the rest.
     public func replaceAfterCurrent(_ entryIds: [String]) {
+        if let deferred = deferredLoad, let first = deferred.entryIds.first {
+            deferredLoad = ([first] + entryIds, deferred.position)
+            return
+        }
         guard let current = currentEnqueuedIndex else { return }
         let tail = Array(enqueuedEntryIds[(current + 1)...])
         var keep = 0
@@ -1552,11 +1787,17 @@ private extension PlayerManager {
     /// A restored queue's track (or a seek made while loading) goes to its
     /// position once its item can seek.
     func itemReady(_ item: AVPlayerItem) {
+        if player.currentItem === item {
+            startWatch?.cancel()
+            startRetries = 0
+        }
         guard let pending = pendingStartSeek, pending.item == ObjectIdentifier(item) else { return }
         item.seek(to: CMTime(seconds: pending.seconds, preferredTimescale: CMTimeScale(1000))) { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.pendingStartSeek?.item == ObjectIdentifier(item) else { return }
+                guard let self, let now = self.pendingStartSeek, now.item == ObjectIdentifier(item) else { return }
                 self.pendingStartSeek = nil
+                // A restored queue's first Play starts here, at its point (unless paused meanwhile).
+                if now.play, self.isPlaying, self.player.currentItem === item { self.player.play() }
             }
         }
     }

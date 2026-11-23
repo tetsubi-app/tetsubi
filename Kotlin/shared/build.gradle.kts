@@ -111,6 +111,8 @@ kotlin {
             api(libs.androidx.media3.session)
             // Google Cast (Default Media Receiver); pulls in Play services Cast framework.
             api(libs.androidx.media3.cast)
+            // The player streams over the app's own OkHttp client (TetsubiOkHttp).
+            implementation(libs.androidx.media3.datasource.okhttp)
             implementation(libs.androidx.mediarouter)
             // The Cast device dialogs are AppCompat dialogs (mediarouter already brings it at run time).
             implementation(libs.androidx.appcompat)

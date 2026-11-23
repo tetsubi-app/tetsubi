@@ -258,6 +258,7 @@ struct AlbumGridView: View {
                                           titleLines: titleLines, showsYear: showsYear)
                         }
                         .buttonStyle(.plain)
+                        .albumQueueMenu(album)
                         .id(album.id)   // for the A–Z strip's jumps
                     }
                 }
@@ -350,6 +351,7 @@ struct AlbumListView: View {
                     }
                 }
             }
+            .albumQueueMenu(album)
             .id(album.id)
             .listRowBackground(Color.clear)
             .onAppear { onAppear(album) }

@@ -168,6 +168,7 @@ public struct SearchView: View {
                 }
             }
         }
+        .albumQueueMenu(album)
     }
 
     /// The albums' section title: "Results (3)" on their own, "Albums (3)"
@@ -198,6 +199,7 @@ public struct SearchView: View {
                 Spacer()
             }
         }
+        .playlistQueueMenu(playlist)
         .accessibilityIdentifier("SearchView.playlist.\(playlist.id)")
     }
 
@@ -257,9 +259,7 @@ public struct SearchView: View {
     private func offlineAlbumRows(_ model: SearchViewModel) -> some View {
             ForEach(model.localResults) { album in
                 Button {
-                    player?.playLocalDownloadedAlbum(albumID: album.id, albumTitle: album.title,
-                                                     artistName: album.artist)
-                    player?.isNowPlayingPresented = true
+                    QueueActions.playDownloaded(id: album.id, title: album.title, artist: album.artist)
                 } label: {
                     HStack(spacing: 12.scaled) {
                         AlbumArtView(request: api?.imageURLRequest(for: album.id, size: 100),
@@ -273,6 +273,7 @@ public struct SearchView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .downloadedAlbumQueueMenu(id: album.id, title: album.title, artist: album.artist)
                 .listRowBackground(Color.clear)
             }
     }

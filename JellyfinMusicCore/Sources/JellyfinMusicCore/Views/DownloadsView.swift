@@ -132,6 +132,7 @@ public struct DownloadsView: View {
                     NavigationLink(value: playlist) {
                         playlistRow(playlist, mgr: mgr)
                     }
+                    .playlistQueueMenu(playlist)
                     .accessibilityIdentifier("DownloadsView.playlist.\(playlist.id)")
                 }
             }
@@ -201,11 +202,8 @@ public struct DownloadsView: View {
                             .accessibilityIdentifier("DownloadsView.select.\(albumID)")
                     }
                     Button {
-                        player?.playLocalDownloadedAlbum(
-                            albumID: albumID, format: .flac,
-                            albumTitle: mgr.albumInfo(for: albumID)?.title ?? "",
-                            artistName: mgr.albumInfo(for: albumID)?.artist ?? "")
-                        player?.isNowPlayingPresented = true
+                        QueueActions.playDownloaded(id: albumID, title: mgr.albumInfo(for: albumID)?.title ?? "",
+                                                    artist: mgr.albumInfo(for: albumID)?.artist ?? "")
                     } label: {
                         AlbumArtView(request: mgr.artRequest(for: albumID), size: 56.scaled, cornerRadius: 6.scaled)
                     }
@@ -235,11 +233,8 @@ public struct DownloadsView: View {
                     Spacer()
                     if !isEditing {
                         Button {
-                            player?.playLocalDownloadedAlbum(
-                            albumID: albumID, format: .flac,
-                            albumTitle: mgr.albumInfo(for: albumID)?.title ?? "",
-                            artistName: mgr.albumInfo(for: albumID)?.artist ?? "")
-                        player?.isNowPlayingPresented = true
+                            QueueActions.playDownloaded(id: albumID, title: mgr.albumInfo(for: albumID)?.title ?? "",
+                                                    artist: mgr.albumInfo(for: albumID)?.artist ?? "")
                         } label: {
                             Image(systemName: "play.fill")
                                 .font(.plex(.title2))
@@ -254,6 +249,15 @@ public struct DownloadsView: View {
                 .onTapGesture {
                     guard isEditing else { return }
                     if !selection.insert(albumID).inserted { selection.remove(albumID) }
+                }
+                .contextMenu {
+                    if !isEditing, player != nil {
+                        QueueMenuItems {
+                            QueueActions.queue(downloadedAlbumIDs: [albumID], sourceId: albumID,
+                                               title: mgr.albumInfo(for: albumID)?.title ?? "",
+                                               artist: mgr.albumInfo(for: albumID)?.artist ?? "", $0)
+                        }
+                    }
                 }
             }
             if isEditing {

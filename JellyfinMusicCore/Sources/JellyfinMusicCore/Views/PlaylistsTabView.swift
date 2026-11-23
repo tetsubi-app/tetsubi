@@ -173,6 +173,7 @@ struct PlaylistsTabView: View {
                             PlaylistCardView(api: api, playlist: playlist)
                         }
                         .buttonStyle(.plain)
+                        .playlistQueueMenu(playlist)
                     }
                 }
                 .padding(.horizontal, edge)
@@ -198,6 +199,7 @@ struct PlaylistsTabView: View {
                     Spacer()
                 }
             }
+            .playlistQueueMenu(playlist)
             .listRowBackground(Color.clear)
         }
         .listStyle(.plain)
@@ -223,6 +225,7 @@ struct HomePlaylistsRow: View {
                                          fixedWidth: true, metrics: metrics)
                     }
                     .buttonStyle(.plain)
+                    .playlistQueueMenu(playlist)
                 }
             }
             .homeRowPadding(wide: metrics != nil)

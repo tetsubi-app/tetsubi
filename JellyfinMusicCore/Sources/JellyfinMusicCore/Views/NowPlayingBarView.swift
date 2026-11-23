@@ -85,9 +85,17 @@ public struct NowPlayingBarView: View {
                         }
 
                         Button { manager.togglePlayPause() } label: {
-                            Image(systemName: manager.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.plex(.title2))
-                                .frame(width: 28.scaled, height: 28.scaled)  // play/pause swap doesn't shift the buttons or the bar's height
+                            Group {
+                                // Starting (loading, no sound yet): a spinner in the same box; a press does nothing.
+                                if manager.isStarting {
+                                    ProgressView().controlSize(.small)
+                                        .accessibilityLabel("Loading")
+                                } else {
+                                    Image(systemName: manager.isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.plex(.title2))
+                                }
+                            }
+                            .frame(width: 28.scaled, height: 28.scaled)  // play/pause swap doesn't shift the buttons or the bar's height
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("NowPlayingBarView.playPause")

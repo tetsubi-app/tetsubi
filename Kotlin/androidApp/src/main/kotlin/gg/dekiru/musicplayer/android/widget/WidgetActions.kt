@@ -111,6 +111,12 @@ object WidgetCommands {
     }
 
     private suspend fun playPause(app: TetsubiApplication, controller: MediaController) {
+        // The track is starting (the widget shows a spinner): as the app's button, the press does
+        // nothing in a start's first seconds and pauses after that or while reconnecting.
+        app.session.player.value?.takeIf { it.isStarting }?.let {
+            it.togglePlayPause()
+            return
+        }
         // The service restored the login when it started; the session's player is the app's.
         val hasQueue = app.session.player.value?.currentTrack != null && controller.mediaItemCount > 0
         val snapshot = withContext(Dispatchers.IO) { WidgetFiles(app).read() }

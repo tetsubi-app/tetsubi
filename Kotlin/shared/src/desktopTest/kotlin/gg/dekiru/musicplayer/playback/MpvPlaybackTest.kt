@@ -13,6 +13,7 @@ private class Recorder : EngineListener {
     override fun onIsPlayingChanged(isPlaying: Boolean) { calls += "playing $isPlaying" }
     override fun onEnded() { calls += "ended" }
     override fun onError(message: String) { calls += "error $message" }
+    override fun onStartingChanged(starting: Boolean, reconnecting: Boolean) { calls += "starting $starting" }
 }
 
 private fun item(n: Int, url: String = "https://server/Audio/$n/stream.flac?static=true", durationMillis: Long = 200_000) =
@@ -32,6 +33,52 @@ class MpvPlaybackTest {
         playback.handle(MpvEvent.StartFile(start))
         sent.clear()
         recorder.calls.clear()
+    }
+
+    @Test
+    fun aCuedQueueOpensNothingUntilPlayThenSeeksToTheHeldPoint() {
+        val items = (0 until 3).map { item(it) }
+        playback.cue(items, 1, 42_000)
+        assertTrue(sent.none { it.first() == "playlist-play-index" || it.first() == "seek" }, "nothing opened: $sent")
+        assertEquals(listOf("loadfile", mpvTarget(items[2].url), "append"), sent.filter { it.first() == "loadfile" }.last())
+        assertEquals(1, playback.current)
+        assertTrue(playback.unloaded)
+        assertEquals(42_000L, playback.heldStartMillis)
+        sent.clear()
+        playback.play()
+        assertEquals(
+            listOf(listOf("set", "pause", "no"), listOf("playlist-play-index", "1"), listOf("seek", "42.0", "absolute+exact")),
+            sent,
+        )
+        assertEquals(0L, playback.heldStartMillis)
+        assertTrue(recorder.calls.none { it.startsWith("index") }, "a cued start isn't a change of track")
+    }
+
+    @Test
+    fun aCuedConvertedStreamStartsAtThePointByItsUrl() {
+        playback.cue(listOf(converted(0), converted(1)), 0, 49_000)
+        assertTrue(sent.none { it.first() == "playlist-play-index" })
+        assertEquals(49_000L, playback.currentOffsetMillis)
+        assertTrue(sent.any { it.first() == "loadfile" && it[1].endsWith("&StartTimeTicks=490000000") })
+        sent.clear()
+        playback.play()
+        assertEquals(listOf(listOf("set", "pause", "no"), listOf("playlist-play-index", "0")), sent)
+    }
+
+    @Test
+    fun startingWhileMpvLoadsWithPlayWanted() {
+        queue(2)
+        playback.handle(MpvEvent.Paused(false))
+        playback.handle(MpvEvent.Idle(false))
+        playback.handle(MpvEvent.CoreIdle(true))
+        assertTrue("starting true" in recorder.calls)
+        playback.handle(MpvEvent.CoreIdle(false))
+        assertEquals("starting false", recorder.calls.last())
+        recorder.calls.clear()
+        // Paused: core-idle too, but not starting.
+        playback.handle(MpvEvent.Paused(true))
+        playback.handle(MpvEvent.CoreIdle(true))
+        assertTrue(recorder.calls.none { it.startsWith("starting") })
     }
 
     @Test

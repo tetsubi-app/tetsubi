@@ -31,7 +31,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -53,7 +52,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -70,6 +68,8 @@ import gg.dekiru.musicplayer.data.models.JellyfinArtist
 import gg.dekiru.musicplayer.ui.components.artistLink
 import gg.dekiru.musicplayer.data.settings.Preferences
 import gg.dekiru.musicplayer.playback.CastRoute
+import gg.dekiru.musicplayer.playback.EndTimes
+import gg.dekiru.musicplayer.playback.showsQueueEnd
 import gg.dekiru.musicplayer.playback.PlaybackTrack
 import gg.dekiru.musicplayer.playback.PlayerController
 import gg.dekiru.musicplayer.playback.RepeatMode
@@ -82,8 +82,6 @@ import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
 import gg.dekiru.musicplayer.ui.components.AlbumBackdrop
 import gg.dekiru.musicplayer.ui.components.ChevronDownIcon
-import gg.dekiru.musicplayer.ui.components.PauseIcon
-import gg.dekiru.musicplayer.ui.components.PlayIcon
 import gg.dekiru.musicplayer.ui.components.SkipIcon
 import gg.dekiru.musicplayer.ui.components.SpeakerIcon
 import kotlin.time.Clock
@@ -97,7 +95,8 @@ import kotlinx.datetime.toLocalDateTime
 /**
  * Full-screen Now Playing (as `NowPlayingView` on iOS): art, title / artist /
  * album, the album's length and when it finishes, the seek bar, previous /
- * play-pause / next, shuffle, repeat, the output picker, and Up next. In
+ * play-pause / next, shuffle, repeat, the output picker, and the queue
+ * ([QueueSection]: reorder, remove, clear). In
  * Maniac Mode: no skips, shuffle, repeat or scrubbing. Back or ⌄ closes it.
  * Where the player has audio effects (Android), the Visualiser toggle shows
  * spectrum bars under the art; the choice is remembered. Where there's
@@ -106,7 +105,7 @@ import kotlinx.datetime.toLocalDateTime
  * The info line's quality text shows the sample rate and bit depth; a tap
  * switches it to the format and bitrate and back (remembered).
  * Wide (a tablet on its side, a Linux window; see [NowPlayingLayout]): two
- * columns as iOS, the art, titles and controls on the left and Up next on
+ * columns as iOS, the art, titles and controls on the left and the queue on
  * the right, everything drawn bigger by [NowPlayingLayout.scale]. Phones keep
  * the single column at the normal size.
  */
@@ -202,7 +201,7 @@ fun NowPlayingScreen(
                         Column(
                             Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())
                                 .padding(start = 20.dp, end = 20.dp, top = 44.dp, bottom = 24.dp),
-                        ) { if (player.currentTrack != null) UpNext(player) }
+                        ) { if (player.currentTrack != null) QueueSection(api, player) }
                     }
                 } else {
                     val artSize = minOf(width - 40.dp, 340.dp, height * 0.42f)
@@ -213,7 +212,7 @@ fun NowPlayingScreen(
                     ) {
                         Spacer(Modifier.height(28.dp))
                         details(artSize)
-                        if (player.currentTrack != null) UpNext(player)
+                        if (player.currentTrack != null) QueueSection(api, player)
                     }
                 }
                 CornerButtons(player, onAddToPlaylist)
@@ -313,14 +312,27 @@ private fun Titles(
                     value = Clock.System.now()
                 }
             }
-            val end = (now + player.queueRemaining.seconds).toLocalDateTime(TimeZone.currentSystemDefault())
-            val finish = "${end.hour.toString().padStart(2, '0')}:${end.minute.toString().padStart(2, '0')}"
+            fun clock(seconds: Double): String {
+                val end = (now + seconds.seconds).toLocalDateTime(TimeZone.currentSystemDefault())
+                return EndTimes.clock(end.hour, end.minute)
+            }
+            // "Album ends 13:02 · Queue ends 15:40" when more than this album is queued, else "Ends: 13:02".
+            val showsQueue = player.playQueue.showsQueueEnd
+            val groupEnd = clock(if (showsQueue) player.currentGroupRemaining else player.queueRemaining)
+            val queueEnd = if (showsQueue) clock(player.queueRemaining) else null
+            val label = player.playQueue.currentEntry?.let { cur ->
+                EndTimes.groupLabel(cur.group.kind, player.playQueue.entries.count { it.batchId == cur.batchId })
+            } ?: "Album ends"
             val quality = QualityText.of(track, qualityDetail.showsDetail)
+            // One line: when both don't fit, "Album ends" goes first.
+            var short by remember(showsQueue, quality?.text) { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (quality != null) QualityLabel(quality, qualityDetail, accent)
                 Text(
-                    "${if (quality != null) "      " else ""}Duration: ${formatAlbumDuration(player.queueLength)}      Ends: $finish",
+                    "${if (quality != null) "      " else ""}Duration: ${formatAlbumDuration(player.queueLength)}      ${EndTimes.text(groupEnd, queueEnd, short, label)}",
                     color = infoColor, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    softWrap = false,
+                    onTextLayout = { if (queueEnd != null && !short && it.hasVisualOverflow) short = true },
                     modifier = Modifier.weight(1f, fill = false),
                 )
             }
@@ -409,9 +421,7 @@ private fun Seek(player: PlayerController, accent: Color?) {
 private fun Controls(player: PlayerController) {
     Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
         if (!player.maniacMode) ControlButton("Previous", 56.dp, player::skipToPrevious) { SkipIcon(false, 32.dp) }
-        ControlButton(if (player.isPlaying) "Pause" else "Play", 72.dp, player::togglePlayPause) {
-            if (player.isPlaying) PauseIcon(44.dp) else PlayIcon(44.dp)
-        }
+        PlayPauseButton(player, 72.dp, 44.dp)
         if (!player.maniacMode) ControlButton("Next", 56.dp, player::skipToNext) { SkipIcon(true, 32.dp) }
     }
 }
@@ -517,42 +527,5 @@ private fun Toggle(
             Text(symbol, color = if (active) tint else Color.White.copy(alpha = 0.6f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
         Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, maxLines = 1, softWrap = false)
-    }
-}
-
-@Composable
-private fun UpNext(player: PlayerController) {
-    val upcoming = player.upNext
-    Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.Bottom) {
-            Text("Up next", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).semantics { heading() })
-            when {
-                player.repeatMode == RepeatMode.ONE -> Text("Repeating this track", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
-                player.repeatMode == RepeatMode.ALL && upcoming.isNotEmpty() -> Text("Then repeats", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
-            }
-        }
-        if (upcoming.isEmpty()) {
-            Text("Last track", color = Color.White.copy(alpha = 0.5f), fontSize = 15.sp, modifier = Modifier.padding(vertical = 6.dp))
-        }
-        // The queue's upcoming entries (other albums too), read-only for now; tap one to play it.
-        upcoming.forEachIndexed { i, (entryId, track) ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = !player.maniacMode, role = Role.Button) { player.skipTo(entryId) }
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(track.title, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    // Artist only when it differs (compilations).
-                    if (track.artist != player.currentTrack?.artist && track.artist.isNotEmpty()) {
-                        Text(track.artist, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-                if (track.durationSeconds > 0) Text(formatTrackTime(track.durationSeconds), color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
-            }
-            if (i != upcoming.lastIndex) HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
-        }
     }
 }

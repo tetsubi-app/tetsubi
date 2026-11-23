@@ -1,5 +1,8 @@
 package gg.dekiru.musicplayer.ui.playlist
 
+import gg.dekiru.musicplayer.ui.components.WithContextMenu
+import gg.dekiru.musicplayer.ui.components.menuClickable
+import gg.dekiru.musicplayer.ui.components.playlistQueueActions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -76,8 +79,10 @@ fun PlaylistGrid(api: JellyfinApi, model: PlaylistsModel, playlists: List<Jellyf
             modifier = Modifier.fillMaxSize(),
         ) {
             items(playlists, key = { it.id }) { playlist ->
+                // Long press or right-click: Play Next, Add to Queue.
+                WithContextMenu(playlistQueueActions(playlist)) { openMenu ->
                 Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { onOpen(playlist) },
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).menuClickable({ onOpen(playlist) }, openMenu),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
@@ -90,6 +95,7 @@ fun PlaylistGrid(api: JellyfinApi, model: PlaylistsModel, playlists: List<Jellyf
                         PlaylistsModel.summary(playlist), color = TetsubiColors.albumArtistText, fontSize = 11.sp, maxLines = 1,
                         overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                     )
+                }
                 }
             }
         }
@@ -111,8 +117,10 @@ fun PlaylistList(api: JellyfinApi, model: PlaylistsModel, playlists: List<Jellyf
 /** One row of the list. Search shows its playlists with it too, at the size of its album rows (`compact`). */
 @Composable
 fun PlaylistListRow(api: JellyfinApi, model: PlaylistsModel, playlist: JellyfinPlaylist, compact: Boolean = false, onOpen: () -> Unit) {
+    // Long press or right-click: Play Next, Add to Queue.
+    WithContextMenu(playlistQueueActions(playlist)) { openMenu ->
     Row(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen).padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 6.dp),
+        Modifier.fillMaxWidth().menuClickable(onOpen, openMenu).padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -121,6 +129,7 @@ fun PlaylistListRow(api: JellyfinApi, model: PlaylistsModel, playlist: JellyfinP
             Text(playlist.displayName, color = Color.White, fontSize = if (compact) 16.sp else 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(PlaylistsModel.summary(playlist), color = TetsubiColors.albumArtistText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+    }
     }
 }
 
@@ -131,8 +140,10 @@ fun PlaylistRow(api: JellyfinApi, model: PlaylistsModel, playlists: List<Jellyfi
     val t = size?.textScale ?: 1f
     LazyRow(contentPadding = homeRowPadding(size), horizontalArrangement = Arrangement.spacedBy((size?.spacing ?: 12f).dp)) {
         items(playlists, key = { it.id }) { playlist ->
+            // Long press or right-click: Play Next, Add to Queue.
+            WithContextMenu(playlistQueueActions(playlist)) { openMenu ->
             Column(
-                Modifier.clip(RoundedCornerShape((8 * t).dp)).clickable(role = Role.Button) { onOpen(playlist) }
+                Modifier.clip(RoundedCornerShape((8 * t).dp)).menuClickable({ onOpen(playlist) }, openMenu)
                     .then(homeCardPadding(size)).width(width),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy((4 * t).dp),
@@ -146,6 +157,7 @@ fun PlaylistRow(api: JellyfinApi, model: PlaylistsModel, playlists: List<Jellyfi
                     PlaylistsModel.summary(playlist), color = TetsubiColors.albumArtistText, fontSize = (11 * t).sp, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
+            }
             }
         }
     }

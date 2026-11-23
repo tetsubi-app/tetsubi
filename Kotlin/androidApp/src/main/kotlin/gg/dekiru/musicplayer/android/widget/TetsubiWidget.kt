@@ -24,6 +24,7 @@ import androidx.glance.LocalSize
 import androidx.glance.action.Action
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.CircularProgressIndicator
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
@@ -227,7 +228,7 @@ private fun SmallView(track: WidgetContent.Track, art: Bitmap?, accent: Color, l
                 // No art to fill the widget with: the placeholder at the top left.
                 if (art == null) Art(null, layout.art.dp, layout.artCorner.dp)
                 Spacer(GlanceModifier.defaultWeight())
-                PlayPauseButton(track.isPlaying, accent, layout.play.dp)
+                PlayPauseButton(track.isPlaying, track.isStarting, accent, layout.play.dp)
             }
             Spacer(GlanceModifier.defaultWeight())
             Text(track.title, style = TextStyle(color = ColorProvider(TEXT), fontSize = layout.titleSp.sp, fontWeight = FontWeight.Bold), maxLines = 1)
@@ -287,7 +288,7 @@ private fun MediumView(track: WidgetContent.Track, art: Bitmap?, accent: Color, 
                     IconButton(R.drawable.ic_widget_previous, "Previous", actionRunCallback<PreviousAction>(), layout.skip.dp)
                     Spacer(GlanceModifier.width(layout.buttonGap.dp))
                 }
-                PlayPauseButton(track.isPlaying, accent, layout.play.dp)
+                PlayPauseButton(track.isPlaying, track.isStarting, accent, layout.play.dp)
                 if (track.showSkips) {
                     Spacer(GlanceModifier.width(layout.buttonGap.dp))
                     IconButton(R.drawable.ic_widget_next, "Next", actionRunCallback<NextAction>(), layout.skip.dp)
@@ -315,19 +316,24 @@ private fun Art(art: Bitmap?, size: Dp, corner: Dp) {
 
 /** Play or Pause: a round button in the key colour. */
 @Composable
-private fun PlayPauseButton(isPlaying: Boolean, accent: Color, size: Dp) {
+private fun PlayPauseButton(isPlaying: Boolean, isStarting: Boolean, accent: Color, size: Dp) {
     Box(
         GlanceModifier.size(size)
             .background(ImageProvider(R.drawable.widget_circle), colorFilter = ColorFilter.tint(ColorProvider(accent)))
             .clickable(actionRunCallback<PlayPauseAction>()),
         contentAlignment = Alignment.Center,
     ) {
-        Image(
-            ImageProvider(if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play),
-            contentDescription = if (isPlaying) "Pause" else "Play",
-            colorFilter = ColorFilter.tint(ColorProvider(ON_ACCENT)),
-            modifier = GlanceModifier.size(size * 0.55f),
-        )
+        // Starting: a spinner in the same circle (a press then does nothing).
+        if (isStarting) {
+            CircularProgressIndicator(color = ColorProvider(ON_ACCENT), modifier = GlanceModifier.size(size * 0.5f))
+        } else {
+            Image(
+                ImageProvider(if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play),
+                contentDescription = if (isPlaying) "Pause" else "Play",
+                colorFilter = ColorFilter.tint(ColorProvider(ON_ACCENT)),
+                modifier = GlanceModifier.size(size * 0.55f),
+            )
+        }
     }
 }
 

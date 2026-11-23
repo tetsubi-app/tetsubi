@@ -67,6 +67,8 @@ import gg.dekiru.musicplayer.playback.PlayerController
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.album.AlbumDownloads
 import gg.dekiru.musicplayer.ui.components.AlbumArt
+import gg.dekiru.musicplayer.ui.components.LocalPlayPrompt
+import gg.dekiru.musicplayer.ui.components.PlayChoice
 import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
 import gg.dekiru.musicplayer.ui.components.CircleIcon
 import gg.dekiru.musicplayer.ui.components.DownloadCircleIcon
@@ -96,6 +98,7 @@ fun DownloadsScreen(api: JellyfinApi, downloads: DownloadManager?, player: Playe
     var isEditing by rememberSaveable { mutableStateOf(false) }
     var selection by rememberSaveable { mutableStateOf(setOf<String>()) }
     var confirmRemove by remember { mutableStateOf(false) }
+    val prompt = LocalPlayPrompt.current
     // Nothing left to edit (removed elsewhere): leave edit mode.
     LaunchedEffect(downloaded.isEmpty() && playlists.isEmpty()) {
         if (downloaded.isEmpty() && playlists.isEmpty()) {
@@ -160,7 +163,13 @@ fun DownloadsScreen(api: JellyfinApi, downloads: DownloadManager?, player: Playe
                 DownloadedRow(
                     api, album, isEditing, isSelected = album.albumId in selection,
                     canPlay = player?.isSupported == true,
-                    onPlay = { player?.play(album.toAlbum()) },
+                    // More than the playing album queued: Replace queue, Play Next or Add to Queue.
+                    onPlay = {
+                        val a = album.toAlbum()
+                        player?.let { p ->
+                            prompt.play(p, PlayChoice(a.displayName, replace = { p.play(a) }, playNext = { p.playNext(a) }, addToQueue = { p.addToQueue(a) }))
+                        }
+                    },
                     onToggle = { selection = if (album.albumId in selection) selection - album.albumId else selection + album.albumId },
                     onLongPress = {
                         isEditing = true

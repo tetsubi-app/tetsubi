@@ -46,6 +46,12 @@ internal sealed interface MpvEvent {
     /** `idle-active`: no file loaded (the queue ended, failed or was stopped). */
     data class Idle(val idle: Boolean) : MpvEvent
 
+    /**
+     * `core-idle`: no audio is moving, for whatever reason: paused, opening
+     * a file, waiting for the cache (`paused-for-cache`), seeking, or idle.
+     */
+    data class CoreIdle(val coreIdle: Boolean) : MpvEvent
+
     /** Repeat One went round: mpv's `loop-file` seeks back to 0:00 without a new file. */
     data object Repeated : MpvEvent
 
@@ -164,7 +170,17 @@ internal class MpvPlayback(
 
     private var paused = true
     private var idle = true
+    private var coreIdle = true
     private var reportedPlaying = false
+    private var reportedStarting = false
+
+    /**
+     * Where a direct stream starts when Play loads it (a cued queue, or a
+     * seek while nothing is loaded), in ms; 0: from the start. A converted
+     * stream is swapped for one started there instead ([startOffsets]).
+     */
+    var heldStartMillis = 0L
+        private set
 
     val isPlaying: Boolean get() = reportedPlaying
 
@@ -177,6 +193,7 @@ internal class MpvPlayback(
         items.clear()
         items += newItems
         startOffsets.clear()
+        heldStartMillis = 0
         // `stop` empties mpv's playlist; `append` doesn't start anything.
         send(listOf("stop"))
         newItems.forEach { send(listOf("loadfile", mpvTarget(it.url), "append")) }
@@ -188,6 +205,26 @@ internal class MpvPlayback(
         }
         current = startIndex.coerceIn(0, newItems.lastIndex)
         load(current)
+    }
+
+    /**
+     * Holds `newItems` in mpv's playlist, paused at `startMillis` into item
+     * `startIndex`, without opening anything (`append` doesn't start a
+     * file): [play] loads it there.
+     */
+    fun cue(newItems: List<EngineItem>, startIndex: Int, startMillis: Long) {
+        items.clear()
+        items += newItems
+        startOffsets.clear()
+        heldStartMillis = 0
+        send(listOf("set", "pause", "yes"))
+        send(listOf("stop"))
+        newItems.forEach { send(listOf("loadfile", mpvTarget(it.url), "append")) }
+        pending = null
+        unloaded = true
+        current = if (newItems.isEmpty()) 0 else startIndex.coerceIn(0, newItems.lastIndex)
+        if (newItems.isNotEmpty() && startMillis > 0) seekTo(startMillis)
+        updateStarting()
     }
 
     fun replaceAfterCurrent(newItems: List<EngineItem>) {
@@ -221,8 +258,13 @@ internal class MpvPlayback(
     fun play() {
         if (items.isEmpty()) return
         send(listOf("set", "pause", "no"))
-        // Ended or failed: load the track again (a failed one is retried).
-        if (unloaded) load(current)
+        // Cued, ended or failed: load the track (a failed one is retried), at the held point.
+        if (unloaded) {
+            load(current)
+            if (heldStartMillis > 0) send(listOf("seek", formatSeconds(heldStartMillis), "absolute+exact"))
+            heldStartMillis = 0
+        }
+        updateStarting()
     }
 
     fun pause() = send(listOf("set", "pause", "yes"))
@@ -230,6 +272,7 @@ internal class MpvPlayback(
     /** Plays entry `index` from its start (Media3's `seekTo(index, 0)`). */
     fun skipTo(index: Int) {
         if (index !in items.indices) return
+        heldStartMillis = 0
         val restored = restoreOwnStream(index)
         if (index == current) {
             // The same track from 0:00: no change to report.
@@ -250,7 +293,11 @@ internal class MpvPlayback(
     fun seekTo(millis: Long): Boolean {
         val item = items.getOrNull(current) ?: return false
         if (!item.seeksByRestart) {
-            if (unloaded) return false
+            if (unloaded) {
+                // Nothing loaded: Play loads it there.
+                heldStartMillis = millis.coerceAtLeast(0)
+                return false
+            }
             send(listOf("seek", formatSeconds(millis), "absolute+exact"))
             return true
         }
@@ -279,9 +326,11 @@ internal class MpvPlayback(
         send(listOf("stop"))
         items.clear()
         startOffsets.clear()
+        heldStartMillis = 0
         current = 0
         pending = null
         unloaded = true
+        updateStarting()
     }
 
     /** One event from mpv, in the order mpv sent them. */
@@ -292,10 +341,15 @@ internal class MpvPlayback(
             is MpvEvent.Paused -> {
                 paused = event.paused
                 updatePlaying()
+                updateStarting()
             }
             is MpvEvent.Idle -> {
                 idle = event.idle
                 updatePlaying()
+            }
+            is MpvEvent.CoreIdle -> {
+                coreIdle = event.coreIdle
+                updateStarting()
             }
             MpvEvent.Repeated -> if (!unloaded && pending == null && repeat == RepeatMode.ONE) {
                 listener()?.onIndexChanged(current, automatic = true)
@@ -339,6 +393,7 @@ internal class MpvPlayback(
             MpvEndReason.EOF -> if (current >= items.lastIndex && repeat == RepeatMode.OFF) {
                 // mpv goes idle and keeps the playlist.
                 unloaded = true
+                updateStarting()
                 listener()?.onEnded()
             }
             MpvEndReason.ERROR -> {
@@ -346,10 +401,19 @@ internal class MpvPlayback(
                 unloaded = true
                 send(listOf("set", "pause", "yes"))
                 send(listOf("stop", "keep-playlist"))
+                updateStarting()
                 listener()?.onError("Playback failed (${event.error ?: "error"}).")
             }
             else -> Unit
         }
+    }
+
+    /** Play is wanted and a file is loading or playing, but no audio moves yet (opening, the cache, a seek). */
+    private fun updateStarting() {
+        val starting = !paused && !unloaded && coreIdle
+        if (starting == reportedStarting) return
+        reportedStarting = starting
+        listener()?.onStartingChanged(starting)
     }
 
     private fun updatePlaying() {

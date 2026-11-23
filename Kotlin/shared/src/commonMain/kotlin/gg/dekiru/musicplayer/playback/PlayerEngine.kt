@@ -51,6 +51,16 @@ interface EngineListener {
     /** The last item finished (Repeat off). */
     fun onEnded()
     fun onError(message: String)
+
+    /**
+     * Whether the playing item is loading after Play, a skip, a seek or a
+     * reconnect: playback is wanted but no sound has come yet (Media3
+     * buffering with play-when-ready, mpv waiting for its cache or file).
+     * Now Playing shows a spinner then. `reconnecting`: a stream that had
+     * already played is waiting to reconnect (not a start): Play/Pause
+     * pauses then, ending the tries.
+     */
+    fun onStartingChanged(starting: Boolean, reconnecting: Boolean = false) = Unit
 }
 
 /**
@@ -76,6 +86,22 @@ interface PlayerEngine {
     fun setAuthorization(header: String?)
 
     fun setQueue(items: List<EngineItem>, startIndex: Int)
+
+    /**
+     * Holds `items`, paused at `startMillis` into item `startIndex`, without
+     * opening any stream (a restored queue at launch, or a paused queue
+     * loaded again). The lock screen and notification show the item; the
+     * first [play] (a skip then Play included) opens it there: a converted
+     * stream starts at that point (`StartTimeTicks`), a direct stream or a
+     * file seeks to it. Nothing is reported to the listener.
+     *
+     * The default (engines that can't wait) loads it paused.
+     */
+    fun cue(items: List<EngineItem>, startIndex: Int, startMillis: Long) {
+        pause()
+        setQueue(items, startIndex)
+        if (startMillis > 0) seekTo(startMillis)
+    }
 
     /**
      * Replaces the items after the playing one without interrupting it.

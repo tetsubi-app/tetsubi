@@ -240,6 +240,7 @@ struct HomeSectionRow: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .albumQueueMenu(album)
                         }
                     }
                     .homeRowPadding(wide: metrics != nil)
@@ -279,6 +280,7 @@ struct OnThisDayRow: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .albumQueueMenu(entry.album)
                 }
             }
             .homeRowPadding(wide: metrics != nil)

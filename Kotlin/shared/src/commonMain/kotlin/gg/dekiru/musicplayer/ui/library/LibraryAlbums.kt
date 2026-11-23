@@ -50,6 +50,9 @@ import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.models.JellyfinArtist
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
+import gg.dekiru.musicplayer.ui.components.WithContextMenu
+import gg.dekiru.musicplayer.ui.components.albumQueueActions
+import gg.dekiru.musicplayer.ui.components.menuClickable
 import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
 
 // The album grid and list shared by the Library's tabs and artist pages.
@@ -169,8 +172,10 @@ internal fun GridCell(
     titleLines: Int = 2, showsYear: Boolean = false, onClick: () -> Unit,
 ) {
     val t = grid.textScale
+    // Long press or right-click: Play Next, Add to Queue.
+    WithContextMenu(albumQueueActions(album)) { openMenu ->
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape((8 * t).dp)).clickable(role = Role.Button, onClick = onClick),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape((8 * t).dp)).menuClickable(onClick, openMenu),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy((4 * t).dp),
     ) {
@@ -196,6 +201,7 @@ internal fun GridCell(
             )
         }
     }
+    }
 }
 
 /** Rows: small cover, title, artist, year, the tick at the right (as the iOS Library's list). */
@@ -213,8 +219,9 @@ fun LibraryAlbumList(
     LazyColumn(state = state, contentPadding = PaddingValues(bottom = 16.dp + bottom), modifier = Modifier.fillMaxSize()) {
         items(albums, key = { it.id }) { album ->
             LaunchedEffect(album.id, albums.size) { onAppear(album) }
+            WithContextMenu(albumQueueActions(album)) { openMenu ->
             Row(
-                Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpen(album) }.padding(horizontal = 16.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().menuClickable({ onOpen(album) }, openMenu).padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -225,6 +232,7 @@ fun LibraryAlbumList(
                     album.productionYear?.let { Text(it.toString(), color = TetsubiColors.albumYearText, fontSize = 11.sp) }
                 }
                 if (isDownloaded(album)) DownloadedTick(20.dp)
+            }
             }
             Box(Modifier.padding(start = 88.dp).fillMaxWidth().height(0.5.dp).background(Color.White.copy(alpha = 0.12f)))
         }

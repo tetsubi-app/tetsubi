@@ -164,6 +164,8 @@ public struct AppRootView: View {
             libraryTabRequest = .playlists
             selectedTab = .library
         }
+        // Play on an album or playlist with more queued: Replace / Play Next / Add to Queue.
+        .queuePromptHost()
         .sidebarTabsOnMac()
         // Lets the Mac menu bar (AppCommands) reach the player and tabs.
         .focusedSceneValue(\.playerManager, player)

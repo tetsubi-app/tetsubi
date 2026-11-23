@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -79,9 +80,7 @@ fun NowPlayingBar(api: JellyfinApi, player: PlayerController, modifier: Modifier
                     }
                 }
                 if (!player.maniacMode) ControlButton("Previous", 44.dp, player::skipToPrevious) { SkipIcon(forward = false, size = 22.dp) }
-                ControlButton(if (player.isPlaying) "Pause" else "Play", 48.dp, player::togglePlayPause) {
-                    if (player.isPlaying) PauseIcon(26.dp) else PlayIcon(26.dp)
-                }
+                PlayPauseButton(player, 48.dp, 26.dp)
                 if (!player.maniacMode) ControlButton("Next", 44.dp, player::skipToNext) { SkipIcon(forward = true, size = 22.dp) }
             }
             if (player.duration > 0) {
@@ -94,6 +93,30 @@ fun NowPlayingBar(api: JellyfinApi, player: PlayerController, modifier: Modifier
                     modifier = Modifier.fillMaxWidth().padding(start = 28.dp, end = 28.dp, bottom = 10.dp).height(3.dp),
                 )
             }
+        }
+    }
+}
+
+/**
+ * Play or Pause; while the track is starting ([PlayerController.isStarting])
+ * a small spinner in the same space, and a press does nothing.
+ */
+@Composable
+internal fun PlayPauseButton(player: PlayerController, size: Dp, iconSize: Dp) {
+    val label = when {
+        player.isStarting -> "Loading"
+        player.isPlaying -> "Pause"
+        else -> "Play"
+    }
+    ControlButton(label, size, player::togglePlayPause) {
+        when {
+            player.isStarting -> CircularProgressIndicator(
+                color = Color.White,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(iconSize * 0.75f),
+            )
+            player.isPlaying -> PauseIcon(iconSize)
+            else -> PlayIcon(iconSize)
         }
     }
 }

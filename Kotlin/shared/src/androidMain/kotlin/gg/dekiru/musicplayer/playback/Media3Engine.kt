@@ -20,8 +20,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.TransferListener
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
@@ -66,11 +66,25 @@ import kotlinx.coroutines.launch
 @UnstableApi
 class Media3Engine(private val context: Context) : PlayerEngine {
 
-    private val http = DefaultHttpDataSource.Factory()
+    /**
+     * Direct streams (the original file): 15 s to connect, 30 s for the
+     * response and each read. Both stream factories run over the app's own
+     * OkHttp client ([StreamHttpClients], [gg.dekiru.musicplayer.data.api.TetsubiOkHttp]),
+     * so a stream reuses the connection the API calls already have open.
+     * OkHttp follows redirects across http/https by default.
+     */
+    private val http = OkHttpDataSource.Factory(StreamHttpClients.direct())
         .setUserAgent("Tetsubi/${AppInfo.VERSION}")
-        .setAllowCrossProtocolRedirects(true)
-        .setConnectTimeoutMs(15_000)
-        .setReadTimeoutMs(30_000)
+
+    /**
+     * Streams the server converts: a shorter connect wait, and the first
+     * response is limited separately ([FirstResponseDataSource]), so a
+     * request that goes nowhere (the route to the server not up yet) is
+     * given up after seconds and the reconnect tries again. Later reads
+     * keep the usual 30 s.
+     */
+    private val convertedHttp = OkHttpDataSource.Factory(StreamHttpClients.converted())
+        .setUserAgent("Tetsubi/${AppInfo.VERSION}")
 
     /**
      * The track-start diagnostic line ([StreamStartLog]). Its handler, the
@@ -103,7 +117,9 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     val player: ExoPlayer = ExoPlayer.Builder(context)
         .setRenderersFactory(effectsRenderersFactory(context, audioEffects))
         .setMediaSourceFactory(
-            DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http).setTransferListener(streamOpened))
+            DefaultMediaSourceFactory(
+                DefaultDataSource.Factory(context, FirstResponseDataSource.Factory(http, convertedHttp)).setTransferListener(streamOpened),
+            )
                 .setLoadErrorHandlingPolicy(ConvertedStreamErrorPolicy()),
         )
         .setAudioAttributes(
@@ -141,6 +157,23 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
     /** True while swapping in a restarted stream: that's not a change of track. */
     private var restarting = false
+
+    /**
+     * The queue was given with [cue]: ExoPlayer holds it unprepared (no
+     * stream opened) until Play prepares it. Its position and length are
+     * the item's own meanwhile ([Seekable]).
+     */
+    private var cued = false
+
+    /** What [EngineListener.onStartingChanged] last said. */
+    private var reportedStarting = false
+    private var reportedReconnecting = false
+
+    /**
+     * The playing item has made a sound since it was loaded, skipped to or
+     * seeked: a reconnect then is a dropped stream, not a start.
+     */
+    private var hadPlayed = false
 
     // Reconnecting a converted stream (see StreamReconnect)
 
@@ -228,23 +261,35 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         private fun offset() = offsetOf(item())
         private fun converted() = item()?.takeIf { it.seeksByRestart(onCast) && it.durationMillis > 0 }
 
+        /** A cued item (not prepared yet): ExoPlayer knows nothing of it, so its own length stands. */
+        private fun cuedItem() = item()?.takeIf { !onCast && cued && it.durationMillis > 0 }
+
+        /** The length the app knows for the item, where ExoPlayer can't tell. */
+        private fun known() = converted() ?: cuedItem()
+
         override fun getCurrentPosition() = super.getCurrentPosition() + offset()
         override fun getContentPosition() = super.getContentPosition() + offset()
         override fun getBufferedPosition() = super.getBufferedPosition() + offset()
         override fun getContentBufferedPosition() = super.getContentBufferedPosition() + offset()
-        override fun getDuration() = converted()?.durationMillis ?: super.getDuration()
-        override fun getContentDuration() = converted()?.durationMillis ?: super.getContentDuration()
-        override fun isCurrentMediaItemSeekable() = converted() != null || super.isCurrentMediaItemSeekable()
+        override fun getDuration() = known()?.durationMillis ?: super.getDuration()
+        override fun getContentDuration() = known()?.durationMillis ?: super.getContentDuration()
+        override fun isCurrentMediaItemSeekable() = known() != null || super.isCurrentMediaItemSeekable()
 
         // ExoPlayer counts a stream of unknown length that can't be seeked as
         // live, and Media3 then hides the position from the notification and
         // lock screen. A converted track has a known length: it isn't live.
-        override fun isCurrentMediaItemLive() = converted() == null && super.isCurrentMediaItemLive()
-        override fun isCurrentMediaItemDynamic() = converted() == null && super.isCurrentMediaItemDynamic()
+        // Nor is a cued one, which ExoPlayer hasn't looked at yet.
+        override fun isCurrentMediaItemLive() = known() == null && super.isCurrentMediaItemLive()
+        override fun isCurrentMediaItemDynamic() = known() == null && super.isCurrentMediaItemDynamic()
+
+        /** Play from the notification, lock screen or a car on a cued queue: prepared here, so it's timed. */
+        override fun prepare() {
+            if (wrapped === player) prepareHere(StreamStartLog.Reason.RESUME) else super.prepare()
+        }
 
         override fun getAvailableCommands(): Player.Commands {
             val base = super.getAvailableCommands()
-            if (converted() == null) return base
+            if (known() == null) return base
             return base.buildUpon().addAll(
                 Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM, Player.COMMAND_SEEK_TO_PREVIOUS,
                 Player.COMMAND_SEEK_BACK, Player.COMMAND_SEEK_FORWARD,
@@ -284,9 +329,14 @@ class Media3Engine(private val context: Context) : PlayerEngine {
      */
     private fun seekWithin(index: Int, positionMs: Long) {
         val from = active.currentMediaItemIndex
+        hadPlayed = false
         moveWithin(index, positionMs)
         if (reconnect.active) retryStream()
-        if (!casting) beginStart(if (index == from) StreamStartLog.Reason.SEEK else StreamStartLog.Reason.SKIP)
+        // A cued queue opens nothing until Play (which is timed then).
+        if (!casting && player.playbackState != Player.STATE_IDLE) {
+            beginStart(if (index == from) StreamStartLog.Reason.SEEK else StreamStartLog.Reason.SKIP)
+        }
+        updateStarting()
     }
 
     private fun moveWithin(index: Int, positionMs: Long) {
@@ -346,6 +396,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             // A new queue (the controller knows where it starts) or a restarted stream.
             if (!isActive || reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED || restarting) return
+            hadPlayed = false
             restoreOtherTracks()
             val automatic = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
                 reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
@@ -360,6 +411,8 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (!isActive) return
+            if (isPlaying) hadPlayed = true
+            updateStarting()
             // Getting a dropped stream back: still playing as far as the app knows.
             if (!isPlaying && source === player && reconnect.active && player.playWhenReady) return
             listener?.onIsPlayingChanged(isPlaying)
@@ -368,11 +421,17 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             // Paused while reconnecting: the player wasn't playing, so it doesn't say it stopped.
             if (isActive && source === player && reconnect.active && !playWhenReady) listener?.onIsPlayingChanged(false)
+            // Play on a cued queue that came some other way than play(): open it.
+            if (isActive && source === player && playWhenReady && cued) prepareHere(StreamStartLog.Reason.RESUME)
+            if (isActive) updateStarting()
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (!isActive) return
+            updateStarting()
             if (source === player) {
+                // Prepared, by whatever means: no longer cued.
+                if (playbackState != Player.STATE_IDLE) cued = false
                 if (playbackState == Player.STATE_READY && reconnect.active) endReconnect()
                 if (playbackState == Player.STATE_ENDED) listener?.onEnded()
             } else if (playbackState == Player.STATE_IDLE) {
@@ -382,9 +441,13 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
         override fun onPlayerError(error: PlaybackException) {
             if (!isActive) return
-            if (source === player && reconnectAfter(error)) return
+            if (source === player && reconnectAfter(error)) {
+                updateStarting()
+                return
+            }
             if (source === player) startLog.failed(error.errorCodeName)
             listener?.onError("Playback failed (${error.errorCodeName}).")
+            updateStarting()
         }
     }
 
@@ -470,6 +533,36 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         reconnect.reset()
         mainHandler.removeCallbacks(retryTask)
         reconnectWakeLock?.runCatching { if (isHeld) release() }
+        updateStarting()
+    }
+
+    /**
+     * Tells the listener whether the active player is starting: Play is
+     * wanted but no sound has come (buffering, or a dropped converted
+     * stream waiting for its next try).
+     */
+    private fun updateStarting() {
+        val p = active
+        val starting = p.playWhenReady && !p.isPlaying && when (p.playbackState) {
+            Player.STATE_BUFFERING -> true
+            Player.STATE_IDLE -> p === player && (reconnect.active || cued)
+            else -> false
+        }
+        val reconnecting = starting && p === player && reconnect.active && hadPlayed
+        if (starting == reportedStarting && reconnecting == reportedReconnecting) return
+        reportedStarting = starting
+        reportedReconnecting = reconnecting
+        listener?.onStartingChanged(starting, reconnecting)
+    }
+
+    /** Prepares ExoPlayer's queue if it isn't (cued, or after an error), timing the start. */
+    private fun prepareHere(reason: StreamStartLog.Reason) {
+        if (player.playbackState != Player.STATE_IDLE || player.mediaItemCount == 0) return
+        val wasCued = cued
+        cued = false
+        player.prepare()
+        beginStart(if (wasCued) StreamStartLog.Reason.PLAY else reason)
+        updateStarting()
     }
 
     /**
@@ -587,6 +680,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         val hadQueue = queueItems.isNotEmpty()
         // From here on the old player's events are ignored.
         _activePlayer.value = target
+        cued = false
         endReconnect()
         endStart()
         if (source === player) player.stop()
@@ -645,10 +739,14 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
     override fun setAuthorization(header: String?) {
         authorization = header
-        http.setDefaultRequestProperties(header?.let { mapOf("Authorization" to it) }.orEmpty())
+        val properties = header?.let { mapOf("Authorization" to it) }.orEmpty()
+        http.setDefaultRequestProperties(properties)
+        convertedHttp.setDefaultRequestProperties(properties)
     }
 
     override fun setQueue(items: List<EngineItem>, startIndex: Int) {
+        cued = false
+        hadPlayed = false
         endReconnect()
         queueItems.clear()
         queueItems += items
@@ -662,6 +760,35 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         player.setMediaItems(items.map { mediaItem(it, it.url, onCast = false) }, startIndex, 0)
         player.prepare()
         beginStart(StreamStartLog.Reason.PLAY)
+        updateStarting()
+    }
+
+    /**
+     * ExoPlayer is given the queue but not prepared, so no stream opens
+     * (at launch the route to the server may not be up yet, and the first
+     * request would hang). The point is set as a seek would set it: a
+     * converted stream is swapped for the one started there. [play]
+     * prepares. On a Cast device the queue is loaded paused there.
+     */
+    override fun cue(items: List<EngineItem>, startIndex: Int, startMillis: Long) {
+        hadPlayed = false
+        endReconnect()
+        endStart()
+        queueItems.clear()
+        queueItems += items
+        startOffsets.clear()
+        if (casting) {
+            cued = false
+            loadOnCast(PlaybackSnapshot(startIndex, startMillis, playWhenReady = false, repeat))
+            return
+        }
+        player.playWhenReady = false
+        // A prepared player would load the new items at once: back to idle first.
+        player.stop()
+        player.setMediaItems(items.map { mediaItem(it, it.url, onCast = false) }, startIndex, 0)
+        cued = items.isNotEmpty()
+        if (startMillis > 0) moveWithin(startIndex, startMillis)
+        updateStarting()
     }
 
     override fun replaceAfterCurrent(items: List<EngineItem>) {
@@ -705,17 +832,31 @@ class Media3Engine(private val context: Context) : PlayerEngine {
             if (castEnded) loadOnCast(PlaybackSnapshot(queueIndexOf(castEndedEntry).coerceAtLeast(0), 0, playWhenReady = true, repeat)) else active.play()
             return
         }
-        if (player.playbackState == Player.STATE_IDLE) {
-            // After an error: loads the item again.
-            player.prepare()
-            beginStart(StreamStartLog.Reason.RESUME)
-        }
+        // Cued (nothing opened yet), or after an error: loads the item (again).
+        prepareHere(StreamStartLog.Reason.RESUME)
         // Ended: Play starts the queue again.
         if (player.playbackState == Player.STATE_ENDED) seekable.seekTo(0, 0)
         player.play()
+        updateStarting()
     }
 
-    override fun pause() = active.pause()
+    /**
+     * Pauses. While a dropped stream waits for its next try, the tries end
+     * (the stream started at the held point stays in, so Play carries on
+     * from there).
+     */
+    override fun pause() {
+        val waiting = !casting && reconnect.active
+        active.pause()
+        if (waiting) {
+            endReconnect()
+            endStart()
+            // The player wasn't playing, so it won't say it stopped.
+            listener?.onIsPlayingChanged(false)
+        }
+        updateStarting()
+    }
+
     override fun seekTo(millis: Long) = seekable.seekTo(millis)
     /** `index`: a queue index (on a Cast device, mapped to its window; outside it, the window moves there). */
     override fun skipTo(index: Int) {
@@ -753,6 +894,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     }
 
     override fun stop() {
+        cued = false
         endReconnect()
         endStart()
         player.stop()
@@ -765,6 +907,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         castItems.clear()
         startOffsets.clear()
         castEndedEntry = null
+        updateStarting()
     }
 
     override val positionMillis: Long get() = if (casting && castEnded) 0 else seekable.currentPosition

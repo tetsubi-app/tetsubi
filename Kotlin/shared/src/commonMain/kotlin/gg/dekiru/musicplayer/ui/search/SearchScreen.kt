@@ -62,6 +62,12 @@ import gg.dekiru.musicplayer.downloads.LocalFiles
 import gg.dekiru.musicplayer.playback.PlayerController
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
+import gg.dekiru.musicplayer.ui.components.LocalPlayPrompt
+import gg.dekiru.musicplayer.ui.components.PlayChoice
+import gg.dekiru.musicplayer.ui.components.PlayPrompt
+import gg.dekiru.musicplayer.ui.components.WithContextMenu
+import gg.dekiru.musicplayer.ui.components.albumQueueActions
+import gg.dekiru.musicplayer.ui.components.menuClickable
 import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
 import gg.dekiru.musicplayer.ui.components.PlayIcon
 import gg.dekiru.musicplayer.ui.components.XCircleIcon
@@ -101,6 +107,7 @@ fun SearchScreen(
     LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() }
     val isDownloaded = rememberIsDownloaded(downloads)
     val insets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues()
+    val prompt = LocalPlayPrompt.current
 
     Box(
         Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
@@ -125,7 +132,7 @@ fun SearchScreen(
                     onOpenPlaylist(playlist)
                 }, onPlay = { local ->
                     focus.clearFocus()
-                    play(local, player, onOpen)
+                    play(local, player, prompt, onOpen)
                 })
                 item { Spacer(Modifier.height(24.dp)) }
             }
@@ -251,10 +258,12 @@ private fun LazyListScope.offlineResults(
     }
     items(model.localResults, key = { "local-${it.id}" }) { album ->
         val cover = downloads?.downloadedAlbum(album.id)?.coverPath?.takeIf(LocalFiles::exists)
+        // Long press or right-click: Play Next, Add to Queue.
+        WithContextMenu(albumQueueActions(album.toJellyfinAlbum())) { openMenu ->
         Row(
             Modifier
                 .fillMaxWidth()
-                .clickable(role = Role.Button, onClickLabel = "Play album") { onPlay(album) }
+                .menuClickable({ onPlay(album) }, openMenu, onClickLabel = "Play album")
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -266,24 +275,43 @@ private fun LazyListScope.offlineResults(
             }
             PlayIcon(20.dp, TetsubiColors.blue)
         }
+        }
     }
 }
 
-/** Plays a download, opening Now Playing (as iOS). No player here (the desktop): its album page instead. */
-private fun play(album: LocalAlbum, player: PlayerController?, onOpen: (JellyfinAlbum) -> Unit) {
-    val jellyfinAlbum = JellyfinAlbum(
-        id = album.id, name = album.title.ifEmpty { null },
-        albumArtists = listOf(JellyfinPerson(name = album.artist)),
+/** A download as an album to play or queue. */
+private fun LocalAlbum.toJellyfinAlbum() = JellyfinAlbum(
+    id = id, name = title.ifEmpty { null },
+    albumArtists = listOf(JellyfinPerson(name = artist)),
+)
+
+/**
+ * Plays a download, opening Now Playing (as iOS); with more than the
+ * playing album queued, asks first. No player here (the desktop): its
+ * album page instead.
+ */
+private fun play(album: LocalAlbum, player: PlayerController?, prompt: PlayPrompt, onOpen: (JellyfinAlbum) -> Unit) {
+    val jellyfinAlbum = album.toJellyfinAlbum()
+    if (player?.isSupported != true) return onOpen(jellyfinAlbum)
+    prompt.play(
+        player,
+        PlayChoice(
+            jellyfinAlbum.displayName,
+            replace = { player.play(jellyfinAlbum) },
+            playNext = { player.playNext(jellyfinAlbum) },
+            addToQueue = { player.addToQueue(jellyfinAlbum) },
+        ),
     )
-    if (player?.isSupported == true) player.play(jellyfinAlbum) else onOpen(jellyfinAlbum)
 }
 
 @Composable
 private fun ResultRow(api: JellyfinApi, album: JellyfinAlbum, localArt: String?, isDownloaded: Boolean, onClick: () -> Unit) {
+    // Long press or right-click: Play Next, Add to Queue.
+    WithContextMenu(albumQueueActions(album)) { openMenu ->
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
+            .menuClickable(onClick, openMenu)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -297,6 +325,7 @@ private fun ResultRow(api: JellyfinApi, album: JellyfinAlbum, localArt: String?,
         if (isDownloaded) {
             CheckCircleIcon(16.dp, TetsubiColors.green, Modifier.semantics { contentDescription = "Downloaded" })
         }
+    }
     }
 }
 

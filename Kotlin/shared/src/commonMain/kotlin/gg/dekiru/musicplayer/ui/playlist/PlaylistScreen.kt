@@ -86,6 +86,14 @@ import gg.dekiru.musicplayer.playback.PlayerController
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.album.formatDuration
 import gg.dekiru.musicplayer.ui.components.AlbumArt
+import gg.dekiru.musicplayer.ui.components.LocalPlayPrompt
+import gg.dekiru.musicplayer.ui.components.MenuAction
+import gg.dekiru.musicplayer.ui.components.MoreMenuButton
+import gg.dekiru.musicplayer.ui.components.PlayChoice
+import gg.dekiru.musicplayer.ui.components.PlayPrompt
+import gg.dekiru.musicplayer.ui.components.WithContextMenu
+import gg.dekiru.musicplayer.ui.components.menuClickable
+import gg.dekiru.musicplayer.ui.components.queueActions
 import gg.dekiru.musicplayer.ui.home.OFFLINE_MESSAGE
 import gg.dekiru.musicplayer.ui.home.StatusBanner
 import gg.dekiru.musicplayer.ui.library.ShuffleIcon
@@ -144,6 +152,11 @@ fun PlaylistScreen(
     val drag = remember { RowDrag() }
     var renaming by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
+    val prompt = LocalPlayPrompt.current
+    // Play Next and Add to Queue for the whole playlist (its loaded songs).
+    val queue = player?.takeIf { it.isSupported && model.entries.isNotEmpty() }?.let { p ->
+        queueActions({ p.playNext(model.playlist, model.entries) }, { p.addToQueue(model.playlist, model.entries) })
+    }.orEmpty()
 
     BoxWithConstraints(
         Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
@@ -165,6 +178,7 @@ fun PlaylistScreen(
                         else -> null
                     },
                     onEdit = { if (editing) model.doneEditing() else model.startEditing() },
+                    menu = if (editing) emptyList() else queue,
                 )
             }
             if (editing) {
@@ -185,7 +199,7 @@ fun PlaylistScreen(
                 item { Header(api, model, artSize = if (wide) 240.dp else 160.dp, localArt = download?.coverPath) }
                 item {
                     Actions(
-                        model, player, manager, download, downloadState,
+                        model, player, manager, download, downloadState, prompt,
                         canDownload = isOnline && model.loaded && model.entries.isNotEmpty(),
                         onRemove = { confirmingRemove = true },
                     )
@@ -218,11 +232,16 @@ fun PlaylistScreen(
                             player.currentPlace == position && player.currentTrack?.id == entry.track.id
                         // Maniac Mode: playlists start at the first song, so rows aren't buttons.
                         val canTap = player?.isSupported == true && !player.maniacMode
+                        // The song's own Play Next / Add to Queue (in Maniac Mode too), as part of the playlist.
+                        val songQueue = player?.takeIf { it.isSupported }?.let { p ->
+                            queueActions({ p.playNext(model.playlist, listOf(entry)) }, { p.addToQueue(model.playlist, listOf(entry)) })
+                        }.orEmpty()
                         EntryRow(
                             api, entry,
                             localArt = download?.let { rememberSavedArt(it, entry.artItemId) },
                             isPlaying = playingHere,
-                            onClick = if (canTap) ({ model.play(player, startingAt = position, openNowPlaying = false) }) else null,
+                            onClick = if (canTap && player != null) ({ prompt.play(player, playlistChoice(model, player, song = entry, startingAt = position)) }) else null,
+                            queue = songQueue,
                             onAddToPlaylist = onAddToPlaylist?.takeIf { isOnline }?.let { add -> { add(listOf(entry.track.id)) } },
                             onGoToAlbum = if (entry.albumId != null) ({ model.openAlbum(entry, onOpenAlbum) }) else null,
                         )
@@ -274,7 +293,7 @@ private fun rememberSavedArt(download: DownloadedPlaylist, itemId: String): Stri
     remember(download, itemId) { "${download.directory}/${DownloadPaths.COVERS}/${DownloadPaths.sanitize(itemId)}.jpg".takeIf(LocalFiles::exists) }
 
 @Composable
-private fun TopBar(title: String, onBack: () -> Unit, editTitle: String?, onEdit: () -> Unit) {
+private fun TopBar(title: String, onBack: () -> Unit, editTitle: String?, onEdit: () -> Unit, menu: List<MenuAction> = emptyList()) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back" }) {
             Text("‹ Back", color = TetsubiColors.blue, fontSize = 16.sp)
@@ -288,8 +307,23 @@ private fun TopBar(title: String, onBack: () -> Unit, editTitle: String?, onEdit
                 Text(editTitle, color = TetsubiColors.blue, fontSize = 16.sp, fontWeight = if (editTitle == "Done") FontWeight.SemiBold else FontWeight.Normal)
             }
         }
+        MoreMenuButton("More", menu, Modifier.padding(end = 8.dp))
     }
 }
+
+/**
+ * Play the playlist (from the tapped `song`, or shuffled), or, from the
+ * prompt, queue it instead (a tapped song: just that song; Shuffle leaves
+ * shuffle as it is). A refused play says why on the page.
+ */
+private fun playlistChoice(
+    model: PlaylistModel, player: PlayerController, song: PlaylistEntry? = null, startingAt: Int? = null, shuffled: Boolean = false,
+) = PlayChoice(
+    title = song?.track?.displayName ?: model.playlist.displayName,
+    replace = { model.play(player, startingAt = startingAt, shuffled = shuffled, openNowPlaying = song == null) },
+    playNext = { player.playNext(model.playlist, song?.let(::listOf) ?: model.entries) },
+    addToQueue = { player.addToQueue(model.playlist, song?.let(::listOf) ?: model.entries) },
+)
 
 // Edit mode
 
@@ -483,6 +517,7 @@ private fun Actions(
     manager: DownloadManager?,
     download: DownloadedPlaylist?,
     state: DownloadAlbumState?,
+    prompt: PlayPrompt,
     canDownload: Boolean,
     onRemove: () -> Unit,
 ) {
@@ -492,7 +527,12 @@ private fun Actions(
         val nowPlaying = player?.isPlaying(model.playlist) == true
         Button(
             onClick = {
-                if (nowPlaying) player.isNowPlayingOpen = true else player?.let(model::play)
+                when {
+                    player == null -> {}
+                    nowPlaying -> player.isNowPlayingOpen = true
+                    // More than the playing album queued: Replace queue, Play Next or Add to Queue.
+                    else -> prompt.play(player, playlistChoice(model, player))
+                }
             },
             enabled = canPlay,
             colors = ButtonDefaults.buttonColors(containerColor = if (nowPlaying) TetsubiColors.pink else TetsubiColors.blue, contentColor = Color.White),
@@ -500,7 +540,7 @@ private fun Actions(
         if (player?.maniacMode != true) {
             OutlinedButton(
                 onClick = {
-                    player?.let { model.play(it, shuffled = true) }
+                    player?.let { prompt.play(it, playlistChoice(model, it, shuffled = true)) }
                 },
                 enabled = canPlay,
             ) {
@@ -561,17 +601,30 @@ private fun EntryRow(
     localArt: String?,
     isPlaying: Boolean,
     onClick: (() -> Unit)?,
+    queue: List<MenuAction>,
     onAddToPlaylist: (() -> Unit)?,
     onGoToAlbum: (() -> Unit)?,
 ) {
     val shape = RoundedCornerShape(6.dp)
+    // ⋯, a long press and a right-click: Play Next, Add to Queue, Add to Playlist…, Go to Album.
+    val menu = queue + listOfNotNull(
+        onAddToPlaylist?.let { MenuAction("Add to Playlist…", action = it) },
+        onGoToAlbum?.let { MenuAction("Go to Album", action = it) },
+    )
+    WithContextMenu(menu) { openMenu ->
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 1.dp)
             .clip(shape)
             .background(if (isPlaying) TetsubiColors.pink else Color.Gray.copy(alpha = 0.05f), shape)
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .then(
+                when {
+                    onClick != null -> Modifier.menuClickable(onClick, openMenu)
+                    openMenu != null -> Modifier.menuClickable({}, openMenu)
+                    else -> Modifier
+                },
+            )
             .padding(start = 8.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -593,43 +646,12 @@ private fun EntryRow(
             formatDuration(entry.track.durationSeconds), color = if (isPlaying) Color.White.copy(alpha = 0.85f) else TetsubiColors.albumArtistText,
             fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp),
         )
-        EntryMenu(entry.track.displayName, onAddToPlaylist, onGoToAlbum)
+        // Keeps its room when empty, so the lengths line up.
+        if (menu.isEmpty()) Spacer(Modifier.size(40.dp)) else MoreMenuButton("More for ${entry.track.displayName}", menu)
+    }
     }
 }
 
 /** "artist · album", or whichever is known. */
 internal fun entryDetail(entry: PlaylistEntry): String =
     listOfNotNull(entry.albumArtist?.takeIf { it.isNotEmpty() }, entry.albumName?.takeIf { it.isNotEmpty() }).joinToString(" · ")
-
-@Composable
-private fun EntryMenu(title: String, onAddToPlaylist: (() -> Unit)?, onGoToAlbum: (() -> Unit)?) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        Box(
-            Modifier.size(40.dp).clip(RoundedCornerShape(50))
-                .clickable(role = Role.Button) { open = true }
-                .semantics { contentDescription = "More for $title" },
-            contentAlignment = Alignment.Center,
-        ) { Text("⋯", color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp, fontWeight = FontWeight.Bold) }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (onAddToPlaylist != null) {
-                DropdownMenuItem(
-                    text = { Text("Add to Playlist…", color = Color.White) },
-                    onClick = {
-                        open = false
-                        onAddToPlaylist()
-                    },
-                )
-            }
-            if (onGoToAlbum != null) {
-                DropdownMenuItem(
-                    text = { Text("Go to Album", color = Color.White) },
-                    onClick = {
-                        open = false
-                        onGoToAlbum()
-                    },
-                )
-            }
-        }
-    }
-}

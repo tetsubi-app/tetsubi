@@ -346,10 +346,33 @@ public final class PlaylistDetailViewModel {
     /// the sheet).
     public func play() {
         guard let player, !entries.isEmpty else { return }
-        if !isThisPlaylistPlaying, refused(player.play(playlist: playlist, tracks: entries, online: isOnline())) {
+        if isThisPlaylistPlaying {
+            player.isNowPlayingPresented = true
             return
         }
-        player.isNowPlayingPresented = true
+        // With more than the current album or playlist queued, asks
+        // Replace queue / Play Next / Add to Queue first.
+        QueuePrompt.shared.play(playlist.name, replace: { [self] in
+            if refused(player.play(playlist: playlist, tracks: entries, online: isOnline())) { return }
+            player.isNowPlayingPresented = true
+        }, place: { [self] how in
+            queue(how)
+        })
+    }
+
+    /// Play Next / Add to Queue for the whole playlist.
+    public func queue(_ how: QueueActions.Placement) {
+        guard !entries.isEmpty else {
+            QueueActions.queue(playlist: playlist, how)
+            return
+        }
+        QueueActions.queue(playlist: playlist, entries: entries, how)
+    }
+
+    /// Play Next / Add to Queue for one row's song (as a one-song playlist
+    /// part, so offline it's queued only when it's on this device).
+    public func queue(entry: PlaylistEntry, _ how: QueueActions.Placement) {
+        QueueActions.queue(playlist: playlist, entries: [entry], how)
     }
 
     /// Offline, with the song (or every song) not on this device:
@@ -363,20 +386,31 @@ public final class PlaylistDetailViewModel {
     /// Turn shuffle on and play the playlist in a new random order.
     public func shuffle() {
         guard let player, !entries.isEmpty else { return }
-        let before = player.shuffle
-        player.setShuffle(true)
-        if refused(player.play(playlist: playlist, tracks: entries, online: isOnline())) {
-            player.setShuffle(before)
-            return
-        }
-        player.isNowPlayingPresented = true
+        // Play Next / Add to Queue from the prompt leave shuffle as it is.
+        QueuePrompt.shared.play(playlist.name, replace: { [self] in
+            let before = player.shuffle
+            player.setShuffle(true)
+            if refused(player.play(playlist: playlist, tracks: entries, online: isOnline())) {
+                player.setShuffle(before)
+                return
+            }
+            player.isNowPlayingPresented = true
+        }, place: { [self] how in
+            queue(how)
+        })
     }
 
     /// Play the playlist from the tapped row.
     public func play(from entry: PlaylistEntry) {
         guard let player else { return }
-        _ = refused(player.play(playlist: playlist, tracks: entries, startingAt: entry.position,
-                                online: isOnline()))
+        // Asks first with more queued; Play Next / Add to Queue then queue
+        // just this song.
+        QueuePrompt.shared.play(entry.track.displayName, replace: { [self] in
+            _ = refused(player.play(playlist: playlist, tracks: entries, startingAt: entry.position,
+                                    online: isOnline()))
+        }, place: { [self] how in
+            queue(entry: entry, how)
+        })
     }
 
     /// Fetch the row's album and open its page.
@@ -454,6 +488,17 @@ public struct PlaylistDetailView: View {
                 .appTheme()
         }
         .toolbar {
+            if player != nil, !viewModel.isEditing {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        QueueMenuItems { viewModel.queue($0) }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("More")
+                    .accessibilityIdentifier("PlaylistDetailView.moreMenu")
+                }
+            }
             if viewModel.showsEdit || viewModel.isEditing {
                 ToolbarItem(placement: .primaryAction) {
                     Button(viewModel.isEditing ? "Done" : "Edit") {
@@ -774,6 +819,9 @@ public struct PlaylistDetailView: View {
                     }
                     // Long-press on iOS, right-click on the Mac.
                     .contextMenu {
+                        if player != nil {
+                            QueueMenuItems { viewModel.queue(entry: entry, $0) }
+                        }
                         // Offline, playlists can't be changed.
                         if !viewModel.isOffline {
                             Button {

@@ -61,6 +61,13 @@ class MpvEngine(
     @Volatile private var timePos = 0.0
     @Volatile private var mpvDuration = 0.0
 
+    /**
+     * A held start being sought after Play loaded a direct stream (a cued
+     * queue): shown as the position until mpv gets there, rather than 0:00
+     * while the file opens. Null otherwise.
+     */
+    @Volatile private var seekTarget: Double? = null
+
     /** Repeat One, for the event thread (mpv loops the file itself). */
     @Volatile private var loopOne = false
 
@@ -123,6 +130,7 @@ class MpvEngine(
         library.mpv_observe_property(handle, PROP_DURATION, "duration", MpvLibrary.FORMAT_DOUBLE)
         library.mpv_observe_property(handle, PROP_PAUSE, "pause", MpvLibrary.FORMAT_FLAG)
         library.mpv_observe_property(handle, PROP_IDLE, "idle-active", MpvLibrary.FORMAT_FLAG)
+        library.mpv_observe_property(handle, PROP_CORE_IDLE, "core-idle", MpvLibrary.FORMAT_FLAG)
         return handle
     }
 
@@ -133,7 +141,16 @@ class MpvEngine(
     override fun setQueue(items: List<EngineItem>, startIndex: Int) {
         if (!isSupported) return
         resetTimes()
+        seekTarget = null
         playback.setQueue(items, startIndex)
+    }
+
+    /** mpv's playlist holds the queue, but no file is opened until Play ([MpvPlayback.cue]). */
+    override fun cue(items: List<EngineItem>, startIndex: Int, startMillis: Long) {
+        if (!isSupported) return
+        resetTimes()
+        seekTarget = null
+        playback.cue(items, startIndex, startMillis)
     }
 
     override fun replaceAfterCurrent(items: List<EngineItem>) {
@@ -145,7 +162,11 @@ class MpvEngine(
     }
 
     override fun play() {
-        if (isSupported) playback.play()
+        if (!isSupported) return
+        val held = playback.heldStartMillis
+        playback.play()
+        // The held point is sought once the file opens: shown meanwhile.
+        if (held > 0 && playback.heldStartMillis == 0L) seekTarget = held / 1000.0
     }
 
     override fun pause() {
@@ -154,6 +175,7 @@ class MpvEngine(
 
     override fun seekTo(millis: Long) {
         if (!isSupported) return
+        seekTarget = null
         val converted = playback.currentItem?.seeksByRestart == true
         // mpv will report this seek: it isn't Repeat One going round.
         if (!converted) ownSeeks.incrementAndGet()
@@ -165,6 +187,7 @@ class MpvEngine(
 
     override fun skipTo(index: Int) {
         if (!isSupported || index !in playback.items.indices) return
+        seekTarget = null
         if (index != playback.current) {
             resetTimes()
         } else {
@@ -188,11 +211,12 @@ class MpvEngine(
     override fun stop() {
         if (!isSupported) return
         resetTimes()
+        seekTarget = null
         playback.stop()
     }
 
     override val positionMillis: Long
-        get() = (timePos * 1000).toLong().coerceAtLeast(0) + playback.currentOffsetMillis
+        get() = ((seekTarget ?: timePos) * 1000).toLong().coerceAtLeast(0) + playback.currentOffsetMillis
 
     override val durationMillis: Long
         get() {
@@ -261,7 +285,11 @@ class MpvEngine(
                 MpvLibrary.EVENT_PROPERTY_CHANGE -> event.data?.let { property(event.replyUserdata, it) }
                 MpvLibrary.EVENT_FILE_LOADED -> {
                     fileLoaded = true
-                    pendingSeek.getAndSet(null)?.let(::send)
+                    pendingSeek.getAndSet(null)?.let { seek ->
+                        // Ours (START_FILE forgot any count): not Repeat One going round.
+                        ownSeeks.incrementAndGet()
+                        send(seek)
+                    }
                 }
                 MpvLibrary.EVENT_START_FILE -> {
                     fileLoaded = false
@@ -308,10 +336,14 @@ class MpvEngine(
         val format = data.getInt(8)
         val value = data.getPointer(16)
         when (id) {
-            PROP_TIME_POS -> timePos = if (format == MpvLibrary.FORMAT_DOUBLE && value != null) value.getDouble(0) else 0.0
+            PROP_TIME_POS -> {
+                timePos = if (format == MpvLibrary.FORMAT_DOUBLE && value != null) value.getDouble(0) else 0.0
+                seekTarget?.let { if (timePos >= it - 1.0) seekTarget = null }
+            }
             PROP_DURATION -> mpvDuration = if (format == MpvLibrary.FORMAT_DOUBLE && value != null) value.getDouble(0) else 0.0
             PROP_PAUSE -> if (format == MpvLibrary.FORMAT_FLAG && value != null) deliver(MpvEvent.Paused(value.getInt(0) != 0))
             PROP_IDLE -> if (format == MpvLibrary.FORMAT_FLAG && value != null) deliver(MpvEvent.Idle(value.getInt(0) != 0))
+            PROP_CORE_IDLE -> if (format == MpvLibrary.FORMAT_FLAG && value != null) deliver(MpvEvent.CoreIdle(value.getInt(0) != 0))
         }
     }
 
@@ -326,6 +358,7 @@ class MpvEngine(
         private const val PROP_DURATION = 2L
         private const val PROP_PAUSE = 3L
         private const val PROP_IDLE = 4L
+        private const val PROP_CORE_IDLE = 5L
 
         /** A seek mpv makes by itself this close to the end, with Repeat One on, is the track going round. */
         private const val LOOP_END_WINDOW_SECONDS = 2.0
@@ -354,6 +387,8 @@ class MpvEngine(
             "prefetch-playlist" to "yes",
             "cache" to "yes",
             "demuxer-readahead-secs" to "30",
+            // A converted stream's first response gets no shorter limit here (Android's has one): Linux
+            // converts only formats the app doesn't recognise, and FFmpeg has one timeout for everything.
             "network-timeout" to "30",
             // Normalisation is the app's own volume: no ReplayGain on top.
             "replaygain" to "no",

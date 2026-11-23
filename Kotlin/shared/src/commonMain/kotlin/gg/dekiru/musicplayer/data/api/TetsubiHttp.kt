@@ -2,13 +2,15 @@ package gg.dekiru.musicplayer.data.api
 
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
-import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.plugins.HttpTimeout
 import kotlinx.serialization.json.Json
 
-/** The one HTTP client the app uses (OkHttp on Android and desktop). */
+/**
+ * The one HTTP client the app uses (OkHttp on Android and desktop, over
+ * `TetsubiOkHttp.client`, whose connections Android's player shares).
+ */
 object TetsubiHttp {
-    val client: HttpClient by lazy { HttpClient(httpEngineFactory()) { tetsubiDefaults() } }
+    val client: HttpClient by lazy { newHttpClient { tetsubiDefaults() } }
 }
 
 /** Timeouts as on iOS: 30 s per request. Errors are checked by hand, not thrown. */
@@ -27,7 +29,8 @@ val TetsubiJson = Json {
     coerceInputValues = true
 }
 
-internal expect fun httpEngineFactory(): HttpClientEngineFactory<*>
+/** A client on the platform's engine, configured by [configure]. */
+internal expect fun newHttpClient(configure: HttpClientConfig<*>.() -> Unit): HttpClient
 
 /** A random ID for this install (`DeviceId` in the header). */
 internal expect fun randomUuid(): String

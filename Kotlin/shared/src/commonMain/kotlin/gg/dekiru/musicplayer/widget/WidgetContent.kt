@@ -27,6 +27,8 @@ sealed interface WidgetContent {
         val queueSeconds: Double = 0.0,
         /** When the queue finishes, in milliseconds since 1970; null when it can't be said (the app was closed). */
         val finishAt: Long? = null,
+        /** The track is starting: a spinner instead of Play/Pause. */
+        val isStarting: Boolean = false,
     ) : WidgetContent {
         /** What a screen reader says for the widget: "<title> by <artist>". */
         val description: String get() = if (artist.isBlank()) title else "$title by $artist"
@@ -92,6 +94,7 @@ sealed interface WidgetContent {
                 artFile = snapshot.artFile,
                 queueSeconds = snapshot.queueSeconds.coerceAtLeast(0.0),
                 finishAt = finishAt(snapshot, playerAlive, now),
+                isStarting = snapshot.isStarting && playerAlive,
             )
         }
 

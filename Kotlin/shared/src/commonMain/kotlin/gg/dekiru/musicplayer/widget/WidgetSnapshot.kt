@@ -26,6 +26,8 @@ data class WidgetSnapshot(
     /** Every disc of the album, in order: what Play starts again after the app was closed. */
     val discIds: List<String> = emptyList(),
     val isPlaying: Boolean = false,
+    /** The track is loading after Play and hasn't made a sound yet (Android only: a spinner on Play/Pause). */
+    val isStarting: Boolean = false,
     /** Maniac Mode: no previous or next. */
     val maniacMode: Boolean = false,
     /** The art's key colour as 0xRRGGBB; null for Tetsubi's usual blue. */
@@ -79,7 +81,7 @@ data class WidgetSnapshot(
             return when {
                 !live.signedIn -> WidgetSnapshot(signedIn = false, maniacMode = live.maniacMode, updatedAt = now)
                 track == null -> (previous?.takeIf { it.signedIn } ?: WidgetSnapshot(signedIn = true)).let {
-                    it.copy(isPlaying = false, maniacMode = live.maniacMode, remainingSeconds = it.queueSeconds, updatedAt = now)
+                    it.copy(isPlaying = false, isStarting = false, maniacMode = live.maniacMode, remainingSeconds = it.queueSeconds, updatedAt = now)
                 }
                 else -> WidgetSnapshot(
                     signedIn = true,
@@ -89,6 +91,7 @@ data class WidgetSnapshot(
                     albumId = track.albumId,
                     discIds = live.discIds,
                     isPlaying = live.isPlaying,
+                    isStarting = live.isStarting,
                     maniacMode = live.maniacMode,
                     accentRGB = accentRGB,
                     artFile = artFile,
@@ -112,6 +115,8 @@ data class WidgetLive(
     /** The playing album's discs (empty for a playlist's queue). */
     val discIds: List<String> = emptyList(),
     val isPlaying: Boolean = false,
+    /** The track is starting ([gg.dekiru.musicplayer.playback.PlayerController.isStarting]). */
+    val isStarting: Boolean = false,
     val maniacMode: Boolean = false,
     /** The whole queue, in seconds (the player's `queueLength`). */
     val queueSeconds: Double = 0.0,

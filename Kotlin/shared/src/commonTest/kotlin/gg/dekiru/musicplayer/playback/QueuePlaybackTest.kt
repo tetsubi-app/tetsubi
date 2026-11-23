@@ -30,9 +30,20 @@ class QueuePlaybackTest {
 
     private class Setup(val server: FakeServer, val engine: FakeEngine, val player: PlayerController, val saved: MutableList<PlayQueueSnapshot>)
 
-    private fun TestScope.setup(tracks: Int = 3, maniac: Boolean = false, online: () -> Boolean = { true }): Setup {
+    private fun TestScope.setup(
+        tracks: Int = 3,
+        maniac: Boolean = false,
+        online: () -> Boolean = { true },
+        /** An album's tracks wait for its gate; a failed gate is a server error. */
+        gates: Map<String, kotlinx.coroutines.CompletableDeferred<Boolean>> = emptyMap(),
+    ): Setup {
         val server = FakeServer { request ->
+            request.url.parameters["ParentId"]?.let { gates[it] }?.let { gate ->
+                if (!gate.await()) return@FakeServer json("", io.ktor.http.HttpStatusCode.InternalServerError)
+            }
             when (request.path) {
+                // Playlist P: tracks X-t1 and Y-t2.
+                "/Playlists/P/Items" -> json("""{"Items":[${track("X", 1)},${track("Y", 2)}]}""")
                 "/Items" -> {
                     val parent = request.url.parameters["ParentId"]!!
                     json("""{"Items":[${(1..tracks).joinToString(",") { track(parent, it) }}]}""")
@@ -394,7 +405,10 @@ class QueuePlaybackTest {
         assertEquals("A-t2", r.player.currentTrack?.id)
         assertEquals(listOf("A-t1", "A-t2", "C-t1", "C-t2", "B-t1", "B-t2"), r.engineTracks)
         assertEquals(1, r.engine.index)
-        assertEquals(listOf(42_000L), r.engine.seeks)
+        // Held at the point, nothing opened until Play.
+        assertEquals(42_000L, r.engine.cuedAt)
+        assertFalse(r.engine.opened)
+        assertEquals(0, r.engine.loads)
         assertFalse(r.engine.playing)
         assertEquals(RepeatMode.ALL, r.engine.repeat)
         assertEquals(42.0, r.player.position)
@@ -404,6 +418,7 @@ class QueuePlaybackTest {
         r.player.resume()
         settle()
         assertTrue(r.engine.playing)
+        assertEquals(42_000L, r.engine.openedAt, "Play opens the stream at the saved point")
         assertEquals(listOf("start"), r.reports())
     }
 
@@ -440,5 +455,200 @@ class QueuePlaybackTest {
         settle()
         assertNull(s.player.currentTrack)
         assertEquals(true, s.player.queueNotice?.isError)
+    }
+
+    // Step 3: the menus' playlist and song calls, and when Play asks
+
+    @Test
+    fun aPlaylistCardIsFetchedAndQueued() = runTest {
+        val s = setup()
+        s.player.play(album("A"))
+        settle()
+        val playlist = gg.dekiru.musicplayer.data.models.JellyfinPlaylist(id = "P", name = "Mix")
+        s.player.addToQueue(playlist)
+        settle()
+        assertEquals(listOf("A-t1", "A-t2", "A-t3", "X-t1", "Y-t2"), s.queueTracks)
+        assertEquals(QueueGroupKind.PLAYLIST, s.player.displayGroups.last().group.kind)
+        assertEquals(PlayerController.ADDED_TO_QUEUE, s.player.queueNotice?.message)
+    }
+
+    @Test
+    fun aPlaylistSongIsQueuedAsPartOfThePlaylist() = runTest {
+        val s = setup()
+        s.player.play(album("A"))
+        settle()
+        val playlist = gg.dekiru.musicplayer.data.models.JellyfinPlaylist(id = "P", name = "Mix")
+        val song = gg.dekiru.musicplayer.data.models.PlaylistEntry(
+            entryId = "e1",
+            track = gg.dekiru.musicplayer.data.models.JellyfinTrack(id = "S", name = "Song", runTimeTicks = 600_000_000L, albumId = "Z"),
+        )
+        s.player.playNext(playlist, listOf(song))
+        settle()
+        assertEquals(listOf("A-t1", "A-t2", "A-t3", "S"), s.queueTracks)
+        assertEquals(QueueGroupKind.PLAYLIST, s.player.displayGroups.last().group.kind)
+        assertEquals(PlayerController.PLAYING_NEXT, s.player.queueNotice?.message)
+    }
+
+    @Test
+    fun offlineAPlaylistWithNoDownloadSaysSo() = runTest {
+        val s = setup(online = { false })
+        s.player.play(album("A"))
+        settle()
+        s.player.playNext(gg.dekiru.musicplayer.data.models.JellyfinPlaylist(id = "P", name = "Mix"))
+        settle()
+        assertEquals(PlayerController.NOTHING_DOWNLOADED, s.player.queueNotice?.message)
+        assertTrue(s.player.queueNotice?.isError == true)
+    }
+
+    @Test
+    fun playAsksOnlyWhenMoreThanThePlayingAlbumIsQueued() = runTest {
+        val s = setup()
+        assertFalse(s.player.asksBeforePlay, "nothing playing")
+        s.player.play(album("A"))
+        settle()
+        assertFalse(s.player.asksBeforePlay, "just the playing album")
+        s.player.addToQueue(album("B"))
+        settle()
+        assertTrue(s.player.asksBeforePlay)
+        // Once B is all that's left, nothing else is queued.
+        s.player.skipTo(s.player.playQueue.playOrder[3])
+        assertFalse(s.player.asksBeforePlay)
+        // Repeat All brings A round again: something else is queued.
+        s.player.changeRepeatMode(RepeatMode.ALL)
+        assertTrue(s.player.asksBeforePlay)
+    }
+
+    @Test
+    fun theEditorsMovesApplyToThePlayer() = runTest {
+        val s = setup(tracks = 2)
+        threeAlbums(s) // A1 A2 | C1 C2 | B1 B2, A1 playing
+        val editor = QueueEditor.from(s.player.playQueue)
+        // B's group up, above C (allowed: not above the rest of A).
+        val bRun = editor.runs.indexOfFirst { it.first().group.id == "B" }
+        val slot = editor.groupUpSlot(bRun)!!
+        s.player.moveQueue(editor.runs[bRun].map { it.id }, QueueEditor.toIndex(s.player.playQueue.currentPlayIndex, slot))
+        assertEquals(listOf("A-t1", "A-t2", "B-t1", "B-t2", "C-t1", "C-t2"), s.queueTracks)
+        assertEquals(s.queueTracks, s.engineTracks)
+        // A track down one.
+        val e2 = QueueEditor.from(s.player.playQueue)
+        val b1 = e2.upcoming.first { it.track.id == "B-t1" }.id
+        s.player.moveQueue(listOf(b1), QueueEditor.toIndex(s.player.playQueue.currentPlayIndex, e2.trackDownSlot(b1)!!))
+        assertEquals(listOf("A-t1", "A-t2", "B-t2", "B-t1", "C-t1", "C-t2"), s.queueTracks)
+        assertEquals("A-t1", s.player.currentTrack?.id, "the playing track stays")
+    }
+
+    // Adds apply in the order they were tapped
+
+    private fun gate() = kotlinx.coroutines.CompletableDeferred<Boolean>()
+
+    @Test
+    fun twoAddsFinishingInReverseLandInTapOrder() = runTest {
+        val b = gate()
+        val c = gate()
+        val s = setup(tracks = 1, gates = mapOf("B" to b, "C" to c))
+        s.player.play(album("A"))
+        settle()
+        s.player.addToQueue(album("B"))
+        s.player.addToQueue(album("C"))
+        c.complete(true)
+        settle()
+        assertEquals(listOf("A-t1"), s.queueTracks, "C waits for B")
+        b.complete(true)
+        settle()
+        assertEquals(listOf("A-t1", "B-t1", "C-t1"), s.queueTracks)
+        assertEquals(s.queueTracks, s.engineTracks)
+    }
+
+    @Test
+    fun aFailedAddInTheMiddleIsDroppedAndTheRestApply() = runTest {
+        val b = gate()
+        val c = gate()
+        val d = gate()
+        val s = setup(tracks = 1, gates = mapOf("B" to b, "C" to c, "D" to d))
+        s.player.play(album("A"))
+        settle()
+        s.player.addToQueue(album("B"))
+        s.player.addToQueue(album("C"))
+        s.player.addToQueue(album("D"))
+        d.complete(true)
+        c.complete(false)
+        settle()
+        assertEquals(PlayerController.ALBUM_NOT_QUEUED, s.player.queueNotice?.message, "the failure says so at once")
+        assertEquals(listOf("A-t1"), s.queueTracks)
+        b.complete(true)
+        settle()
+        assertEquals(listOf("A-t1", "B-t1", "D-t1"), s.queueTracks)
+    }
+
+    @Test
+    fun aFailedFirstAddLetsTheNextApply() = runTest {
+        val b = gate()
+        val s = setup(tracks = 1, gates = mapOf("B" to b))
+        s.player.play(album("A"))
+        settle()
+        s.player.addToQueue(album("B"))
+        s.player.addToQueue(album("C"))
+        settle()
+        assertEquals(listOf("A-t1"), s.queueTracks)
+        b.complete(false)
+        settle()
+        assertEquals(listOf("A-t1", "C-t1"), s.queueTracks)
+    }
+
+    @Test
+    fun playNextTwiceputsTheSecondInFront() = runTest {
+        val b = gate()
+        val s = setup(tracks = 1, gates = mapOf("B" to b))
+        s.player.play(album("A"))
+        settle()
+        s.player.playNext(album("B"))
+        s.player.playNext(album("C"))
+        settle()
+        b.complete(true)
+        settle()
+        assertEquals(listOf("A-t1", "C-t1", "B-t1"), s.queueTracks)
+    }
+
+    @Test
+    fun playCancelsWaitingAddsButNotLaterOnes() = runTest {
+        val b = gate()
+        val s = setup(tracks = 1, gates = mapOf("B" to b))
+        s.player.addToQueue(album("B"))
+        s.player.play(album("A"))
+        settle()
+        s.player.addToQueue(album("C"))
+        settle()
+        b.complete(true)
+        settle()
+        assertEquals(listOf("A-t1", "C-t1"), s.queueTracks, "B was dropped by the new Play; C applied")
+    }
+
+    @Test
+    fun anAddAfterPlayLandsAfterTheReplaceEvenIfItsTracksComeFirst() = runTest {
+        val a = gate()
+        val s = setup(tracks = 1, gates = mapOf("A" to a))
+        s.player.play(album("Z"))
+        settle()
+        s.player.play(album("A"))
+        s.player.addToQueue(album("B"))
+        settle()
+        assertEquals(listOf("Z-t1"), s.queueTracks, "B waits for A's Play")
+        a.complete(true)
+        settle()
+        assertEquals(listOf("A-t1", "B-t1"), s.queueTracks)
+    }
+
+    @Test
+    fun aLaterPlaySupersedesAnEarlierOneStillFetching() = runTest {
+        val a = gate()
+        val s = setup(tracks = 1, gates = mapOf("A" to a))
+        s.player.play(album("A"))
+        s.player.play(album("B"))
+        settle()
+        assertEquals(listOf("B-t1"), s.queueTracks)
+        a.complete(false)
+        settle()
+        assertEquals(listOf("B-t1"), s.queueTracks)
+        assertNull(s.player.lastError, "the earlier Play's failure isn't shown")
     }
 }

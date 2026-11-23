@@ -61,6 +61,14 @@ import gg.dekiru.musicplayer.data.models.JellyfinTrack
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
 import gg.dekiru.musicplayer.ui.components.AlbumRow
+import gg.dekiru.musicplayer.ui.components.LocalPlayPrompt
+import gg.dekiru.musicplayer.ui.components.MenuAction
+import gg.dekiru.musicplayer.ui.components.MoreMenuButton
+import gg.dekiru.musicplayer.ui.components.PlayChoice
+import gg.dekiru.musicplayer.ui.components.PlayPrompt
+import gg.dekiru.musicplayer.ui.components.WithContextMenu
+import gg.dekiru.musicplayer.ui.components.menuClickable
+import gg.dekiru.musicplayer.ui.components.queueActions
 import gg.dekiru.musicplayer.playback.PlayerController
 import gg.dekiru.musicplayer.playback.formatAlbumDuration
 import androidx.compose.ui.draw.clip
@@ -112,6 +120,7 @@ fun AlbumScreen(
         AlbumDownloads(model.discs, active, downloaded.map { it.albumId }.toSet())
     }
     val isDownloaded = rememberIsDownloaded(manager)
+    val prompt = LocalPlayPrompt.current
     // Scrolling content stops below the status bar; the bottom inset is padding inside the list.
     val insets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues()
 
@@ -131,13 +140,12 @@ fun AlbumScreen(
                     onAddToPlaylist = onAddToPlaylist?.takeIf { model.tracks.isNotEmpty() }?.let { add -> { add(model.tracks.map { it.id }) } },
                     isOnline = isOnline,
                     // The listening queue (the player confirms with "Playing next" / "Added to queue").
-                    onPlayNext = player?.takeIf { it.isSupported }?.let { p -> { p.playNext(model.album) } },
-                    onAddToQueue = player?.takeIf { it.isSupported }?.let { p -> { p.addToQueue(model.album) } },
+                    queue = player?.takeIf { it.isSupported }?.let { p -> queueActions({ p.playNext(model.album) }, { p.addToQueue(model.album) }) }.orEmpty(),
                 )
             }
             item { Header(api, model, artSize = if (wide) 240.dp else 160.dp, localArt = manager.coverPath(model.album), onOpenArtist) }
-            item { Actions(model, player, manager, dl) }
-            tracks(model, player, manager, dl, onAddToPlaylist)
+            item { Actions(model, player, manager, dl, prompt) }
+            tracks(model, player, manager, dl, onAddToPlaylist, isOnline, prompt)
             if (model.moreByArtist.isNotEmpty()) {
                 item {
                     SectionTitle("More by ${model.album.artistName}", Modifier.padding(start = 16.dp, top = 28.dp, bottom = 8.dp))
@@ -156,8 +164,8 @@ private fun TopBar(
     onBack: () -> Unit,
     onAddToPlaylist: (() -> Unit)?,
     isOnline: Boolean = true,
-    onPlayNext: (() -> Unit)? = null,
-    onAddToQueue: (() -> Unit)? = null,
+    /** Play Next and Add to Queue (none without a player). */
+    queue: List<MenuAction> = emptyList(),
 ) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back" }) {
@@ -167,49 +175,15 @@ private fun TopBar(
             title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 16.dp),
         )
-        val items = buildList {
-            onPlayNext?.let { add(MenuItem("Play Next", action = it)) }
-            onAddToQueue?.let { add(MenuItem("Add to Queue", action = it)) }
-            onAddToPlaylist?.let { add(MenuItem("Add to Playlist…", enabled = isOnline, action = it)) }
-        }
-        if (items.isNotEmpty()) {
-            Box(Modifier.padding(end = 8.dp)) { MoreMenu("More", items) }
-        }
+        val items = queue + listOfNotNull(onAddToPlaylist?.let { MenuAction("Add to Playlist…", enabled = isOnline, action = it) })
+        MoreMenuButton("More", items, Modifier.padding(end = 8.dp))
     }
 }
 
-/** The ⋯ button with "Add to Playlist…" (a track's, a disc's). */
+/** The ⋯ button with "Add to Playlist…" (a disc's). */
 @Composable
 private fun AddToPlaylistMenu(label: String, onAddToPlaylist: () -> Unit) =
-    MoreMenu(label, listOf(MenuItem("Add to Playlist…", action = onAddToPlaylist)))
-
-private class MenuItem(val title: String, val enabled: Boolean = true, val action: () -> Unit)
-
-/** A ⋯ button and its menu. */
-@Composable
-private fun MoreMenu(label: String, items: List<MenuItem>) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        Box(
-            Modifier.size(40.dp).clip(RoundedCornerShape(50))
-                .clickable(role = Role.Button) { open = true }
-                .semantics { contentDescription = label },
-            contentAlignment = Alignment.Center,
-        ) { Text("⋯", color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp, fontWeight = FontWeight.Bold) }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            for (item in items) {
-                DropdownMenuItem(
-                    text = { Text(item.title, color = if (item.enabled) Color.White else Color.White.copy(alpha = 0.4f)) },
-                    enabled = item.enabled,
-                    onClick = {
-                        open = false
-                        item.action()
-                    },
-                )
-            }
-        }
-    }
-}
+    MoreMenuButton(label, listOf(MenuAction("Add to Playlist…", action = onAddToPlaylist)))
 
 @Composable
 private fun Header(api: JellyfinApi, model: AlbumModel, artSize: androidx.compose.ui.unit.Dp, localArt: String?, onOpenArtist: ((JellyfinArtist) -> Unit)?) {
@@ -232,14 +206,19 @@ private fun Header(api: JellyfinApi, model: AlbumModel, artSize: androidx.compos
 }
 
 @Composable
-private fun Actions(model: AlbumModel, player: PlayerController?, manager: DownloadManager?, dl: AlbumDownloads) {
+private fun Actions(model: AlbumModel, player: PlayerController?, manager: DownloadManager?, dl: AlbumDownloads, prompt: PlayPrompt) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             // "Now playing" (this album already playing) just opens Now Playing.
             val nowPlaying = player?.isPlaying(model.album) == true
             Button(
                 onClick = {
-                    if (nowPlaying) player?.isNowPlayingOpen = true else player?.play(model.album)
+                    when {
+                        player == null -> {}
+                        nowPlaying -> player.isNowPlayingOpen = true
+                        // More than the playing album queued: Replace queue, Play Next or Add to Queue.
+                        else -> prompt.play(player, albumChoice(player, model, track = null))
+                    }
                 },
                 enabled = player?.isSupported == true,
                 colors = ButtonDefaults.buttonColors(containerColor = if (nowPlaying) TetsubiColors.pink else TetsubiColors.blue, contentColor = Color.White),
@@ -318,8 +297,10 @@ private fun LazyListScope.tracks(
     manager: DownloadManager?,
     dl: AlbumDownloads,
     onAddToPlaylist: ((List<String>) -> Unit)?,
+    isOnline: Boolean,
+    prompt: PlayPrompt,
 ) {
-    val row: LazyListScope.(List<JellyfinTrack>) -> Unit = { tracks -> trackRows(tracks, model, player, onAddToPlaylist) }
+    val row: LazyListScope.(List<JellyfinTrack>) -> Unit = { tracks -> trackRows(tracks, model, player, onAddToPlaylist, isOnline, prompt) }
     fun addDisc(tracks: List<JellyfinTrack>): (() -> Unit)? = onAddToPlaylist?.takeIf { tracks.isNotEmpty() }?.let { add -> { add(tracks.map { it.id }) } }
     item {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 20.dp, bottom = 4.dp), verticalAlignment = Alignment.Bottom) {
@@ -330,7 +311,7 @@ private fun LazyListScope.tracks(
                 val text = formatAlbumDuration(seconds.toDouble())
                 Text(
                     text, color = TetsubiColors.albumArtistText, fontSize = 12.sp,
-                    modifier = Modifier.padding(end = if (onAddToPlaylist != null) 56.dp else 24.dp).semantics { contentDescription = "Playing time $text" },
+                    modifier = Modifier.padding(end = if (onAddToPlaylist != null || player?.isSupported == true) 56.dp else 24.dp).semantics { contentDescription = "Playing time $text" },
                 )
             }
         }
@@ -367,20 +348,35 @@ private fun LazyListScope.trackRows(
     model: AlbumModel,
     player: PlayerController?,
     onAddToPlaylist: ((List<String>) -> Unit)?,
+    isOnline: Boolean,
+    prompt: PlayPrompt,
 ) {
     items(tracks, key = { "track-${it.id}" }) { track ->
         val playingHere = player != null && player.currentTrack?.id == track.id && player.isPlaying(model.album)
         // Maniac Mode: albums start at track 1, so rows aren't buttons.
         val canTap = player?.isSupported == true && !player.maniacMode
+        // The song's menu (⋯, long press, right-click): Play Next, Add to Queue (in Maniac Mode too), Add to Playlist….
+        val queue = player?.takeIf { it.isSupported }?.let { p ->
+            queueActions({ p.playNext(model.album, listOf(track)) }, { p.addToQueue(model.album, listOf(track)) })
+        }.orEmpty()
+        val menu = queue + listOfNotNull(onAddToPlaylist?.let { add -> MenuAction("Add to Playlist…", enabled = isOnline) { add(listOf(track.id)) } })
         TrackRow(
             track,
             showAlbum = !model.allTracksFromThisAlbum,
             isPlaying = playingHere,
-            onClick = if (canTap) ({ player?.play(model.album, startTrackId = track.id, openNowPlaying = false) }) else null,
-            onAddToPlaylist = onAddToPlaylist?.let { add -> { add(listOf(track.id)) } },
+            onClick = if (canTap && player != null) ({ prompt.play(player, albumChoice(player, model, track = track)) }) else null,
+            menu = menu,
         )
     }
 }
+
+/** Play the album (from the tapped `track`), or, from the prompt, queue it instead (a tapped track: just that track). */
+private fun albumChoice(player: PlayerController, model: AlbumModel, track: JellyfinTrack?) = PlayChoice(
+    title = track?.displayName ?: model.album.displayName,
+    replace = { player.play(model.album, startTrackId = track?.id, openNowPlaying = track == null) },
+    playNext = { if (track != null) player.playNext(model.album, listOf(track)) else player.playNext(model.album) },
+    addToQueue = { if (track != null) player.addToQueue(model.album, listOf(track)) else player.addToQueue(model.album) },
+)
 
 /** "Disc 2", its subtitle, and on the right (for a disc of a set) its own download control, then its ⋯ menu. */
 @Composable
@@ -439,18 +435,30 @@ private fun DiscDownload(manager: DownloadManager?, dl: AlbumDownloads, disc: Je
     }
 }
 
-/** One track: tap to play the album from here; its ⋯ menu has Add to Playlist…. The playing row is solid pink with white text. */
+/**
+ * One track: tap to play the album from here; its ⋯ menu (also a long press
+ * or right-click) has Play Next, Add to Queue and Add to Playlist…. The
+ * playing row is solid pink with white text.
+ */
 @Composable
-private fun TrackRow(track: JellyfinTrack, showAlbum: Boolean, isPlaying: Boolean, onClick: (() -> Unit)?, onAddToPlaylist: (() -> Unit)?) {
+private fun TrackRow(track: JellyfinTrack, showAlbum: Boolean, isPlaying: Boolean, onClick: (() -> Unit)?, menu: List<MenuAction>) {
     val shape = RoundedCornerShape(6.dp)
+    val hasMenu = menu.isNotEmpty()
+    WithContextMenu(menu) { openMenu ->
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 1.dp)
             .clip(shape)
             .background(if (isPlaying) TetsubiColors.pink else Color.Gray.copy(alpha = 0.05f), shape)
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
-            .padding(start = 8.dp, end = if (onAddToPlaylist != null) 0.dp else 8.dp, top = if (onAddToPlaylist != null) 2.dp else 8.dp, bottom = if (onAddToPlaylist != null) 2.dp else 8.dp),
+            .then(
+                when {
+                    onClick != null -> Modifier.menuClickable(onClick, openMenu)
+                    openMenu != null -> Modifier.menuClickable({}, openMenu, enabled = true)
+                    else -> Modifier
+                },
+            )
+            .padding(start = 8.dp, end = if (hasMenu) 0.dp else 8.dp, top = if (hasMenu) 2.dp else 8.dp, bottom = if (hasMenu) 2.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -467,7 +475,8 @@ private fun TrackRow(track: JellyfinTrack, showAlbum: Boolean, isPlaying: Boolea
             }
         }
         Text(formatDuration(track.durationSeconds), color = TetsubiColors.albumArtistText, fontSize = 12.sp)
-        if (onAddToPlaylist != null) AddToPlaylistMenu("More for ${track.displayName}", onAddToPlaylist)
+        MoreMenuButton("More for ${track.displayName}", menu)
+    }
     }
 }
 

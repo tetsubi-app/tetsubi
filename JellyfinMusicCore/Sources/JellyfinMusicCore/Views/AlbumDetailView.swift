@@ -305,37 +305,35 @@ public final class AlbumDetailViewModel {
             print("[AlbumDetailView] Player tap with no PlayerManager — skipping")
             return
         }
-        Task { @MainActor in
-            // "Now playing" (this album already playing) just opens the sheet.
-            if !self.isThisAlbumPlaying {
-                if self.isMultiDisc {
-                    player.play(discs: self.discs, as: self.album)
-                } else {
-                    player.play(album: self.album, startIndex: 0)
-                }
+        // "Now playing" (this album already playing) just opens the sheet.
+        if isThisAlbumPlaying {
+            player.isNowPlayingPresented = true
+            return
+        }
+        // With more than the current album queued, asks Replace queue /
+        // Play Next / Add to Queue first.
+        QueuePrompt.shared.play(album.displayName, replace: { [self] in
+            if isMultiDisc {
+                player.play(discs: discs, as: album)
+            } else {
+                player.play(album: album, startIndex: 0)
             }
             player.isNowPlayingPresented = true
-        }
+        }, place: { [self] how in
+            queue(how)
+        })
     }
 
-    /// Queues the album (every disc) right after the playing album, with a
-    /// short confirmation. Allowed in Maniac Mode.
-    public func playNext() {
-        guard let player else { return }
-        player.playNext(album: album, discs: discs) { added in
-            PlaylistEvents.shared.show(added ? "Playing next" : Self.notQueuedMessage, isError: !added)
-        }
+    /// Play Next / Add to Queue for the album (every disc), with a short
+    /// confirmation. Allowed in Maniac Mode.
+    public func queue(_ how: QueueActions.Placement) {
+        QueueActions.queue(album: album, how)
     }
 
-    /// Queues the album (every disc) at the end of the queue.
-    public func addToQueue() {
-        guard let player else { return }
-        player.addToQueue(album: album, discs: discs) { added in
-            PlaylistEvents.shared.show(added ? "Added to queue" : Self.notQueuedMessage, isError: !added)
-        }
+    /// Play Next / Add to Queue for one song.
+    public func queue(track: JellyfinTrack, _ how: QueueActions.Placement) {
+        QueueActions.queue(tracks: [track], in: album, how)
     }
-
-    nonisolated static let notQueuedMessage = "Couldn't add this album. Check the connection, or download it first."
 
     /// The server IDs of these tracks, for "Add to Playlist…". None when
     /// offline, and none for rows built from a download (their IDs
@@ -356,21 +354,25 @@ public final class AlbumDetailViewModel {
             print("[AlbumDetailView] Play(track:) with no PlayerManager — skipping")
             return
         }
-        Task { @MainActor in
+        // With more than the current album queued, asks first; Play Next
+        // and Add to Queue then queue just this song.
+        QueuePrompt.shared.play(track.displayName, replace: { [self] in
             // Rows built from a download: play it from disk, from track 1,
             // as the Play button does.
-            if let disc = track.albumId, self.discsFromDownload.contains(disc) {
-                if self.isMultiDisc {
-                    player.play(discs: self.discs, as: self.album)
+            if let disc = track.albumId, discsFromDownload.contains(disc) {
+                if isMultiDisc {
+                    player.play(discs: discs, as: album)
                 } else {
-                    player.play(album: self.album, startIndex: 0)
+                    player.play(album: album, startIndex: 0)
                 }
-            } else if self.isMultiDisc {
-                player.play(discs: self.discs, as: self.album, startingAt: track.id)
+            } else if isMultiDisc {
+                player.play(discs: discs, as: album, startingAt: track.id)
             } else {
-                player.play(track, in: self.album)
+                player.play(track, in: album)
             }
-        }
+        }, place: { [self] how in
+            queue(track: track, how)
+        })
     }
 
     /// Kicks off a download in the format chosen in Settings.
@@ -469,16 +471,7 @@ public struct AlbumDetailView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button {
-                        viewModel.playNext()
-                    } label: {
-                        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
-                    }
-                    Button {
-                        viewModel.addToQueue()
-                    } label: {
-                        Label("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward")
-                    }
+                    QueueMenuItems { viewModel.queue($0) }
                     addToPlaylistButton(viewModel.tracks)
                         .disabled(viewModel.playlistTrackIds(viewModel.tracks).isEmpty)
                 } label: {
@@ -800,9 +793,12 @@ public struct AlbumDetailView: View {
                  isPlaying: viewModel.isCurrent(track)) {
             viewModel.play(track: track)
         }
-        .allowsHitTesting(viewModel.canPlayIndividualTracks)
-        // Long-press on iOS, right-click on the Mac.
+        // Long-press on iOS, right-click on the Mac. (In Maniac Mode a tap
+        // does nothing, but the menu still queues.)
         .contextMenu {
+            if viewModel.hasPlayer {
+                QueueMenuItems { viewModel.queue(track: track, $0) }
+            }
             if !viewModel.playlistTrackIds([track]).isEmpty {
                 addToPlaylistButton([track])
             }

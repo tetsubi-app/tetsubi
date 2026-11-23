@@ -509,3 +509,79 @@ final class PlaylistQueueTests: XCTestCase {
             albumIds: [albumId], playingAlbumId: nil, queueSourceId: nil, queue: []))
     }
 }
+
+// MARK: - Starting playback (a held paused queue, the loading state)
+
+extension PlaylistQueueTests {
+
+    /// A queue loaded paused (as a restored one is at launch) makes no player
+    /// item, so nothing connects to the server, until Play; Play then makes
+    /// it at the held point and shows the loading state until it's there.
+    func testAPausedLoadOpensNothingUntilPlay() throws {
+        player.play(playlist: playlist, tracks: entries, startingAt: 1)
+        let current = try XCTUnwrap(player.playQueue.currentEntryId)
+        let upcoming = player.playQueue.upcomingEntries.map(\.id)
+        player.pause()
+        player.load(entryIds: [current] + upcoming, position: 42, play: false)
+        XCTAssertNil(player.outputPlayer.currentItem, "no item, no connection")
+        XCTAssertFalse(player.isStarting)
+
+        // An edit while held changes what's held, still opening nothing.
+        player.replaceAfterCurrent(Array(upcoming.prefix(1)))
+        XCTAssertNil(player.outputPlayer.currentItem)
+
+        player.resume()
+        XCTAssertNotNil(player.outputPlayer.currentItem, "Play makes the item")
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertTrue(player.isStarting, "loading until the item is at its point")
+        // Presses while it starts don't pause it.
+        player.togglePlayPause()
+        player.togglePlayPause()
+        XCTAssertTrue(player.isPlaying)
+        // An explicit Pause still pauses.
+        player.pause()
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertFalse(player.isStarting)
+    }
+
+    /// A start can't be paused by a press in its first 10 s; after that, or
+    /// once it has been retried, a press pauses, and Play carries on from the point.
+    func testPressesPauseAStartAfterTenSecondsOrARetry() throws {
+        player.play(playlist: playlist, tracks: entries, startingAt: 1)
+        let current = try XCTUnwrap(player.playQueue.currentEntryId)
+        player.pause()
+        player.load(entryIds: [current], position: 42, play: false)
+        var clock = Date()
+        player.now = { clock }
+        player.resume()
+        XCTAssertTrue(player.isStarting)
+        clock += 9
+        player.togglePlayPause()
+        XCTAssertTrue(player.isPlaying, "within 10 s: ignored")
+        clock += 2
+        XCTAssertFalse(player.ignoresPlayPause)
+        player.togglePlayPause()
+        XCTAssertFalse(player.isPlaying, "after 10 s: paused")
+        XCTAssertFalse(player.isStarting)
+
+        // Play again: a new start, presses ignored again…
+        player.togglePlayPause()
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertTrue(player.isStarting, "still waiting to reach 0:42")
+        XCTAssertTrue(player.ignoresPlayPause)
+        // …until it has been retried: then a press pauses.
+        player.startRetries = 1
+        XCTAssertFalse(player.ignoresPlayPause)
+        player.togglePlayPause()
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    func testOnlyConvertedStreamsGetAFirstResponseLimit() {
+        let converted = URL(string: "http://jellyfin-box:8096/Audio/t1/universal?TranscodingProtocol=hls&ApiKey=x")
+        let direct = URL(string: "http://jellyfin-box:8096/Audio/t1/stream.flac?static=true&ApiKey=x")
+        XCTAssertEqual(PlayerManager.firstResponseLimit(for: converted), 8)
+        XCTAssertNil(PlayerManager.firstResponseLimit(for: direct))
+        XCTAssertNil(PlayerManager.firstResponseLimit(for: URL(fileURLWithPath: "/tmp/universal")))
+        XCTAssertNil(PlayerManager.firstResponseLimit(for: nil))
+    }
+}

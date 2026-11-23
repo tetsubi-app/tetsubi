@@ -11,7 +11,7 @@ import SwiftUI
 ///   - a seek slider (with `elapsed / total` time labels)
 ///   - prev / play-pause / next
 ///   - shuffle + repeat toggles
-///   - "Up next": the tracks that will play after this one (tap to play)
+///   - the queue (`NowPlayingQueue`): reorder, remove, clear, tap to play
 ///   - "up" button to dismiss the sheet
 public struct NowPlayingView: View {
 
@@ -189,9 +189,10 @@ public struct NowPlayingView: View {
         return max(room, 700)
     }
 
-    /// The single column: everything in one scroll, the track list last.
+    /// The single column: everything in one scrolling list, the queue last
+    /// (a `List`, so its rows can be dragged and swiped).
     private func narrowLayout(_ s: CGFloat) -> some View {
-        ScrollView {
+        List {
             VStack(spacing: 16 * s) {
                 artSection(size: 220 * s, s)
                 visualiserSection(s)
@@ -199,12 +200,15 @@ public struct NowPlayingView: View {
                 seekSection(s)
                 controlsSection(s)
                 togglesSection(s)
-                upNextSection(s)
             }
-            .padding(20 * s)
-            .padding(.top, 8 * s)
-            .padding(.bottom, 24 * s)
+            .listRowInsets(EdgeInsets(top: 28 * s, leading: 20 * s, bottom: 0, trailing: 20 * s))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .moveDisabled(true)
+
+            NowPlayingQueue(manager: manager, s: s)
         }
+        .nowPlayingList(bottom: 44 * s)
     }
 
     /// Two columns, each scrolling on its own. The top padding keeps both
@@ -228,12 +232,10 @@ public struct NowPlayingView: View {
             }
             .frame(width: left)
 
-            ScrollView {
-                upNextSection(s)
-                    .padding(.horizontal, 20 * s)
-                    .padding(.top, 44 * s)
-                    .padding(.bottom, 24 * s)
+            List {
+                NowPlayingQueue(manager: manager, s: s)
             }
+            .nowPlayingList(top: 32 * s, bottom: 24 * s)
         }
     }
 
@@ -276,17 +278,23 @@ public struct NowPlayingView: View {
                 if manager.queueLength > 0 {
                     // One line: album duration, then the finish time.
                     // Re-evaluated periodically so the estimate keeps up while paused.
+                    // With more than this album queued: "Album ends 13:02 · Queue
+                    // ends 15:40", dropping the album's end when it doesn't fit.
                     TimelineView(.periodic(from: .now, by: 15)) { context in
-                        let end = context.date.addingTimeInterval(manager.queueRemaining)
-                        HStack(spacing: 16 * s) {
-                            qualityText(for: track)
-                            Text("Duration: \(Self.formatAlbumDuration(manager.queueLength))")
-                            Text("Ends: \(end.formatted(date: .omitted, time: .shortened))")
+                        let variants = manager.endTimesVariants(now: context.date) {
+                            $0.formatted(date: .omitted, time: .shortened)
+                        }
+                        ViewThatFits(in: .horizontal) {
+                            ForEach(variants, id: \.self) { ends in
+                                infoLine(track, ends: ends, s)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            infoLine(track, ends: variants.last ?? "", s)
+                                .minimumScaleFactor(0.8)
                         }
                         .font(.plex(.caption, scale: s))
                         .foregroundStyle(.white.opacity(0.5))
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
                     }
                 }
                 if let message = manager.errorMessage {
@@ -307,6 +315,15 @@ public struct NowPlayingView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    /// Quality, the queue's length and the end times, on one line.
+    private func infoLine(_ track: PlaybackTrack, ends: String, _ s: CGFloat) -> some View {
+        HStack(spacing: 16 * s) {
+            qualityText(for: track)
+            Text("Duration: \(Self.formatAlbumDuration(manager.queueLength))")
+            Text(ends)
+        }
     }
 
     /// The artist under the title; when it can (`ArtistLink`), a tap closes
@@ -458,13 +475,21 @@ public struct NowPlayingView: View {
             Button {
                 manager.togglePlayPause()
             } label: {
-                Image(systemName: manager.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.plex(.largeTitle, scale: s))
-                    .foregroundStyle(.white)
-                    // A fixed box: the play and pause symbols differ in size, and the
-                    // row (and everything below it) shifted when they swapped.
-                    .frame(width: 52 * s, height: 52 * s)
-                    .contentShape(Rectangle())
+                Group {
+                    // Starting (loading, no sound yet): a spinner in the same box; a press does nothing.
+                    if manager.isStarting {
+                        ProgressView().tint(.white)
+                            .accessibilityLabel("Loading")
+                    } else {
+                        Image(systemName: manager.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.plex(.largeTitle, scale: s))
+                            .foregroundStyle(.white)
+                    }
+                }
+                // A fixed box: the play and pause symbols differ in size, and the
+                // row (and everything below it) shifted when they swapped.
+                .frame(width: 52 * s, height: 52 * s)
+                .contentShape(Rectangle())
             }
             .accessibilityIdentifier("NowPlayingView.playPause")
 
@@ -546,83 +571,6 @@ public struct NowPlayingView: View {
         .padding(.top, 4 * s)
     }
 
-    // MARK: - Up next
-
-    @ViewBuilder
-    private func upNextSection(_ s: CGFloat) -> some View {
-        let upcoming = manager.upNext
-        if manager.currentTrack != nil {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Up next")
-                        .font(.plex(.headline, scale: s))
-                    Spacer()
-                    if manager.repeatMode == .one {
-                        Text("Repeating this track")
-                            .font(.plex(.caption, scale: s))
-                            .foregroundStyle(.white.opacity(0.5))
-                    } else if manager.repeatMode == .all, !upcoming.isEmpty {
-                        Text("Then repeats")
-                            .font(.plex(.caption, scale: s))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                }
-                .padding(.bottom, 8 * s)
-
-                if upcoming.isEmpty {
-                    Text("Last track")
-                        .font(.plex(.subheadline, scale: s))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .padding(.vertical, 6 * s)
-                } else {
-                    ForEach(upcoming, id: \.entryId) { item in
-                        upNextRow(item.track, s, onTap: manager.maniacMode ? nil : {
-                            manager.skipTo(entryId: item.entryId)
-                        })
-                        if item.entryId != upcoming.last?.entryId {
-                            Divider().overlay(Color.white.opacity(0.1))
-                        }
-                    }
-                }
-            }
-            .padding(.top, 12 * s)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier("NowPlayingView.upNext")
-        }
-    }
-
-    /// `onTap` nil (Maniac Mode): the row isn't a button.
-    private func upNextRow(_ track: PlaybackTrack, _ s: CGFloat, onTap: (() -> Void)?) -> some View {
-        Button { onTap?() } label: {
-            HStack(spacing: 12 * s) {
-                VStack(alignment: .leading, spacing: 2 * s) {
-                    Text(track.title)
-                        .font(.plex(.subheadline, scale: s))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    // Artist only when it differs (compilations, mixed queues).
-                    if track.artist != manager.currentTrack?.artist, !track.artist.isEmpty {
-                        Text(track.artist)
-                            .font(.plex(.caption, scale: s))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 8 * s)
-                if track.duration > 0 {
-                    Text(Self.format(track.duration))
-                        .font(.plex(.caption, scale: s).monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-            }
-            .padding(.vertical, 8 * s)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(onTap == nil)
-        .accessibilityHint(onTap == nil ? "" : "Plays this track")
-    }
-
     // MARK: - Helpers
 
     private var nowRepeatIcon: String {
@@ -650,6 +598,17 @@ public struct NowPlayingView: View {
         return String(format: "%d:%02d", mm, ss)
     }
 }
+extension View {
+    /// Now Playing's lists: plain, see-through, with room at the ends.
+    func nowPlayingList(top: CGFloat = 0, bottom: CGFloat) -> some View {
+        listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 1)
+            .contentMargins(.top, top, for: .scrollContent)
+            .contentMargins(.bottom, bottom, for: .scrollContent)
+    }
+}
+
 /// A playback failure: what went wrong and what to do (in Now Playing).
 struct PlaybackErrorText: View {
     let message: String

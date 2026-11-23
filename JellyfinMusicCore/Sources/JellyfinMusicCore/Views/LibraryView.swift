@@ -349,6 +349,7 @@ public struct LibraryView: View {
                                       metrics: metrics, isDownloaded: isDownloaded(album))
                     }
                     .buttonStyle(.plain)
+                    .albumQueueMenu(album)
                     .id(album.id)
                     .onAppear { model.loadMoreIfNeeded(after: album) }
                 }
