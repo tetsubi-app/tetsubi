@@ -72,6 +72,7 @@ import gg.dekiru.musicplayer.ui.playlist.AddToPlaylistModel
 import gg.dekiru.musicplayer.ui.playlist.AddToPlaylistSheet
 import gg.dekiru.musicplayer.ui.playlist.PlaylistModel
 import gg.dekiru.musicplayer.ui.playlist.PlaylistNoticeBanner
+import gg.dekiru.musicplayer.ui.playlist.QueueNoticeBanner
 import gg.dekiru.musicplayer.ui.playlist.PlaylistScreen
 import gg.dekiru.musicplayer.ui.playlist.PlaylistsModel
 import gg.dekiru.musicplayer.ui.album.AlbumModel
@@ -263,7 +264,10 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                             Tab.DOWNLOADS -> DownloadsScreen(api, downloads, playing, onOpenPlaylist = ::openPlaylist)
                             Tab.SETTINGS -> SettingsScreen(session, api)
                         }
-                        is AlbumEntry -> AlbumScreen(api, top.model, playing, onOpen = ::open, onBack = ::back, onAddToPlaylist = addToPlaylist::start, onOpenArtist = ::openArtist)
+                        is AlbumEntry -> AlbumScreen(
+                            api, top.model, playing, onOpen = ::open, onBack = ::back, onAddToPlaylist = addToPlaylist::start,
+                            onOpenArtist = ::openArtist, isOnline = network.online,
+                        )
                         is ArtistEntry -> ArtistScreen(
                             api, top.model, onOpen = ::open, onBack = ::back,
                             network = session.environment.network.state, downloads = downloads, zoom = library.gridZoom,
@@ -315,6 +319,13 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
             addToPlaylist,
             Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).widthIn(max = 720.dp),
         )
+        // "Playing next" / "Added to queue".
+        if (playing != null) {
+            QueueNoticeBanner(
+                playing,
+                Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).widthIn(max = 720.dp),
+            )
+        }
     }
 }
 

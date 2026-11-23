@@ -231,4 +231,40 @@ class PlayQueueStoreTest {
             LocalFiles.deleteRecursively(dir)
         }
     }
+
+    @Test
+    fun saverWritesAChangeMadeDuringAWrite() = runTest {
+        val writes = mutableListOf<PlayQueueSnapshot>()
+        val q = sampleQueue()
+        lateinit var saver: PlayQueueSaver
+        // The second change arrives while the first is being written.
+        saver = PlayQueueSaver(this, {
+            writes += it
+            if (it.positionSeconds == 1.0) saver.schedule(q.snapshot(2.0))
+        }, intervalMillis = 1_000, ioDispatcher = StandardTestDispatcher(testScheduler))
+        saver.schedule(q.snapshot(1.0))
+        advanceTimeBy(1_001)
+        runCurrent()
+        assertEquals(listOf(1.0), writes.map { it.positionSeconds })
+        assertTrue(saver.hasPending)
+        advanceTimeBy(1_001)
+        runCurrent()
+        assertEquals(listOf(1.0, 2.0), writes.map { it.positionSeconds }, "written an interval later, with no further change")
+        assertFalse(saver.hasPending)
+    }
+
+    @Test
+    fun aCancelledSaverWritesNothingMore() = runTest {
+        val writes = mutableListOf<PlayQueueSnapshot>()
+        val saver = PlayQueueSaver(this, { writes += it }, intervalMillis = 1_000, ioDispatcher = StandardTestDispatcher(testScheduler))
+        val q = sampleQueue()
+        saver.schedule(q.snapshot(1.0))
+        saver.cancel()
+        assertFalse(saver.hasPending)
+        saver.schedule(q.snapshot(2.0))
+        saver.flush()
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertEquals(0, writes.size)
+    }
 }

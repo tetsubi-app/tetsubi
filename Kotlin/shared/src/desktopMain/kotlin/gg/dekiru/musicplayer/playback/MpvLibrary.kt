@@ -43,6 +43,10 @@ internal interface MpvLibrary : Library {
     /** `args`: the command and its arguments, ending with null. */
     fun mpv_command(ctx: Pointer, args: Array<String?>): Int
     fun mpv_get_property(ctx: Pointer, name: String, format: Int, data: LongByReference): Int
+
+    /** A property as a string mpv allocated (free it with [mpv_free]); null on error. */
+    fun mpv_get_property_string(ctx: Pointer, name: String): Pointer?
+    fun mpv_free(data: Pointer)
     fun mpv_observe_property(ctx: Pointer, reply_userdata: Long, name: String, format: Int): Int
     fun mpv_request_log_messages(ctx: Pointer, min_level: String): Int
     fun mpv_wait_event(ctx: Pointer, timeout: Double): Pointer

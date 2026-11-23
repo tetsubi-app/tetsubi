@@ -39,8 +39,14 @@ class FakeEngine(override val isSupported: Boolean = true, override val cast: Ca
     val seeks = mutableListOf<Long>()
 
     override fun setAuthorization(header: String?) { authHeader = header }
-    override fun setQueue(items: List<EngineItem>, startIndex: Int) { this.items = items; index = startIndex }
+    /** How many times a whole new queue was loaded (an edit that interrupts playback would be one). */
+    var loads = 0
+    override fun setQueue(items: List<EngineItem>, startIndex: Int) { this.items = items; index = startIndex; loads++ }
     override fun replaceAfterCurrent(items: List<EngineItem>) { this.items = this.items.take(index + 1) + items }
+    override fun replaceAroundCurrent(before: List<EngineItem>, after: List<EngineItem>) {
+        items = before + items[index] + after
+        index = before.size
+    }
     override fun play() { playing = true; listener?.onIsPlayingChanged(true) }
     override fun pause() { playing = false; listener?.onIsPlayingChanged(false) }
     override fun seekTo(millis: Long) { seeks += millis; positionMillis = millis }
@@ -201,10 +207,10 @@ class PlaybackTest {
         val s = setup(tracks = 3)
         s.player.play(album, startTrackId = "t2")
         settle()
-        assertEquals(listOf(2), s.player.upNext.map { it.first })
+        assertEquals(listOf("t3"), s.player.upNext.map { it.second.id })
         s.player.cycleRepeatMode()
         assertEquals(RepeatMode.ALL, s.engine.repeat)
-        assertEquals(listOf(2, 0), s.player.upNext.map { it.first })
+        assertEquals(listOf("t3", "t1"), s.player.upNext.map { it.second.id })
         s.player.skipTo(2)
         s.player.skipToNext()
         assertEquals(0, s.player.currentIndex)
@@ -219,9 +225,9 @@ class PlaybackTest {
         val s = setup(tracks = 3) // 60 + 120 + 180 s
         s.player.play(album, startTrackId = "t2")
         settle()
-        assertEquals(360.0, s.player.albumLength)
-        assertEquals(300.0, s.player.albumRemaining)
-        assertEquals("6m 00s", formatAlbumDuration(s.player.albumLength))
+        assertEquals(360.0, s.player.queueLength)
+        assertEquals(300.0, s.player.queueRemaining)
+        assertEquals("6m 00s", formatAlbumDuration(s.player.queueLength))
     }
 
     @Test
@@ -417,11 +423,13 @@ class PlaybackTest {
         s.player.play(album, startTrackId = "t4")
         settle()
         s.engine.finishTrack()
+        val playing = s.player.currentTrack?.id
         s.player.changeManiacMode(true)
-        val playing = s.player.queue.take(2).map { it.id }
-        val rest = s.player.queue.drop(2).map { it.id }
-        assertEquals(rest.sortedBy { it.removePrefix("t").toInt() }, rest)
-        assertEquals(playing + rest, s.engine.items.map { it.id })
+        // Changed with the listening queue: the whole queue goes back in album order (played ones too).
+        assertEquals((1..6).map { "t$it" }, s.player.queue.map { it.id })
+        assertEquals(s.player.queue.map { it.id }, s.engine.items.map { it.id })
+        assertEquals(playing, s.player.currentTrack?.id)
+        assertEquals(1, s.engine.loads, "the playing track carries on")
     }
 
     @Test

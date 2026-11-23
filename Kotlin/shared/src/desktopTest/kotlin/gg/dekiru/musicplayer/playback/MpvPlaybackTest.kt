@@ -319,4 +319,60 @@ class MpvPlaybackTest {
         playback.play()
         assertEquals(1, sent.size)
     }
+
+    // The listening queue: edits round the playing entry
+
+    @Test
+    fun replacingKeepsTheEntriesThatStayTheSame() {
+        queue(4, start = 1)
+        // t2 stays next (opened ahead for a gapless join); t3 goes, t7 comes.
+        playback.replaceAfterCurrent(listOf(item(2), item(7)))
+        assertEquals(
+            listOf(
+                listOf("playlist-remove", "3"),
+                listOf("loadfile", mpvTarget(item(7).url), "append"),
+            ),
+            sent,
+        )
+        assertEquals(listOf("t0", "t1", "t2", "t7"), playback.items.map { it.id })
+    }
+
+    @Test
+    fun replacingBeforeTheCurrentMovesItWithoutStoppingIt() {
+        queue(4, start = 2)
+        playback.replaceAroundCurrent(listOf(item(9)), listOf(item(3)))
+        assertEquals(
+            listOf(
+                listOf("playlist-remove", "0"),
+                listOf("playlist-remove", "0"),
+                listOf("loadfile", mpvTarget(item(9).url), "append"),
+                listOf("playlist-move", "2", "0"),
+            ),
+            sent,
+        )
+        assertTrue(sent.none { it.first() == "playlist-play-index" || it.first() == "stop" })
+        assertEquals(listOf("t9", "t2", "t3"), playback.items.map { it.id })
+        assertEquals(1, playback.current)
+        assertEquals(emptyList(), recorder.calls)
+    }
+
+    @Test
+    fun aStartReadBeforeAnEditIsFoundByItsPath() {
+        queue(4, start = 2)
+        playback.replaceAroundCurrent(emptyList(), listOf(item(3)))
+        // mpv moved on to t3 while the old entries before it were still there: it said position 3.
+        playback.handle(MpvEvent.StartFile(3, mpvTarget(item(3).url)))
+        assertEquals(listOf("index 1 auto"), recorder.calls)
+        assertEquals(1, playback.current)
+        assertTrue(isStreamOf(StreamUrls.startingAt(converted(1).url, 5_000), converted(1).url))
+        assertFalse(isStreamOf(converted(2).url, converted(1).url))
+    }
+
+    @Test
+    fun replacingTheQueueBeforeAnyEntriesKeepsNothing() {
+        assertEquals(
+            listOf(listOf("loadfile", "a", "append"), listOf("playlist-move", "1", "0"), listOf("loadfile", "b", "append"), listOf("playlist-move", "2", "1")),
+            replaceBeforeCommands(size = 1, current = 0, urls = listOf("a", "b")),
+        )
+    }
 }

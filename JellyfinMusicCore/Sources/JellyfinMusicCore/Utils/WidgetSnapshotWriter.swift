@@ -67,9 +67,10 @@ public final class WidgetSnapshotWriter {
         guard player === AppSession.shared.player else { return }
         current.signedIn = true
         if let track = player.currentTrack {
-            let ids = Self.albumIDs(queueAlbumIDs: player.queue.map(\.albumId),
-                                    sourcePositions: player.queuePositions,
-                                    sourceID: player.queueSourceId, currentAlbumID: track.albumId)
+            // The album the playing entry was queued from (each of its discs).
+            let ids = Self.albumIDs(queueAlbumIDs: player.currentBatchAlbumIds, sourcePositions: [],
+                                    sourceID: player.currentGroupIsAlbum ? player.queueSourceId : nil,
+                                    currentAlbumID: track.albumId)
             current.trackTitle = track.title
             current.artist = track.artist
             current.album = track.album
@@ -159,7 +160,7 @@ public final class WidgetSnapshotWriter {
         // The queue's length and what's left of it now (Now Playing's
         // Duration and Ends). No track: nothing to finish.
         if let player, player.currentTrack != nil {
-            let times = Self.queueTimes(length: player.albumLength, remaining: player.albumRemaining)
+            let times = Self.queueTimes(length: player.queueLength, remaining: player.queueRemaining)
             current.queueSeconds = times.queue
             current.remainingSeconds = times.remaining
         } else {

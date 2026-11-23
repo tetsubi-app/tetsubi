@@ -105,6 +105,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        // Going to the background: the listening queue is written now (where it is in the track too).
+        (application as TetsubiApplication).session.saveQueueSoon()
         controller?.let(MediaController::releaseFuture)
         controller = null
         super.onStop()

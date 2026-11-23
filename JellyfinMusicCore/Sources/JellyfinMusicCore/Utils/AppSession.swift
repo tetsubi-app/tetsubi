@@ -41,9 +41,11 @@ public final class AppSession {
     private func start(_ api: JellyfinAPI, newLogin: Bool) {
         player?.stop()
         self.api = api
-        let player = PlayerManager(api: api)
+        let player = PlayerManager(api: api, queueSaver: PlayQueueSaver())
         player.start()
         self.player = player
+        // The queue saved for this server and user comes back paused.
+        player.restoreSavedQueue()
         self.downloadManager = DownloadManager(api: api)
         #if os(iOS)
         // The widget keeps the last track across launches, not across logins.
@@ -246,7 +248,8 @@ public final class AppSession {
     /// Clears the saved login and stops playback.
     public func signOut() {
         authenticator.logout()
-        player?.stop()
+        player?.stop(forgetQueue: true)
+        PlayQueueStore.clear()
         api = nil
         player = nil
         downloadManager = nil

@@ -21,6 +21,13 @@ data class EngineItem(
     val castUrl: String? = null,
     /** The cover for the TV, with the token. */
     val castArtworkUrl: String? = null,
+    /**
+     * The queue entry it plays (`QueueEntry.id`): unique in the queue, where
+     * [id] (the track's) may be there twice. Engines keep their own
+     * bookkeeping (restarted streams, Cast) by this, never by position,
+     * since positions shift when the queue is edited.
+     */
+    val entryId: String = id,
 ) {
     /** Converted on the fly by the server: seeking restarts the stream at the new point. */
     val seeksByRestart: Boolean get() = StreamUrls.isConverted(url)
@@ -34,7 +41,11 @@ data class EngineItem(
 
 /** What the player tells [PlayerController]. Called on the main thread. */
 interface EngineListener {
-    /** The playing item changed. `automatic`: the previous one played to its end (or repeated). */
+    /**
+     * The playing item changed to item `index` of the engine's list (as last
+     * given by [PlayerEngine.setQueue] and the replace calls). `automatic`:
+     * the previous one played to its end (or repeated).
+     */
     fun onIndexChanged(index: Int, automatic: Boolean)
     fun onIsPlayingChanged(isPlaying: Boolean)
     /** The last item finished (Repeat off). */
@@ -66,8 +77,20 @@ interface PlayerEngine {
 
     fun setQueue(items: List<EngineItem>, startIndex: Int)
 
-    /** Replaces the items after the playing one without interrupting it. */
+    /**
+     * Replaces the items after the playing one without interrupting it.
+     * Items that already follow it in the same order (by [EngineItem.entryId])
+     * are kept as they are, so the next one stays loaded for a gapless join.
+     */
     fun replaceAfterCurrent(items: List<EngineItem>)
+
+    /**
+     * Replaces the items before and after the playing one without
+     * interrupting it (the queue was shuffled, unshuffled or edited): the
+     * playing item ends up at index `before.size`. Following items kept as
+     * in [replaceAfterCurrent].
+     */
+    fun replaceAroundCurrent(before: List<EngineItem>, after: List<EngineItem>)
 
     fun play()
     fun pause()
@@ -111,6 +134,7 @@ class UnsupportedPlayerEngine : PlayerEngine {
     override fun setAuthorization(header: String?) = Unit
     override fun setQueue(items: List<EngineItem>, startIndex: Int) = Unit
     override fun replaceAfterCurrent(items: List<EngineItem>) = Unit
+    override fun replaceAroundCurrent(before: List<EngineItem>, after: List<EngineItem>) = Unit
     override fun play() = Unit
     override fun pause() = Unit
     override fun seekTo(millis: Long) = Unit

@@ -198,12 +198,11 @@ class PlaylistPlaybackTest {
         settle()
         s.engine.finishTrack()
         settle()
-        val played = s.player.queue.take(2).map { it.trackNumber }
+        val playing = s.player.currentPlace
         s.player.changeManiacMode(true)
-        assertEquals(played, s.player.queue.take(2).map { it.trackNumber }, "what's played and playing stays")
-        val rest = s.player.queue.drop(2).map { it.trackNumber }
-        assertEquals(rest.sorted(), rest, "the rest in playlist order")
-        assertEquals(listOf(1, 2, 3, 4, 5), s.player.queue.map { it.trackNumber }.sorted(), "no row lost or doubled")
+        // The whole queue goes back in playlist order (with the listening queue; it used to keep what had played first).
+        assertEquals(listOf(1, 2, 3, 4, 5), s.player.queue.map { it.trackNumber }, "in playlist order, no row lost or doubled")
+        assertEquals(playing, s.player.currentPlace, "the playing row carries on")
         assertEquals(s.player.queue.map { it.id }, s.engine.items.map { it.id })
         assertEquals(s.player.queue.map { it.album }, s.engine.items.map { it.album })
         assertEquals(s.player.currentTrack?.trackNumber, s.player.currentPlace?.plus(1))

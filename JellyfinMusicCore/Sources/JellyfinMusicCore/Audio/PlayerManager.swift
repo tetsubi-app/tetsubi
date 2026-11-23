@@ -4,14 +4,21 @@ import Foundation
 import Observation
 import AVFoundation
 import MediaPlayer
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// Drives audio playback via `AVQueuePlayer` and integrates with
 /// `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter`. The manager is
 /// `@Observable` so SwiftUI views can read / update its state.
 ///
-/// The queue is built from the track list of one album, or from a
-/// playlist's tracks (each keeping its own album); `queueSourceId` says
-/// which.
+/// What plays is the listening queue (`playQueue`, kept by a
+/// `PlayQueueController`): albums, playlists and tracks queued one after
+/// another. The AVQueuePlayer holds the current entry and everything after
+/// it in play order, so tracks join without gaps, also from one album to
+/// the next. Each player item is mapped to its queue entry's id.
 ///
 /// Gapless playback: `AVQueuePlayer` natively pre-queues items and
 /// auto-advances; on `didPlayToEndTime` we advance state. As a v1.1
@@ -24,11 +31,15 @@ public final class PlayerManager {
 
     // MARK: Public state
 
-    /// The widget shows the queue's length and finish time, so edits
-    /// (Up Next) are passed on too.
+    /// The queue's tracks in play order (played ones too), derived from
+    /// `playQueue`. The widget shows the queue's length and finish time,
+    /// so edits are passed on too.
     public private(set) var queue: [PlaybackTrack] = [] {
         didSet { widgetChanged() }
     }
+    /// The entry id of each of `queue`'s tracks.
+    public private(set) var queueEntryIds: [String] = []
+    /// The current track's place in `queue`.
     public private(set) var currentIndex: Int = 0
     public private(set) var currentTrack: PlaybackTrack? {
         didSet {
@@ -48,8 +59,11 @@ public final class PlayerManager {
     }
     public private(set) var position: TimeInterval = 0
     public private(set) var duration: TimeInterval = 0
-    public private(set) var repeatMode: RepeatMode = .off
-    public private(set) var shuffle: Bool = false
+    /// The listening queue: entries, play order, shuffle and repeat.
+    public var playQueue: PlayQueue { controller.queue }
+    public var repeatMode: RepeatMode { controller.queue.repeatMode }
+    /// Shuffle across the whole queue.
+    public var shuffle: Bool { controller.queue.shuffle }
     /// Maniac Mode (Settings): no skip, shuffle, repeat or scrubbing.
     /// Change with `setManiacMode(_:)`.
     public private(set) var maniacMode: Bool = PlaybackSettings.maniacMode {
@@ -88,50 +102,67 @@ public final class PlayerManager {
     private let nowPlaying: NowPlayingController
     private let audioSession: AudioSession
     private let stream: StreamURLBuilder
+    /// Keeps the queue and decides what the AVQueuePlayer holds.
+    private let controller = PlayQueueController()
 
     private var player: AVQueuePlayer = AVQueuePlayer()
     /// The underlying player, for the Mac's AirPlay picker.
     var outputPlayer: AVPlayer { player }
+    /// The player items handed to the AVQueuePlayer, in order (played ones
+    /// stay until the queue moves past them), and each one's entry id.
     private var enqueuedItems: [AVPlayerItem] = []
+    private var enqueuedEntryIds: [String] = []
     /// End-of-track observer per queued item, removed when the item leaves
     /// the queue (otherwise NotificationCenter keeps one per track ever queued).
     private var itemEndObservers: [ObjectIdentifier: NSObjectProtocol] = [:]
     /// Per queued item: its failed-to-play notification and `status` observation.
     private var itemFailureObservers: [ObjectIdentifier: (NSObjectProtocol, NSKeyValueObservation)] = [:]
-    /// Position in `enqueuedItems` of the first item we enqueued, so we
-    /// can map `currentIndex` (into the full `queue`) to the next item to
-    /// pre-load. Reset on each `loadQueue`.
-    private var enqueuedStartIndex = 0
+    /// A restored queue starts partway into its track: the item and where,
+    /// applied once the item is ready (an item can't seek before that).
+    private var pendingStartSeek: (item: ObjectIdentifier, seconds: Double)?
     /// Track with an open server playback report (streamed tracks only).
     private var reportedTrack: PlaybackTrack?
-    /// Builds a player item for a queue index; used to rebuild the AVQueuePlayer queue on skip/repeat.
-    private var itemFactory: ((Int) -> AVPlayerItem?)?
+    /// What each queue entry plays and shows, by entry id: the track's
+    /// metadata as Now Playing shows it, and its file when it has one.
+    private var media: [String: PlaybackTrack] = [:]
+    /// Each entry's place in the album or playlist it was queued from
+    /// (a place, not a track ID: a playlist can hold the same song twice).
+    private var sourcePositions: [String: Int] = [:]
+    /// The format asked of the server for streams.
+    private var streamFormat: AudioFormat = .alac
     private var timeObserverToken: Any?
+    private var lifecycleObservers: [NSObjectProtocol] = []
+    private var lastPeriodicSave = Date.distantPast
     private var isConfigured = false
-    private var pendingFormat: AudioFormat = .alac
-    private var pendingAlbum: JellyfinAlbum?
-    /// For each entry of a streamed queue, its place in the album or
-    /// playlist it was started from (before shuffling), so Maniac Mode can
-    /// put a shuffled queue back in order. By place, not track ID: a
-    /// playlist can hold the same song twice.
-    private(set) var queuePositions: [Int] = []
 
-    /// What the queue was started from: the album's ID (the merged entry's
-    /// for a multi-disc album) or the playlist's. Nil when nothing is queued.
-    public private(set) var queueSourceId: String?
+    /// The album or playlist the current entry was queued from (the
+    /// album's ID, the merged entry's for a multi-disc album, or the
+    /// playlist's; the first track's for single tracks). Nil when nothing
+    /// is queued. "Is this album playing" checks use it.
+    public var queueSourceId: String? { controller.queue.currentEntry?.group.id }
 
-    /// The playing track's place in the album or playlist the queue was
-    /// started from, whatever order the queue plays in.
+    /// The playing track's place in the album or playlist it was queued
+    /// from, whatever order the queue plays in.
     public var currentSourcePosition: Int? {
-        guard queue.indices.contains(currentIndex) else { return nil }
-        return queuePositions.indices.contains(currentIndex) ? queuePositions[currentIndex] : currentIndex
+        guard let entry = controller.queue.currentEntry else { return nil }
+        if let place = sourcePositions[entry.id] { return place }
+        return controller.queue.entries.filter { $0.batchId == entry.batchId }.firstIndex { $0.id == entry.id }
     }
 
-    public init(api: JellyfinAPI) {
+    /// `queueSaver` saves the queue across launches (the app's player);
+    /// nil saves nothing (tests, previews).
+    public init(api: JellyfinAPI, queueSaver: PlayQueueSaver? = nil) {
         self.api = api
         self.audioSession = AudioSession()
         self.nowPlaying = NowPlayingController()
         self.stream = StreamURLBuilder(api: api, userId: api.userId ?? "")
+        controller.saver = queueSaver
+        controller.serverId = api.baseURL.absoluteString
+        controller.userId = api.userId
+        controller.maniacMode = maniacMode
+        controller.engine = self
+        controller.position = { [weak self] in self?.position ?? 0 }
+        controller.isPlayable = { [weak self] entry in self?.isPlayable(entry) ?? false }
     }
 
     // MARK: - Lifecycle
@@ -154,23 +185,129 @@ public final class PlayerManager {
         nowPlaying.onSeekTo   = { [weak self] t in self?.seek(toTime: t) }
         nowPlaying.onStart    = { [weak self] _ in self?.restartCurrentTrack() }
         installTimeObserver()
-        // `installItemEndObserver` is called per item in `loadQueue` — no
+        installLifecycleObservers()
+        // `installItemEndObserver` is called per item as it's queued — no
         // global observer needed here.
         isConfigured = true
     }
 
-    public func stop() {
+    /// Stops and empties the queue. The saved queue keeps the latest state
+    /// unless `forgetQueue` (signing out), which removes it.
+    public func stop(forgetQueue: Bool = false) {
         reportStopped(atEnd: false)
+        controller.clear(forget: forgetQueue)
         player.pause()
+        clearState()
+    }
+
+    private func clearState() {
+        media = [:]
+        sourcePositions = [:]
         queue = []
-        queuePositions = []
-        queueSourceId = nil
+        queueEntryIds = []
         currentIndex = 0
         currentTrack = nil
         isPlaying = false
         position = 0
         duration = 0
         nowPlaying.clear()
+    }
+
+    /// The saved queue is written when the app goes to the background or
+    /// quits (the Mac quits when its window closes).
+    private func installLifecycleObservers() {
+        #if canImport(UIKit)
+        let name = UIApplication.didEnterBackgroundNotification
+        #elseif canImport(AppKit)
+        let name = NSApplication.willTerminateNotification
+        #endif
+        lifecycleObservers.append(NotificationCenter.default.addObserver(
+            forName: name, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.controller.flushSave() }
+        })
+    }
+
+    // MARK: - Saved queue
+
+    /// Brings back the queue saved for this server and user, paused at the
+    /// track and position it was at (Play carries on). Nothing is reported
+    /// to the server until it plays. Does nothing when something is queued.
+    public func restoreSavedQueue() {
+        guard controller.queue.isEmpty,
+              let snapshot = PlayQueueStore.load(serverId: controller.serverId, userId: controller.userId)
+        else { return }
+        start()
+        guard let at = controller.restore(snapshot, register: { entries in
+            for entry in entries { media[entry.id] = restoredTrack(entry) }
+        }) else {
+            // Nothing in it can play now: nothing is kept.
+            media = [:]
+            return
+        }
+        syncFromQueue()
+        duration = currentTrack?.duration ?? 0
+        position = at
+        isPlaying = false
+        isLoading = false
+        lastError = nil
+        updateNowPlayingForCurrent()
+        nowPlaying.updateState(isPlaying: false, elapsedTime: at)
+        loadLocalDetails(entryIds: controller.queue.entries.map(\.id))
+    }
+
+    /// Whether an entry can play now: its file is here, or it's a server
+    /// track and there's a connection.
+    private func isPlayable(_ entry: QueueEntry) -> Bool {
+        if let file = media[entry.id]?.localURL, FileManager.default.fileExists(atPath: file.path) { return true }
+        return !Self.isLocalOnly(entry.track.id) && NetworkMonitor.shared.isConnected
+    }
+
+    /// Tracks played from a downloaded album's folder have ids made from the
+    /// album and file ("albumID/01 - Song.flac"), not the server's: they
+    /// can't be streamed.
+    nonisolated static func isLocalOnly(_ trackId: String) -> Bool { trackId.contains("/") }
+
+    /// A saved entry as the player shows and plays it: its file when it's on
+    /// this device (a downloaded album's or playlist's), else the stream.
+    private func restoredTrack(_ entry: QueueEntry) -> PlaybackTrack {
+        let t = entry.track
+        var localURL: URL?
+        var localArt: URL?
+        if Self.isLocalOnly(t.id), let slash = t.id.firstIndex(of: "/") {
+            let albumID = String(t.id[..<slash])
+            let name = String(t.id[t.id.index(after: slash)...])
+            let file = DownloadPaths.albumDir(albumID).appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: file.path) { localURL = file }
+            localArt = TrackCovers.existing(albumID: albumID, fileName: name)
+        } else {
+            let fileNumber = (t.discNumber ?? 1) > 1 ? (t.discNumber ?? 1) * 100 + t.trackNumber : t.trackNumber
+            if entry.group.kind == .playlist {
+                let files = PlaylistFiles(playlistID: entry.group.id)
+                localURL = files.file(trackID: t.id, albumID: t.albumId, title: t.title, fileNumber: fileNumber)
+                localArt = PlaylistDownloadPaths.savedArt(playlistID: entry.group.id, itemID: t.artItemId)
+            } else {
+                localURL = PlaylistFiles(playlistID: "").albumFile(albumID: t.albumId, title: t.title,
+                                                                   fileNumber: fileNumber)
+            }
+        }
+        var pt = PlaybackTrack(id: t.id, trackNumber: t.trackNumber, title: t.title, artist: t.artist,
+                               album: t.album, albumId: t.albumId, duration: t.durationSeconds,
+                               albumArtURL: api.albumArtURL(for: t.artItemId, size: 600), localURL: localURL)
+        pt.artItemId = t.artItemId
+        pt.albumArtistId = t.artistId
+        pt.localArtURL = localArt
+        pt.normalizationGain = t.normalizationGain
+        pt.codec = t.codec
+        pt.sampleRate = t.sampleRate
+        pt.bitDepth = t.bitDepth
+        pt.qualityLabel = PlaybackTrack.qualityLabel(format: AudioFormat.source(codec: t.codec, container: t.container),
+                                                     bitrate: t.bitrate)
+        if localURL == nil, NetworkMonitor.shared.isExpensive, let cap = PlaybackSettings.mobileDataBitrate {
+            pt.qualityLabel = "AAC \(cap / 1000) kbps"
+            pt.bitDepth = nil
+        }
+        return pt
     }
 
     // MARK: - Offline playback
@@ -211,17 +348,28 @@ public final class PlayerManager {
         albumTitle: String,
         artistName: String
     ) {
-        start()
-        let playbackTracks = albumIDs.flatMap { albumID -> [PlaybackTrack] in
+        let items = localItems(albumIDs: albumIDs, albumTitle: albumTitle, artistName: artistName)
+        guard !items.isEmpty else {
+            print("[PlayerManager] No local tracks for \(albumIDs)")
+            return
+        }
+        let group = QueueGroup(id: sourceId, kind: .album, title: albumTitle,
+                               artist: artistName.isEmpty ? nil : artistName, artItemId: albumIDs.first)
+        place(items, group: group, how: .replace(startIndex: nil))
+    }
+
+    /// A downloaded album's tracks from its files (several discs back to back).
+    private func localItems(albumIDs: [String], albumTitle: String, artistName: String) -> [QueueItem] {
+        albumIDs.flatMap { albumID -> [QueueItem] in
             let artURL = api.albumArtURL(for: albumID, size: 600)
-            let local = DownloadPaths.localTracks(albumID: albumID, format: format)
+            let local = DownloadPaths.localTracks(albumID: albumID)
             // Saved titles are by number; downloads of untagged tracks made
             // before numbering by position share one number, so theirs are
             // matched by file name instead.
             let clashing = Self.numbersClash(local.map(\.trackNumber))
             let titles = clashing ? [:] : DownloadedTitles.titles(for: albumID)
             let byFile = clashing ? DownloadedTitles.titlesByFile(for: albumID) : [:]
-            return local.map { entry in
+            return local.enumerated().map { i, entry in
                 let fileTitle = DownloadedTitles.fileTitle(entry.name)
                 var track = PlaybackTrack(
                     id: albumID + "/" + entry.url.lastPathComponent,
@@ -237,33 +385,10 @@ public final class PlayerManager {
                     localURL: entry.url
                 )
                 track.localArtURL = TrackCovers.existing(albumID: albumID, fileName: entry.name)
-                // Format and bitrate come from the file itself (loadLocalDurations).
-                return track
+                // Format and bitrate come from the file itself (loadLocalDetails).
+                return QueueItem(queueTrack: QueueTrack(playbackTrack: track), playback: track, sourcePosition: i)
             }
         }
-        guard !playbackTracks.isEmpty else {
-            print("[PlayerManager] No local tracks for \(albumIDs)")
-            return
-        }
-
-        queuePositions = []   // downloads always play in order
-        queueSourceId = sourceId
-        itemFactory = { i in
-            playbackTracks.indices.contains(i)
-                ? AVPlayerItem(url: playbackTracks[i].localURL ?? URL(fileURLWithPath: "")) : nil
-        }
-        enqueue(from: 0, count: playbackTracks.count)
-        self.queue = playbackTracks
-        self.currentIndex = 0
-        self.currentTrack = playbackTracks.first
-        self.isPlaying = true
-        self.isLoading = false
-        self.lastError = nil
-        updateNowPlayingForCurrent()
-        player.play()
-        loadLocalDurations(of: playbackTracks)
-        loadMissingLocalTitles(albumIDs: albumIDs)
-        loadMissingTrackCovers(albumIDs: albumIDs)
     }
 
     /// Downloads made before per-track pictures were saved: once per album,
@@ -279,14 +404,12 @@ public final class PlayerManager {
                     guard let self else { return }
                     await TrackCovers.save(pairs, albumID: albumID, api: self.api)
                     TrackCovers.markChecked(albumID: albumID)
-                    for i in self.queue.indices where self.queue[i].albumId == albumID {
-                        guard let name = self.queue[i].localURL?.lastPathComponent,
-                              let art = TrackCovers.existing(albumID: albumID, fileName: name) else { continue }
-                        self.queue[i].localArtURL = art
-                    }
-                    if self.queue.indices.contains(self.currentIndex) {
-                        self.currentTrack = self.queue[self.currentIndex]
-                        self.updateNowPlayingForCurrent()
+                    self.patchMedia { track in
+                        guard track.albumId == albumID, let name = track.localURL?.lastPathComponent,
+                              let art = TrackCovers.existing(albumID: albumID, fileName: name) else { return nil }
+                        var copy = track
+                        copy.localArtURL = art
+                        return copy
                     }
                 }
             }
@@ -311,15 +434,10 @@ public final class PlayerManager {
                                         uniquingKeysWith: { a, _ in a })
                 Task { @MainActor in
                     DownloadedTitles.save(titles, for: albumID)
-                    guard let self else { return }
-                    for i in self.queue.indices where self.queue[i].albumId == albumID
-                        && self.queue[i].localURL != nil {
-                        guard let title = titles[self.queue[i].trackNumber] else { continue }
-                        self.queue[i] = self.queue[i].withTitle(title)
-                    }
-                    if self.queue.indices.contains(self.currentIndex) {
-                        self.currentTrack = self.queue[self.currentIndex]
-                        self.updateNowPlayingForCurrent()
+                    self?.patchMedia { track in
+                        guard track.albumId == albumID, track.localURL != nil,
+                              let title = titles[track.trackNumber] else { return nil }
+                        return track.withTitle(title)
                     }
                 }
             }
@@ -335,37 +453,50 @@ public final class PlayerManager {
             let byFile = DownloadedTitles.byFileName(tracks.map(\.displayName))
             Task { @MainActor in
                 DownloadedTitles.saveByFile(byFile, for: albumID)
-                guard let self else { return }
-                for i in self.queue.indices where self.queue[i].albumId == albumID {
-                    guard let url = self.queue[i].localURL,
-                          let title = byFile[DownloadedTitles.fileTitle(url.lastPathComponent)] else { continue }
-                    self.queue[i] = self.queue[i].withTitle(title)
-                }
-                if self.queue.indices.contains(self.currentIndex) {
-                    self.currentTrack = self.queue[self.currentIndex]
-                    self.updateNowPlayingForCurrent()
+                self?.patchMedia { track in
+                    guard track.albumId == albumID, let url = track.localURL,
+                          let title = byFile[DownloadedTitles.fileTitle(url.lastPathComponent)] else { return nil }
+                    return track.withTitle(title)
                 }
             }
         }
     }
 
-    /// Local files carry no server runtime, so read each file's duration from
-    /// disk and patch the queue (drives the seek bar and album length).
-    private func loadLocalDurations(of tracks: [PlaybackTrack]) {
+    /// Changes queued tracks (`change` returns the new track, or nil to
+    /// leave it) and shows the result.
+    private func patchMedia(_ change: (PlaybackTrack) -> PlaybackTrack?) {
+        var changed = false
+        for (id, track) in media {
+            if let new = change(track) {
+                media[id] = new
+                changed = true
+            }
+        }
+        guard changed else { return }
+        syncFromQueue()
+        updateNowPlayingForCurrent()
+    }
+
+    /// Downloaded entries: their files carry no server runtime, so read
+    /// each file's length, format and quality from disk (drives the seek
+    /// bar and the queue's length).
+    private func loadLocalDetails(entryIds: [String]) {
+        let local = entryIds.compactMap { id in media[id].flatMap { $0.localURL == nil ? nil : (id, $0) } }
+        guard !local.isEmpty else { return }
         Task { @MainActor [weak self] in
-            for (i, track) in tracks.enumerated() {
+            for (id, track) in local {
                 guard let url = track.localURL else { continue }
                 let asset = AVURLAsset(url: url)
                 guard let time = try? await asset.load(.duration) else { continue }
                 let secs = time.seconds
                 let quality = await Self.localQuality(of: asset, url: url, seconds: secs)
-                guard let self, secs.isFinite, secs > 0,
-                      self.queue.indices.contains(i), self.queue[i].id == track.id else { continue }
-                self.queue[i] = self.queue[i].withDuration(secs).withQuality(quality)
-                if i == self.currentIndex {
-                    self.currentTrack = self.queue[i]
-                    self.duration = secs
-                }
+                guard let self, secs.isFinite, secs > 0, let now = self.media[id] else { continue }
+                // Only a downloaded album's own files say more than the server.
+                let updated = Self.isLocalOnly(now.id) || now.duration <= 0
+                    ? now.withDuration(secs).withQuality(quality) : now.withDuration(secs)
+                self.media[id] = updated
+                self.syncFromQueue()
+                if id == self.controller.queue.currentEntryId { self.duration = secs }
             }
         }
     }
@@ -401,32 +532,60 @@ public final class PlayerManager {
         return quality
     }
 
-    /// Total length of the queued album, in seconds.
-    public var albumLength: TimeInterval {
+    // MARK: - Times
+
+    /// Total length of the whole queue, in seconds (the album's, when only
+    /// one album is queued).
+    public var queueLength: TimeInterval {
         queue.reduce(0) { $0 + $1.duration }
     }
 
-    /// Time left in the queue: the rest of this track plus every track after it.
-    public var albumRemaining: TimeInterval {
+    /// Time left in the whole queue: the rest of this track plus every
+    /// track after it in play order. "Ends:" in Now Playing and the widget.
+    public var queueRemaining: TimeInterval {
         let rest = queue.indices.contains(currentIndex)
             ? queue[(currentIndex + 1)...].reduce(0) { $0 + $1.duration } : 0
         return max(0, duration - position) + rest
     }
 
+    /// Time left in the current album or playlist: the rest of this track
+    /// plus the tracks after it queued with it (its display group).
+    public var currentGroupRemaining: TimeInterval {
+        let order = controller.queue.entriesInPlayOrder
+        guard order.count == queue.count, order.indices.contains(currentIndex) else { return 0 }
+        let batch = order[currentIndex].batchId
+        var rest = 0.0
+        var i = currentIndex + 1
+        while i < order.count, order[i].batchId == batch {
+            rest += queue[i].duration
+            i += 1
+        }
+        return max(0, duration - position) + rest
+    }
+
+    /// The album IDs of the current entry's album, in queue order (each
+    /// disc of a multi-disc album), for the widget's Play.
+    var currentBatchAlbumIds: [String] {
+        guard let current = controller.queue.currentEntry else { return [] }
+        return controller.queue.entries.filter { $0.batchId == current.batchId }.map(\.track.albumId)
+    }
+
+    /// Whether the current entry was queued from an album (not a playlist
+    /// or single tracks).
+    var currentGroupIsAlbum: Bool { controller.queue.currentEntry?.group.kind == .album }
+
     // MARK: - Playback control
 
-    /// Play an album from the given index. Default `.alac` because it
-    /// is universally decodable by AVURLAsset on Apple platforms.
+    /// Play an album from the given index, replacing the queue. Default
+    /// `.alac` because it is universally decodable by AVURLAsset on Apple
+    /// platforms.
     ///
     /// If the album is fully downloaded locally, it plays from disk
     /// automatically. Otherwise it fetches the track list and streams
     /// from Jellyfin.
     ///
-    /// If `self.shuffle` is `.true`, the fetched track list is
-    /// randomized before queuing. When a `startIndex` is given (e.g.
-    /// the user tapped a specific track), that track is moved to the
-    /// head of the randomized queue so it plays first; the rest is
-    /// shuffled.
+    /// With shuffle on, the queue is shuffled; a given `startIndex` (e.g.
+    /// the user tapped a specific track) plays first.
     public func play(
         album: JellyfinAlbum,
         startIndex: Int = 0,
@@ -440,8 +599,6 @@ public final class PlayerManager {
         }
         isLoading = true
         lastError = nil
-        pendingFormat = format
-        pendingAlbum = album
         // Maniac Mode always starts at track 1.
         let startIndex = maniacMode ? 0 : startIndex
         api.tracksForAlbum(album.id) { [weak self] result in
@@ -485,10 +642,7 @@ public final class PlayerManager {
             return
         }
 
-        let allLocal = discs.allSatisfy {
-            DownloadPaths.exists(albumID: $0.id) && DownloadPaths.fileCount(albumID: $0.id) > 0
-        }
-        if allLocal && trackID == nil {
+        if Self.allDownloaded(discs) && trackID == nil {
             playLocal(albumIDs: discs.map(\.id), sourceId: album.id, format: format,
                       albumTitle: album.displayName, artistName: album.artistName)
             return
@@ -496,23 +650,9 @@ public final class PlayerManager {
 
         isLoading = true
         lastError = nil
-        pendingFormat = format
-        pendingAlbum = album
-        var perDisc = [[JellyfinTrack]?](repeating: nil, count: discs.count)
-        let group = DispatchGroup()
-        for (i, disc) in discs.enumerated() {
-            group.enter()
-            api.tracksForAlbum(disc.id) { result in
-                DispatchQueue.main.async {
-                    if case .success(let tracks) = result { perDisc[i] = tracks }
-                    group.leave()
-                }
-            }
-        }
-        group.notify(queue: .main) { [weak self] in
+        fetchTracks(discs: discs) { [weak self] tracks in
             guard let self else { return }
-            let tracks = perDisc.compactMap { $0 }.flatMap { $0 }
-            guard !tracks.isEmpty else {
+            guard let tracks, !tracks.isEmpty else {
                 print("[PlayerManager] No tracks for discs \(discs.map(\.id))")
                 self.onFail(.unknown)
                 return
@@ -526,7 +666,7 @@ public final class PlayerManager {
     /// of the album's tracks and starts with the tapped track first.
     ///
     /// If `self.shuffle` is on, the tapped track plays first, then
-    /// the rest of the album is randomized after it.
+    /// the rest of the queue is randomized after it.
     public func play(
         _ track: JellyfinTrack,
         in album: JellyfinAlbum,
@@ -534,8 +674,6 @@ public final class PlayerManager {
     ) {
         isLoading = true
         lastError = nil
-        pendingFormat = format
-        pendingAlbum = album
         api.tracksForAlbum(album.id) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
@@ -573,27 +711,15 @@ public final class PlayerManager {
         guard !tracks.isEmpty else { return nil }
         // Maniac Mode always starts at the first song.
         let start = maniacMode ? nil : position.flatMap { tracks.indices.contains($0) ? $0 : nil }
-        let files = PlaylistFiles(playlistID: playlist.id)
-        let sources = tracks.map { entry in
-            QueueSource(track: entry.track, album: entry.album,
-                        localURL: files.file(for: entry),
-                        localArtURL: PlaylistDownloadPaths.savedArt(playlistID: playlist.id,
-                                                                    itemID: entry.artItemId))
+        switch playlistItems(playlist, tracks: tracks, startingAt: start, format: format, online: online) {
+        case .failure(let refusal):
+            return refusal
+        case .success(let (items, first)):
+            lastError = nil
+            streamFormat = format
+            place(items, group: Self.group(for: playlist), how: .replace(startIndex: first))
+            return nil
         }
-        let places: [Int]
-        let forced: Int?
-        switch Self.playlistQueue(onDevice: sources.map { $0.localURL != nil }, startingAt: start,
-                                   online: online ?? NetworkMonitor.shared.isConnected) {
-        case .failure(let refusal): return refusal
-        case .success(let plan): (places, forced) = plan
-        }
-        lastError = nil
-        // The queue holds places in `tracks`, so each row keeps its page
-        // position whichever songs were left out.
-        let planned = planQueue(tracks: places, forcedStartIndex: forced, shuffleOn: shuffle)
-        loadQueue(sources: sources, order: planned.tracks, startIndex: planned.startIndex,
-                  format: format, sourceId: playlist.id)
-        return nil
     }
 
     /// Which rows of a playlist are queued (their positions, in playlist
@@ -608,6 +734,125 @@ public final class PlayerManager {
         guard let start else { return .success((places, nil)) }
         guard let first = places.firstIndex(of: start) else { return .failure(.songNotDownloaded) }
         return .success((places, first))
+    }
+
+    /// A playlist's rows as queue items (offline, only those on this
+    /// device), and the place among them to start at.
+    private func playlistItems(
+        _ playlist: JellyfinPlaylist, tracks: [PlaylistEntry], startingAt start: Int?,
+        format: AudioFormat, online: Bool?
+    ) -> Result<([QueueItem], Int?), PlaylistPlayRefusal> {
+        let files = PlaylistFiles(playlistID: playlist.id)
+        let sources = tracks.map { entry in
+            QueueSource(track: entry.track, album: entry.album,
+                        localURL: files.file(for: entry),
+                        localArtURL: PlaylistDownloadPaths.savedArt(playlistID: playlist.id,
+                                                                    itemID: entry.artItemId))
+        }
+        switch Self.playlistQueue(onDevice: sources.map { $0.localURL != nil }, startingAt: start,
+                                  online: online ?? NetworkMonitor.shared.isConnected) {
+        case .failure(let refusal):
+            return .failure(refusal)
+        case .success(let plan):
+            // Each item keeps its row's place, whichever songs were left out.
+            return .success((items(sources: sources, order: plan.places), plan.start))
+        }
+    }
+
+    // MARK: - Play Next / Add to Queue
+
+    /// Queues an album (every disc, or `discs`) right after the current
+    /// album or playlist. Downloaded albums are queued from disk; offline
+    /// only those are. `completion` says whether anything was queued (the
+    /// caller shows the confirmation). Into an empty queue it plays.
+    public func playNext(album: JellyfinAlbum, discs: [JellyfinAlbum]? = nil, format: AudioFormat = .alac,
+                         completion: ((Bool) -> Void)? = nil) {
+        queueAlbum(album, discs: discs ?? album.allDiscs, format: format, how: .playNext, completion: completion)
+    }
+
+    /// Queues an album (every disc, or `discs`) at the end of the queue.
+    public func addToQueue(album: JellyfinAlbum, discs: [JellyfinAlbum]? = nil, format: AudioFormat = .alac,
+                           completion: ((Bool) -> Void)? = nil) {
+        queueAlbum(album, discs: discs ?? album.allDiscs, format: format, how: .addToQueue, completion: completion)
+    }
+
+    /// Queues a playlist's rows after the current album or playlist.
+    /// Offline only the songs on this device; nil when queued, else why not.
+    @discardableResult
+    public func playNext(playlist: JellyfinPlaylist, tracks: [PlaylistEntry], format: AudioFormat = .alac,
+                         online: Bool? = nil) -> PlaylistPlayRefusal? {
+        queuePlaylist(playlist, tracks: tracks, format: format, online: online, how: .playNext)
+    }
+
+    /// Queues a playlist's rows at the end of the queue.
+    @discardableResult
+    public func addToQueue(playlist: JellyfinPlaylist, tracks: [PlaylistEntry], format: AudioFormat = .alac,
+                           online: Bool? = nil) -> PlaylistPlayRefusal? {
+        queuePlaylist(playlist, tracks: tracks, format: format, online: online, how: .addToQueue)
+    }
+
+    /// Queues single tracks of `album` after the current album or playlist.
+    /// Offline only tracks on this device. Returns whether any were queued.
+    @discardableResult
+    public func playNext(tracks: [JellyfinTrack], in album: JellyfinAlbum, format: AudioFormat = .alac) -> Bool {
+        queueTracks(tracks, in: album, format: format, how: .playNext)
+    }
+
+    /// Queues single tracks of `album` at the end of the queue.
+    @discardableResult
+    public func addToQueue(tracks: [JellyfinTrack], in album: JellyfinAlbum, format: AudioFormat = .alac) -> Bool {
+        queueTracks(tracks, in: album, format: format, how: .addToQueue)
+    }
+
+    private func queueAlbum(_ album: JellyfinAlbum, discs: [JellyfinAlbum], format: AudioFormat,
+                            how: Placement, completion: ((Bool) -> Void)?) {
+        let discs = discs.isEmpty ? [album] : discs
+        let group = Self.group(for: album)
+        if Self.allDownloaded(discs) {
+            let items = localItems(albumIDs: discs.map(\.id), albumTitle: album.displayName,
+                                   artistName: album.artistName)
+            completion?(place(items, group: group, how: how))
+            return
+        }
+        guard NetworkMonitor.shared.isConnected else {
+            completion?(false)
+            return
+        }
+        fetchTracks(discs: discs) { [weak self] tracks in
+            guard let self, let tracks, !tracks.isEmpty else {
+                completion?(false)
+                return
+            }
+            self.streamFormat = format
+            let sources = tracks.map { QueueSource(track: $0, album: album) }
+            completion?(self.place(self.items(sources: sources, order: Array(sources.indices)),
+                                   group: group, how: how))
+        }
+    }
+
+    private func queuePlaylist(_ playlist: JellyfinPlaylist, tracks: [PlaylistEntry], format: AudioFormat,
+                               online: Bool?, how: Placement) -> PlaylistPlayRefusal? {
+        guard !tracks.isEmpty else { return nil }
+        switch playlistItems(playlist, tracks: tracks, startingAt: nil, format: format, online: online) {
+        case .failure(let refusal):
+            return refusal
+        case .success(let (items, _)):
+            streamFormat = format
+            place(items, group: Self.group(for: playlist), how: how)
+            return nil
+        }
+    }
+
+    private func queueTracks(_ tracks: [JellyfinTrack], in album: JellyfinAlbum, format: AudioFormat,
+                             how: Placement) -> Bool {
+        guard let first = tracks.first else { return false }
+        let online = NetworkMonitor.shared.isConnected
+        let sources = tracks.map { QueueSource(track: $0, album: album) }
+        let order = sources.indices.filter { online || sources[$0].localURL != nil }
+        streamFormat = format
+        let group = QueueGroup(id: first.id, kind: .tracks, title: first.displayName,
+                               artist: album.artistName.isEmpty ? nil : album.artistName, artItemId: album.id)
+        return place(items(sources: sources, order: order), group: group, how: how)
     }
 
     // MARK: - Image requests
@@ -640,34 +885,76 @@ public final class PlayerManager {
         var localArtURL: URL? = nil
     }
 
-    /// Queues an album's tracks (see `startQueue(sources:…)`).
+    /// A track ready to queue: what the saved queue keeps, what the player
+    /// shows and plays, and its place in its album or playlist.
+    struct QueueItem {
+        var queueTrack: QueueTrack
+        var playback: PlaybackTrack
+        var sourcePosition: Int
+    }
+
+    /// Where `place` puts things.
+    enum Placement {
+        case replace(startIndex: Int?)
+        case playNext
+        case addToQueue
+    }
+
+    static func group(for album: JellyfinAlbum) -> QueueGroup {
+        QueueGroup(id: album.id, kind: .album, title: album.displayName,
+                   artist: album.artistName.isEmpty ? nil : album.artistName, artItemId: album.id)
+    }
+
+    static func group(for playlist: JellyfinPlaylist) -> QueueGroup {
+        QueueGroup(id: playlist.id, kind: .playlist, title: playlist.name, artItemId: playlist.id)
+    }
+
+    nonisolated static func allDownloaded(_ discs: [JellyfinAlbum]) -> Bool {
+        !discs.isEmpty && discs.allSatisfy {
+            DownloadPaths.exists(albumID: $0.id) && DownloadPaths.fileCount(albumID: $0.id) > 0
+        }
+    }
+
+    /// The tracks of every disc, in disc order (nil when none could be fetched).
+    private func fetchTracks(discs: [JellyfinAlbum], completion: @escaping ([JellyfinTrack]?) -> Void) {
+        var perDisc = [[JellyfinTrack]?](repeating: nil, count: discs.count)
+        let group = DispatchGroup()
+        for (i, disc) in discs.enumerated() {
+            group.enter()
+            api.tracksForAlbum(disc.id) { result in
+                DispatchQueue.main.async {
+                    if case .success(let tracks) = result { perDisc[i] = tracks }
+                    group.leave()
+                }
+            }
+        }
+        group.notify(queue: .main) {
+            let found = perDisc.compactMap { $0 }
+            completion(found.isEmpty ? nil : found.flatMap { $0 })
+        }
+    }
+
+    /// Replaces the queue with an album's tracks and plays (see `place`).
     private func startQueue(
         tracks: [JellyfinTrack],
         album: JellyfinAlbum,
         forcedStartIndex: Int?,
         format: AudioFormat
     ) {
-        startQueue(sources: tracks.map { QueueSource(track: $0, album: album) },
-                   forcedStartIndex: forcedStartIndex, format: format, sourceId: album.id)
-    }
-
-    /// Decides the order and start (`planQueue`) for `sources`, given in
-    /// album or playlist order, then builds the queue and plays.
-    private func startQueue(
-        sources: [QueueSource],
-        forcedStartIndex: Int?,
-        format: AudioFormat,
-        sourceId: String
-    ) {
-        let planned = planQueue(tracks: Array(sources.indices),
-                                forcedStartIndex: forcedStartIndex, shuffleOn: shuffle)
-        loadQueue(sources: sources, order: planned.tracks,
-                  startIndex: planned.startIndex, format: format, sourceId: sourceId)
+        streamFormat = format
+        let sources = tracks.map { QueueSource(track: $0, album: album) }
+        place(items(sources: sources, order: Array(sources.indices)), group: Self.group(for: album),
+              how: .replace(startIndex: forcedStartIndex))
     }
 
     /// The queue's tracks for `sources` played in `order` (places in
     /// `sources`): each with its own album's name, ID and art.
     func playbackTracks(sources: [QueueSource], order: [Int]) -> [PlaybackTrack] {
+        items(sources: sources, order: order).map(\.playback)
+    }
+
+    /// Queue items for `sources` taken in `order` (places in `sources`).
+    func items(sources: [QueueSource], order: [Int]) -> [QueueItem] {
         let cap = NetworkMonitor.shared.isExpensive ? PlaybackSettings.mobileDataBitrate : nil
         return order.enumerated().map { i, place in
             let source = sources[place]
@@ -682,71 +969,120 @@ public final class PlayerManager {
             // Some Jellyfin responses omit the IndexNumber; fill from the
             // position in the fetch.
             if pt.trackNumber == 0 { pt = pt.withTrackNumber(i + 1) }
+            var qt = QueueTrack(track: source.track, album: source.album)
+            qt.trackNumber = pt.trackNumber
             // On mobile data the stream is AAC at the cap, whatever the file is.
             // Lossy, so no bit depth; the sample rate stays the file's.
             if let cap, source.localURL == nil {
                 pt.qualityLabel = "AAC \(cap / 1000) kbps"
                 pt.bitDepth = nil
             }
-            return pt
+            return QueueItem(queueTrack: qt, playback: pt, sourcePosition: place)
         }
     }
 
-    /// Build an `AVPlayerItem` queue from the given tracks and start
-    /// playing. Called by the `play` functions once the track list is
-    /// known. The caller picks the order and start index via `planQueue`,
-    /// so this only builds and enqueues.
-    private func loadQueue(
-        sources: [QueueSource],
-        order: [Int],
-        startIndex: Int,
-        format: AudioFormat,
-        sourceId: String
-    ) {
+    /// Puts `items` (from `group`) in the queue and has the AVQueuePlayer
+    /// follow: a replace plays from its start; Play Next and Add to Queue
+    /// only change what follows the playing track (or play, into an empty
+    /// queue). Returns whether anything was queued.
+    @discardableResult
+    private func place(_ items: [QueueItem], group: QueueGroup, how: Placement) -> Bool {
         start() // idempotent
-
-        // 1. Build PlaybackTracks.
-        let playbackTracks = playbackTracks(sources: sources, order: order)
-
-        // 2. Build AVPlayerItems and enqueue from startIndex to end.
-        // `AVQueuePlayer.insert(_:after:)` is the cross-platform API
-        // (iOS / macOS); `AVQueuePlayer.insert(_:at:)` (the
-        // AVPlayerItemInsertionPoint variant) is iOS-only, so we
-        // track the last-added item and append after it.
-        // Items are built from each queue entry's place in `sources`, so the
-        // queue can be reordered later (Maniac Mode un-shuffling it) and
-        // can hold the same track twice.
-        itemFactory = { [weak self] i in
-            guard let self, self.queuePositions.indices.contains(i),
-                  sources.indices.contains(self.queuePositions[i]) else { return nil }
-            let source = sources[self.queuePositions[i]]
-            // A file that has gone since the queue was built is streamed.
-            if let file = source.localURL, FileManager.default.fileExists(atPath: file.path) {
-                return AVPlayerItem(url: file)
+        var added: [String] = []
+        let register: ([QueueEntry]) -> Void = { [self] entries in
+            added = entries.map(\.id)
+            for (entry, item) in zip(entries, items) {
+                media[entry.id] = item.playback
+                sourcePositions[entry.id] = item.sourcePosition
             }
-            return self.makePlayerItem(for: source.track, format: format)
         }
-        reportStopped(atEnd: false)
-        self.queue = playbackTracks
-        self.queuePositions = order
-        self.queueSourceId = sourceId
-        enqueue(from: startIndex, count: playbackTracks.count)
-
-        // 3. Publish state.
-        self.currentIndex = startIndex < playbackTracks.count ? startIndex : 0
-        self.currentTrack = playbackTracks.indices.contains(self.currentIndex)
-            ? playbackTracks[self.currentIndex] : nil
-        self.duration = self.currentTrack?.duration ?? 0
-        self.position = 0
-        updateNowPlayingForCurrent()
-        reportStarted()
-        isPlaying = true
-        isLoading = false
-
-        // 4. Start the show.
-        player.play()
+        let tracks = items.map(\.queueTrack)
+        let transition: QueueTransition
+        switch how {
+        case .replace(let startIndex):
+            reportStopped(atEnd: false)
+            transition = controller.replace(group: group, tracks: tracks, startIndex: startIndex,
+                                            play: true, register: register)
+        case .playNext:
+            guard !items.isEmpty else { return false }
+            transition = controller.playNext(group: group, tracks: tracks, register: register)
+        case .addToQueue:
+            guard !items.isEmpty else { return false }
+            transition = controller.addToQueue(group: group, tracks: tracks, register: register)
+        }
+        apply(transition)
         // Downloaded tracks show the format and length of their files.
-        if playbackTracks.contains(where: { $0.localURL != nil }) { loadLocalDurations(of: playbackTracks) }
+        loadLocalDetails(entryIds: added)
+        let localAlbums = Array(Set(items.compactMap { item -> String? in
+            Self.isLocalOnly(item.playback.id) ? item.playback.albumId : nil
+        }))
+        if !localAlbums.isEmpty {
+            loadMissingLocalTitles(albumIDs: localAlbums)
+            loadMissingTrackCovers(albumIDs: localAlbums)
+        }
+        return !items.isEmpty
+    }
+
+    // MARK: - Following the queue
+
+    /// Brings the published state in line with the queue and the player
+    /// after a queue operation.
+    private func apply(_ transition: QueueTransition) {
+        switch transition {
+        case .none:
+            return
+        case .upcomingChanged:
+            syncFromQueue()
+        case .started(let play):
+            reportStopped(atEnd: false)
+            pendingStartSeek = nil
+            syncFromQueue()
+            duration = currentTrack?.duration ?? 0
+            position = 0
+            lastError = nil
+            isLoading = false
+            updateNowPlayingForCurrent()
+            if play {
+                reportStarted()
+                isPlaying = true
+            } else {
+                isPlaying = false
+                nowPlaying.updateState(isPlaying: false, elapsedTime: 0)
+            }
+        case .advanced:
+            syncFromQueue()
+            duration = currentTrack?.duration ?? 0
+            position = 0
+            updateNowPlayingForCurrent()
+            reportStarted()
+        case .ended:
+            reportStopped(atEnd: false)
+            syncFromQueue()
+            duration = currentTrack?.duration ?? 0
+            position = 0
+            isPlaying = false
+            updateNowPlayingForCurrent()
+            nowPlaying.updateState(isPlaying: false, elapsedTime: 0)
+        case .emptied:
+            reportStopped(atEnd: false)
+            player.pause()
+            clearState()
+            isLoading = false
+        }
+    }
+
+    /// Re-derives `queue`, `currentIndex` and `currentTrack` from the queue.
+    private func syncFromQueue() {
+        let order = controller.queue.entriesInPlayOrder
+        let ids = Set(order.map(\.id))
+        media = media.filter { ids.contains($0.key) }
+        sourcePositions = sourcePositions.filter { ids.contains($0.key) }
+        let tracks = order.map { media[$0.id] ?? restoredTrack($0) }
+        if tracks != queue { queue = tracks }
+        queueEntryIds = order.map(\.id)
+        currentIndex = controller.queue.currentPlayIndex ?? 0
+        let current = tracks.indices.contains(currentIndex) ? tracks[currentIndex] : nil
+        if current != currentTrack { currentTrack = current }
     }
 
     // MARK: - Playback reporting
@@ -767,51 +1103,35 @@ public final class PlayerManager {
         api.reportPlayback(itemId: track.id, positionSeconds: seconds, stopped: true)
     }
 
-    /// Replace the AVQueuePlayer queue with items `start..<count`.
-    private func enqueue(from start: Int, count: Int) {
-        player.pause()
-        removeAllItems()
-        // `preWarmNextItem` maps `currentIndex` to the queued item via this.
-        enqueuedStartIndex = start
-        var lastAdded: AVPlayerItem?
-        for i in start..<count {
-            guard let item = itemFactory?(i) else { continue }
-            AudioEffects.shared.attach(to: item)  // equaliser + visualiser
-            installItemEndObserver(for: item)
-            player.insert(item, after: lastAdded)
-            enqueuedItems.append(item)
-            lastAdded = item
-        }
-    }
-
     /// The tracks that will play after the current one, in order, with
-    /// their queue index. Wraps to the start when Repeat All is on.
-    public var upNext: [(index: Int, track: PlaybackTrack)] {
-        upNextIndices(count: queue.count, current: currentIndex, repeatMode: repeatMode)
-            .map { ($0, queue[$0]) }
+    /// their entry ids. Wraps to the start when Repeat All is on.
+    public var upNext: [(entryId: String, track: PlaybackTrack)] {
+        controller.queue.upcomingEntries.map { ($0.id, media[$0.id] ?? restoredTrack($0)) }
     }
 
-    /// Play the queue entry at `index` (e.g. tapped in "Up next").
-    public func skip(toQueueIndex index: Int) {
-        guard !maniacMode else { return }
-        jump(to: index)
+    // MARK: - Queue editing
+
+    /// Moves entries (one, or a whole album's) to `toIndex` in the queue as
+    /// shown (see `PlayQueue.move`). Refused in Maniac Mode.
+    public func moveQueue(entryIds: [String], toIndex: Int) {
+        apply(controller.move(entryIds: entryIds, toIndex: toIndex))
     }
 
-    /// Jump playback to `index`, rebuilding the queue so audio follows state.
-    private func jump(to index: Int) {
-        guard index >= 0, index < queue.count else { return }
-        enqueue(from: index, count: queue.count)
-        advanceTo(newIndex: index, startOfTrack: true)
-        isPlaying = true
-        player.play()
+    /// Removes entries. Removing the playing one plays the next (or stops
+    /// at the end). Refused in Maniac Mode.
+    public func removeFromQueue(entryIds: [String]) {
+        apply(controller.remove(entryIds: entryIds, playing: isPlaying))
     }
 
-    private func removeAllItems() {
-        for item in enqueuedItems {
-            player.remove(item)
-            removeItemEndObserver(for: item)
-        }
-        enqueuedItems.removeAll(keepingCapacity: true)
+    /// Removes everything but the playing track. Refused in Maniac Mode.
+    public func clearUpcoming() {
+        apply(controller.clearUpcoming())
+    }
+
+    /// Plays the queue entry `entryId` (e.g. tapped in "Up next"). Refused
+    /// in Maniac Mode.
+    public func skipTo(entryId: String) {
+        apply(controller.skipTo(entryId: entryId))
     }
 
     /// Sets the player volume from the current track's `NormalizationGain`
@@ -822,12 +1142,21 @@ public final class PlayerManager {
         player.volume = PlaybackSettings.volume(forGain: gain)
     }
 
-    private func makePlayerItem(for track: JellyfinTrack, format: AudioFormat) -> AVPlayerItem? {
+    /// The player item for a queue entry: its file when it's here, else the
+    /// server's stream (nil for a downloaded album's track whose file has gone).
+    private func makePlayerItem(entryId: String) -> AVPlayerItem? {
+        guard let entry = controller.queue.entry(id: entryId) else { return nil }
+        // A file that has gone since the queue was built is streamed.
+        if let file = media[entryId]?.localURL, FileManager.default.fileExists(atPath: file.path) {
+            return AVPlayerItem(url: file)
+        }
+        guard !Self.isLocalOnly(entry.track.id) else { return nil }
         // On cellular / a hotspot, stream AAC at the chosen bitrate instead
         // of the original file.
         let cap = NetworkMonitor.shared.isExpensive ? PlaybackSettings.mobileDataBitrate : nil
-        guard let url = stream.url(for: track, format: format, maxBitrate: cap) else {
-            print("[PlayerManager] StreamURLBuilder returned nil for track \(track.id)")
+        guard let url = stream.url(trackId: entry.track.id, container: entry.track.container,
+                                   format: streamFormat, maxBitrate: cap) else {
+            print("[PlayerManager] StreamURLBuilder returned nil for track \(entry.track.id)")
             return nil
         }
         // Gapless: AVQueuePlayer natively pre-loads the next item; the
@@ -840,6 +1169,7 @@ public final class PlayerManager {
         player.pause()
         isPlaying = false
         nowPlaying.updateState(isPlaying: false, elapsedTime: position)
+        controller.scheduleSave()
     }
 
     public func resume() {
@@ -847,10 +1177,11 @@ public final class PlayerManager {
         // After a failed track, Play tries that track again.
         if lastError == .trackFailed {
             lastError = nil
-            jump(to: currentIndex)
+            apply(controller.reloadCurrent(play: true))
             return
         }
-        // After the album finished and went back to the start, this play is a new one.
+        // After the album finished and went back to the start (or a
+        // restored queue), this play is a new one.
         if reportedTrack == nil { reportStarted() }
         player.play()
         isPlaying = true
@@ -862,12 +1193,8 @@ public final class PlayerManager {
     }
 
     public func skipToNext() {
-        guard !maniacMode, !queue.isEmpty else { return }
-        if currentIndex + 1 < queue.count {
-            jump(to: currentIndex + 1)
-        } else if repeatMode == .all {
-            jump(to: 0)
-        }
+        guard !maniacMode else { return }
+        apply(controller.next())
     }
 
     public func skipToPrevious() {
@@ -880,32 +1207,18 @@ public final class PlayerManager {
             widgetChanged()
             return
         }
-        if currentIndex > 0 {
-            jump(to: currentIndex - 1)
-        }
-    }
-
-    /// Update the now-playing state for the new index. Used by both
-    /// skip-forward and skip-backward. The AVQueuePlayer only *plays*
-    /// from the head of the queue, so for "skip to N" we rebuild
-    /// the queue from N.
-    private func advanceTo(newIndex: Int, startOfTrack: Bool) {
-        guard newIndex >= 0 && newIndex < queue.count else { return }
-        reportStopped(atEnd: false)
-        currentIndex = newIndex
-        currentTrack = queue[newIndex]
-        reportStarted()
-        duration = currentTrack?.duration ?? 0
-        position = 0
-        updateNowPlayingForCurrent()
+        apply(controller.previous())
     }
 
     public func seek(toTime t: TimeInterval) {
         guard !maniacMode, let item = player.currentItem else { return }
         let clamped = max(0, min(t, duration > 0 ? duration : t))
-        // `seek(to:completionHandler:)` is the modern API; `seek(to:)`
-        // is deprecated but still works on all our target OSes.
-        item.seek(to: CMTime(seconds: clamped, preferredTimescale: CMTimeScale(1000))) { _ in }
+        if item.status == .readyToPlay {
+            item.seek(to: CMTime(seconds: clamped, preferredTimescale: CMTimeScale(1000))) { _ in }
+        } else {
+            // An item can't seek until it's ready; it does once it is.
+            pendingStartSeek = (ObjectIdentifier(item), clamped)
+        }
         position = clamped
         nowPlaying.updateState(isPlaying: isPlaying, elapsedTime: clamped)
         // The widget works out when the track ends from the position.
@@ -927,17 +1240,16 @@ public final class PlayerManager {
     }
 
     public func setRepeatMode(_ mode: RepeatMode) {
-        guard !maniacMode || mode == .off else { return }
-        repeatMode = mode
+        apply(controller.setRepeatMode(mode))
     }
 
     /// Cycle through the three repeat modes on every tap. UI helper.
     public func cycleRepeatMode() {
         guard !maniacMode else { return }
         switch repeatMode {
-        case .off: repeatMode = .all
-        case .all: repeatMode = .one
-        case .one: repeatMode = .off
+        case .off: setRepeatMode(.all)
+        case .all: setRepeatMode(.one)
+        case .one: setRepeatMode(.off)
         }
     }
 
@@ -945,63 +1257,26 @@ public final class PlayerManager {
         setShuffle(!shuffle)
     }
 
-    /// Set the shuffle flag without rebuilding the queue. The flag is
-    /// read at the *next* `play(album:)` / `play(_:in:)` call.
+    /// Shuffle across the whole queue (the playing track carries on and the
+    /// rest is shuffled after it); off puts the queue back in order. A
+    /// queue started afterwards plays shuffled too. Only off in Maniac Mode.
     public func setShuffle(_ newValue: Bool) {
-        guard !maniacMode || !newValue else { return }
-        shuffle = newValue
+        apply(controller.setShuffle(newValue))
     }
 
     // MARK: - Maniac Mode
 
     /// Turns Maniac Mode on or off and saves it. Turning it on switches
-    /// shuffle and repeat off and puts the rest of a shuffled album back in
-    /// album order (the playing track carries on).
+    /// shuffle and repeat off and puts the rest of a shuffled queue back in
+    /// order (the playing track carries on).
     public func setManiacMode(_ on: Bool) {
         PlaybackSettings.maniacMode = on
         guard on != maniacMode else { return }
         maniacMode = on
-        if on {
-            repeatMode = .off
-            if shuffle {
-                shuffle = false
-                restoreAlbumOrder()
-            }
-        }
+        controller.setManiacMode(on)
+        syncFromQueue()
         nowPlaying.setSkipControlsEnabled(!on)
         NotificationCenter.default.post(name: Self.maniacModeDidChange, object: self)
-    }
-
-    /// Reorders the tracks after the current one into album order and
-    /// requeues them, without interrupting the current track.
-    private func restoreAlbumOrder() {
-        guard queuePositions.count == queue.count, queue.indices.contains(currentIndex) else { return }
-        let order = orderAfterCurrent(positions: queuePositions, current: currentIndex)
-        guard order != Array(queue.indices) else { return }
-        queue = order.map { queue[$0] }
-        queuePositions = order.map { queuePositions[$0] }
-        requeueAfterCurrent()
-    }
-
-    /// Replaces the player items after the current one with `queue`'s.
-    private func requeueAfterCurrent() {
-        let current = currentIndex - enqueuedStartIndex
-        guard enqueuedItems.indices.contains(current) else { return }
-        for item in enqueuedItems[(current + 1)...] {
-            player.remove(item)
-            removeItemEndObserver(for: item)
-        }
-        enqueuedItems.removeSubrange((current + 1)...)
-        var last = enqueuedItems[current]
-        guard currentIndex + 1 < queue.count else { return }
-        for i in (currentIndex + 1)..<queue.count {
-            guard let item = itemFactory?(i) else { continue }
-            AudioEffects.shared.attach(to: item)
-            installItemEndObserver(for: item)
-            player.insert(item, after: last)
-            enqueuedItems.append(item)
-            last = item
-        }
     }
 
     // MARK: - Home-screen widget
@@ -1046,11 +1321,18 @@ public final class PlayerManager {
             // The closure is `@Sendable`, but we're `@MainActor`, so
             // hop back to main explicitly.
             Task { @MainActor in
+                // A restored track waits for its seek; keep its position shown.
+                guard self.pendingStartSeek == nil else { return }
                 let secs = time.seconds
                 self.position = secs
                 if self.duration <= 0,
                    let d = self.player.currentItem?.duration.seconds, d.isFinite, d > 0 {
                     self.duration = d
+                }
+                // Save the position now and then while playing.
+                if self.isPlaying, Date().timeIntervalSince(self.lastPeriodicSave) >= 10 {
+                    self.lastPeriodicSave = Date()
+                    self.controller.scheduleSave()
                 }
                 // Gapless optimisation: ~1s before this item ends, start
                 // loading the next item's asset (see `preWarmNextItem`).
@@ -1059,6 +1341,12 @@ public final class PlayerManager {
                 }
             }
         }
+    }
+
+    /// Where the playing entry's item is among `enqueuedItems`.
+    private var currentEnqueuedIndex: Int? {
+        guard let current = controller.queue.currentEntryId else { return nil }
+        return enqueuedEntryIds.firstIndex(of: current)
     }
 
     /// Pre-warm the *next* queued item's audio asset ~1s before the
@@ -1070,10 +1358,9 @@ public final class PlayerManager {
     /// Additive and guarded: no next item (last track / empty queue) is a
     /// no-op.
     private func preWarmNextItem() {
-        // `enqueuedStartIndex` is where the AVQueuePlayer queue begins, so
-        // the next item to load is one past the currently-playing one.
-        let nextItemIndex = (currentIndex - enqueuedStartIndex) + 1
-        guard nextItemIndex >= 0, nextItemIndex < enqueuedItems.count else { return }
+        guard let current = currentEnqueuedIndex else { return }
+        let nextItemIndex = current + 1
+        guard nextItemIndex < enqueuedItems.count else { return }
         // `AVAsset.loadTracks(withMediaType:)` is cross-platform
         // (iOS 16.4+ / macOS 13.0+, above our iOS 17 / macOS 14 targets)
         // and kicks off an early fetch of the item's audio media. `AVURLAsset`
@@ -1085,6 +1372,76 @@ public final class PlayerManager {
     }
 }
 
+// MARK: - The AVQueuePlayer as the queue's engine
+
+extension PlayerManager: QueueEngine {
+
+    /// Replaces the AVQueuePlayer's items with `entryIds`' (the first plays
+    /// now), from `position` into the first.
+    public func load(entryIds: [String], position: Double, play: Bool) {
+        player.pause()
+        removeAllItems()
+        pendingStartSeek = nil
+        append(entryIds, after: nil)
+        if position > 0, let first = enqueuedItems.first {
+            pendingStartSeek = (ObjectIdentifier(first), position)
+        }
+        if play { player.play() }
+    }
+
+    /// Keeps the playing item (and any items after it that stay the same,
+    /// so the next track's preloading isn't lost) and replaces the rest.
+    public func replaceAfterCurrent(_ entryIds: [String]) {
+        guard let current = currentEnqueuedIndex else { return }
+        let tail = Array(enqueuedEntryIds[(current + 1)...])
+        var keep = 0
+        while keep < tail.count, keep < entryIds.count, tail[keep] == entryIds[keep] { keep += 1 }
+        let cut = current + 1 + keep
+        if cut < enqueuedItems.count {
+            for item in enqueuedItems[cut...] {
+                player.remove(item)
+                removeItemEndObserver(for: item)
+            }
+            enqueuedItems.removeSubrange(cut...)
+            enqueuedEntryIds.removeSubrange(cut...)
+        }
+        append(Array(entryIds[keep...]), after: enqueuedItems.last)
+    }
+
+    /// Adds items for `entryIds` to the end of the AVQueuePlayer's queue.
+    /// `AVQueuePlayer.insert(_:after:)` is the cross-platform API (iOS /
+    /// macOS); the `AVPlayerItemInsertionPoint` variant is iOS-only.
+    private func append(_ entryIds: [String], after last: AVPlayerItem?) {
+        var lastAdded = last
+        for id in entryIds {
+            guard let item = makePlayerItem(entryId: id) else { continue }
+            AudioEffects.shared.attach(to: item)  // equaliser + visualiser
+            installItemEndObserver(for: item)
+            player.insert(item, after: lastAdded)
+            enqueuedItems.append(item)
+            enqueuedEntryIds.append(id)
+            lastAdded = item
+        }
+    }
+
+    private func removeAllItems() {
+        for item in enqueuedItems {
+            player.remove(item)
+            removeItemEndObserver(for: item)
+        }
+        enqueuedItems.removeAll(keepingCapacity: true)
+        enqueuedEntryIds.removeAll(keepingCapacity: true)
+    }
+
+    /// Forgets items the AVQueuePlayer has finished with (up to, not
+    /// including, `index`).
+    fileprivate func dropPlayedItems(before index: Int) {
+        guard index > 0, index <= enqueuedItems.count else { return }
+        for item in enqueuedItems[..<index] { removeItemEndObserver(for: item) }
+        enqueuedItems.removeSubrange(..<index)
+        enqueuedEntryIds.removeSubrange(..<index)
+    }
+}
 // MARK: - Per-item end-of-track observers
 
 private extension PlayerManager {
@@ -1100,9 +1457,9 @@ private extension PlayerManager {
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self, weak item] _ in
             Task { @MainActor in
-                self?.handleItemDidPlayToEndTime()
+                if let self, let item { self.handleItemDidPlayToEndTime(item) }
             }
         }
         // A track that stops partway (stream dropped, audio output failed) or
@@ -1118,8 +1475,14 @@ private extension PlayerManager {
             }
         }
         let status = item.observe(\.status, options: [.new]) { [weak self] item, _ in
-            guard item.status == .failed else { return }
-            Task { @MainActor [weak self] in self?.handleItemFailed(item) }
+            switch item.status {
+            case .failed:
+                Task { @MainActor [weak self] in self?.handleItemFailed(item) }
+            case .readyToPlay:
+                Task { @MainActor [weak self] in self?.itemReady(item) }
+            default:
+                break
+            }
         }
         itemFailureObservers[ObjectIdentifier(item)] = (failed, status)
     }
@@ -1137,8 +1500,7 @@ private extension PlayerManager {
     /// Only the playing track's failure stops playback; a later track that
     /// fails to load early is dealt with when (if) it comes up.
     func handleItemFailed(_ item: AVPlayerItem) {
-        let index = currentIndex - enqueuedStartIndex
-        guard enqueuedItems.indices.contains(index), enqueuedItems[index] === item else { return }
+        guard let index = currentEnqueuedIndex, enqueuedItems[index] === item else { return }
         failedDetail = Self.failureDetail(of: item, expensive: NetworkMonitor.shared.isExpensive)
         print("[PlayerManager] track failed: \(failedDetail)")
         trackFailed()
@@ -1187,17 +1549,33 @@ private extension PlayerManager {
         }
     }
 
-    private func handleItemDidPlayToEndTime() {
+    /// A restored queue's track (or a seek made while loading) goes to its
+    /// position once its item can seek.
+    func itemReady(_ item: AVPlayerItem) {
+        guard let pending = pendingStartSeek, pending.item == ObjectIdentifier(item) else { return }
+        item.seek(to: CMTime(seconds: pending.seconds, preferredTimescale: CMTimeScale(1000))) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.pendingStartSeek?.item == ObjectIdentifier(item) else { return }
+                self.pendingStartSeek = nil
+            }
+        }
+    }
+
+    /// The playing item played to its end. The AVQueuePlayer has already
+    /// moved on to the next item it holds; the queue decides whether that's
+    /// right (it is unless Repeat One, Repeat All going round, or an entry
+    /// that can't play now).
+    func handleItemDidPlayToEndTime(_ item: AVPlayerItem) {
+        guard let index = enqueuedItems.firstIndex(where: { $0 === item }),
+              enqueuedEntryIds[index] == playQueue.currentEntryId else { return }
         reportStopped(atEnd: true)
-        if repeatMode == .one {
-            jump(to: currentIndex)
-        } else if currentIndex + 1 < queue.count {
-            // AVQueuePlayer has already moved on; just sync our state.
-            advanceTo(newIndex: currentIndex + 1, startOfTrack: true)
-        } else if repeatMode == .all {
-            jump(to: 0)
-        } else {
+        let engineNext = enqueuedEntryIds.indices.contains(index + 1) ? enqueuedEntryIds[index + 1] : nil
+        let transition = controller.trackEnded(engineNext: engineNext)
+        if transition == .advanced { dropPlayedItems(before: index + 1) }
+        if transition == .ended {
             finishQueue()
+        } else {
+            apply(transition)
         }
     }
 }
@@ -1235,18 +1613,14 @@ extension PlayerManager {
     /// server until Play (`resume` starts the report).
     func finishQueue() {
         isNowPlayingPresented = false
-        guard !queue.isEmpty else {
+        guard !playQueue.isEmpty else {
             pause()
             return
         }
-        enqueue(from: 0, count: queue.count) // pauses the player
-        currentIndex = 0
-        currentTrack = queue[0]
-        duration = queue[0].duration
-        position = 0
-        isPlaying = false
-        updateNowPlayingForCurrent()
-        nowPlaying.updateState(isPlaying: false, elapsedTime: 0)
+        if playQueue.currentEntryId != playQueue.playOrder.first || enqueuedItems.isEmpty {
+            _ = controller.finish()
+        }
+        apply(.ended)
     }
 }
 
@@ -1342,72 +1716,6 @@ private extension PlaybackTrack {
     }
 }
 
-// MARK: - Standalone queue planning
-
-/// Queue indices that play after `current`. With Repeat All the queue
-/// wraps, so tracks before `current` follow; otherwise it stops at the end.
-/// Repeat One still lists what follows, for when the user skips.
-func upNextIndices(count: Int, current: Int, repeatMode: RepeatMode) -> [Int] {
-    guard count > 0, current >= 0, current < count else { return [] }
-    let after = Array((current + 1)..<count)
-    return repeatMode == .all ? after + Array(0..<current) : after
-}
-
-/// Queue order for Maniac Mode: tracks up to and including `current`
-/// stay put (already played or playing); the rest go back in album or
-/// playlist order. `positions` is each queue entry's place in that order
-/// (a place, not a track ID: a playlist can hold a song twice). Returns
-/// indices into `positions`.
-func orderAfterCurrent(positions: [Int], current: Int) -> [Int] {
-    guard current >= 0, current < positions.count else { return Array(positions.indices) }
-    let rest = (current + 1..<positions.count).sorted {
-        (positions[$0], $0) < (positions[$1], $1)
-    }
-    return Array(0...current) + rest
-}
-
-/// Decides the queue order and start index for a "play" call, given
-/// the fetched track list, an optional index to play first, and the
-/// shuffle flag. Defined as a top-level function so it can be
-/// unit-tested without instantiating a `PlayerManager` (which is
-/// `@MainActor`).
-///
-///   - Shuffle off: preserves the fetched order and starts at
-///     `forcedStartIndex` (0 when `nil`) — so "tap track N" plays N.
-///   - Shuffle on + a valid `forcedStartIndex`: that track is forced
-///     to the head and the *remaining* tracks are randomized,
-///     starting at 0.
-///   - Shuffle on + `nil`/out-of-range `forcedStartIndex`: the whole
-///     list is randomized, starting at 0.
-func planQueue<Track>(
-    tracks: [Track],
-    forcedStartIndex: Int?,
-    shuffleOn: Bool
-) -> (tracks: [Track], startIndex: Int) {
-    guard shuffleOn else {
-        return (tracks, forcedStartIndex ?? 0)
-    }
-    if let forcedStartIndex, forcedStartIndex < tracks.count, forcedStartIndex >= 0 {
-        var arr = tracks
-        let first = arr.remove(at: forcedStartIndex)
-        arr.shuffle()
-        return ([first] + arr, 0)
-    }
-    var arr = tracks
-    arr.shuffle()
-    return (arr, 0)
-}
-
-/// Pure shuffle-with-forced-first helper — the `tracks` half of
-/// `planQueue`. Kept top-level for the existing `applyShuffle`
-/// unit tests.
-func applyShuffle(
-    on tracks: [JellyfinTrack],
-    forcedFirst: Int?,
-    shuffleOn: Bool
-) -> [JellyfinTrack] {
-    planQueue(tracks: tracks, forcedStartIndex: forcedFirst, shuffleOn: shuffleOn).tracks
-}
 
 // MARK: - Gapless pre-load
 

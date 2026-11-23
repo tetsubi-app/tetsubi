@@ -14,6 +14,8 @@ import gg.dekiru.musicplayer.data.settings.desktopEnvironment
 import gg.dekiru.musicplayer.resources.Res
 import gg.dekiru.musicplayer.resources.disc
 import org.jetbrains.compose.resources.painterResource
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.awt.Dimension
 
 fun main() {
@@ -22,6 +24,8 @@ fun main() {
     application {
         Window(
             onCloseRequest = {
+                // The queue's last point, written before the app goes (a second at most).
+                runBlocking { withTimeoutOrNull(1_000) { session.saveQueue() } }
                 // Stops libmpv cleanly before the app goes.
                 (environment.playerEngine as? AutoCloseable)?.close()
                 exitApplication()

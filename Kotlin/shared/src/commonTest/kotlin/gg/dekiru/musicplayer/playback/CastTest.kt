@@ -272,4 +272,30 @@ class CastTest {
         assertTrue(s.engine.playing)
         assertFalse(s.player.isLoading)
     }
+
+    // The Cast device's window of a long queue
+
+    @Test
+    fun aShortQueueGoesToTheReceiverWhole() {
+        assertEquals((0 until 26).toList(), CastWindow.indices(26, 20, RepeatMode.OFF))
+        assertFalse(CastWindow.isPartial(26))
+        assertEquals(emptyList(), CastWindow.indices(0, 0, RepeatMode.OFF))
+    }
+
+    @Test
+    fun aLongQueueIsAWindowAroundThePlayingItem() {
+        assertEquals((0..20).toList(), CastWindow.indices(100, 0, RepeatMode.OFF))
+        assertEquals((45..70).toList(), CastWindow.indices(100, 50, RepeatMode.OFF))
+        assertEquals((90..99).toList(), CastWindow.indices(100, 95, RepeatMode.OFF), "stops at the end")
+        assertEquals((90..99).toList() + (0..15).toList(), CastWindow.indices(100, 95, RepeatMode.ALL), "goes round with Repeat All")
+        assertTrue(CastWindow.isPartial(27))
+    }
+
+    @Test
+    fun sharedStartGoesByEntry() {
+        fun e(id: String) = EngineItem("track", "u", "", "", "", "", 1, entryId = id)
+        assertEquals(2, CastWindow.sharedStart(listOf(e("a"), e("b"), e("c")), listOf(e("a"), e("b"), e("x"))))
+        assertEquals(0, CastWindow.sharedStart(listOf(e("a")), listOf(e("b"))))
+        assertEquals(1, CastWindow.sharedStart(listOf(e("a")), listOf(e("a"), e("b"))))
+    }
 }

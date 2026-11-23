@@ -305,7 +305,7 @@ private fun Titles(
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
-        if (player.albumLength > 0) {
+        if (player.queueLength > 0) {
             // Re-worked out every 15 s so the finish time keeps up while paused.
             val now by produceState(Clock.System.now()) {
                 while (true) {
@@ -313,13 +313,13 @@ private fun Titles(
                     value = Clock.System.now()
                 }
             }
-            val end = (now + player.albumRemaining.seconds).toLocalDateTime(TimeZone.currentSystemDefault())
+            val end = (now + player.queueRemaining.seconds).toLocalDateTime(TimeZone.currentSystemDefault())
             val finish = "${end.hour.toString().padStart(2, '0')}:${end.minute.toString().padStart(2, '0')}"
             val quality = QualityText.of(track, qualityDetail.showsDetail)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (quality != null) QualityLabel(quality, qualityDetail, accent)
                 Text(
-                    "${if (quality != null) "      " else ""}Duration: ${formatAlbumDuration(player.albumLength)}      Ends: $finish",
+                    "${if (quality != null) "      " else ""}Duration: ${formatAlbumDuration(player.queueLength)}      Ends: $finish",
                     color = infoColor, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
@@ -534,11 +534,12 @@ private fun UpNext(player: PlayerController) {
         if (upcoming.isEmpty()) {
             Text("Last track", color = Color.White.copy(alpha = 0.5f), fontSize = 15.sp, modifier = Modifier.padding(vertical = 6.dp))
         }
-        upcoming.forEachIndexed { i, (index, track) ->
+        // The queue's upcoming entries (other albums too), read-only for now; tap one to play it.
+        upcoming.forEachIndexed { i, (entryId, track) ->
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = !player.maniacMode, role = Role.Button) { player.skipTo(index) }
+                    .clickable(enabled = !player.maniacMode, role = Role.Button) { player.skipTo(entryId) }
                     .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

@@ -140,6 +140,10 @@ class MpvEngine(
         if (isSupported) playback.replaceAfterCurrent(items)
     }
 
+    override fun replaceAroundCurrent(before: List<EngineItem>, after: List<EngineItem>) {
+        if (isSupported) playback.replaceAroundCurrent(before, after)
+    }
+
     override fun play() {
         if (isSupported) playback.play()
     }
@@ -265,7 +269,16 @@ class MpvEngine(
                     ownSeeks.set(0)
                     val pos = LongByReference(-1)
                     val code = library.mpv_get_property(handle, "playlist-pos", MpvLibrary.FORMAT_INT64, pos)
-                    deliver(MpvEvent.StartFile(if (code < 0) -1 else pos.value.toInt()))
+                    val position = if (code < 0) -1 else pos.value.toInt()
+                    // What the entry was loaded from: the queue may have moved round it meanwhile.
+                    val path = if (position < 0) null else library.mpv_get_property_string(handle, "playlist/$position/filename")?.let {
+                        try {
+                            it.getString(0, "UTF-8")
+                        } finally {
+                            library.mpv_free(it)
+                        }
+                    }
+                    deliver(MpvEvent.StartFile(position, path))
                 }
                 MpvLibrary.EVENT_END_FILE -> event.data?.let { data ->
                     val reason = MpvEndReason.of(data.getInt(0))

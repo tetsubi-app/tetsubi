@@ -273,14 +273,14 @@ public struct NowPlayingView: View {
                     .font(.plex(.subheadline, scale: s))
                     .foregroundStyle(Color.albumYearText)
                     .lineLimit(1)
-                if manager.albumLength > 0 {
+                if manager.queueLength > 0 {
                     // One line: album duration, then the finish time.
                     // Re-evaluated periodically so the estimate keeps up while paused.
                     TimelineView(.periodic(from: .now, by: 15)) { context in
-                        let end = context.date.addingTimeInterval(manager.albumRemaining)
+                        let end = context.date.addingTimeInterval(manager.queueRemaining)
                         HStack(spacing: 16 * s) {
                             qualityText(for: track)
-                            Text("Duration: \(Self.formatAlbumDuration(manager.albumLength))")
+                            Text("Duration: \(Self.formatAlbumDuration(manager.queueLength))")
                             Text("Ends: \(end.formatted(date: .omitted, time: .shortened))")
                         }
                         .font(.plex(.caption, scale: s))
@@ -575,11 +575,11 @@ public struct NowPlayingView: View {
                         .foregroundStyle(.white.opacity(0.5))
                         .padding(.vertical, 6 * s)
                 } else {
-                    ForEach(upcoming, id: \.index) { item in
+                    ForEach(upcoming, id: \.entryId) { item in
                         upNextRow(item.track, s, onTap: manager.maniacMode ? nil : {
-                            manager.skip(toQueueIndex: item.index)
+                            manager.skipTo(entryId: item.entryId)
                         })
-                        if item.index != upcoming.last?.index {
+                        if item.entryId != upcoming.last?.entryId {
                             Divider().overlay(Color.white.opacity(0.1))
                         }
                     }

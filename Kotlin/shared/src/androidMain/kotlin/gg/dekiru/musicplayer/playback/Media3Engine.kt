@@ -55,6 +55,13 @@ import kotlinx.coroutines.launch
  * they come back ([CastHandover]). Everything here then works on the
  * [activePlayer], whose events reach [PlayerController] as ExoPlayer's do,
  * and the session's player follows it. Main thread only, as Media3 requires.
+ *
+ * The queue is the controller's play order (several albums, shuffled or
+ * not). ExoPlayer holds all of it, item for item, so its indices are the
+ * queue's; a Cast device holds a window of it ([CastWindow], [castItems]),
+ * so its indices are mapped through the items' queue entries. Everything
+ * kept per item (a restarted stream's start, the item the Cast device
+ * ended on) is kept by queue entry, as edits move items about.
  */
 @UnstableApi
 class Media3Engine(private val context: Context) : PlayerEngine {
@@ -123,11 +130,14 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
     override var listener: EngineListener? = null
 
-    /** The queue as given: each item's own stream, from 0:00. */
+    /** The queue as given (ExoPlayer's playlist, item for item): each item's own stream, from 0:00. */
     private val queueItems = mutableListOf<EngineItem>()
 
-    /** Per queue index: where a restarted converted stream begins, in ms (absent: 0). */
-    private val startOffsets = mutableMapOf<Int, Long>()
+    /** Per queue entry: where a restarted converted stream begins, in ms (absent: 0). */
+    private val startOffsets = mutableMapOf<String, Long>()
+
+    /** What the Cast device holds, in its order: the whole queue or a window of it ([CastWindow]). */
+    private val castItems = mutableListOf<EngineItem>()
 
     /** True while swapping in a restarted stream: that's not a change of track. */
     private var restarting = false
@@ -168,11 +178,33 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     private val active: Player get() = _activePlayer.value
     private val casting: Boolean get() = active !== player
 
-    /** The Cast device played the queue to its end: it holds nothing to play until Play loads it again. */
-    private var castEnded = false
+    /**
+     * The Cast device played the queue to its end: it holds nothing to play
+     * until Play loads it again from this queue entry (the track Play starts
+     * from). Null otherwise.
+     */
+    private var castEndedEntry: String? = null
+    private val castEnded: Boolean get() = castEndedEntry != null
 
-    /** While [castEnded]: the track Play starts from. */
-    private var castEndedIndex = 0
+    /** The items `p` holds: ExoPlayer the whole queue, the Cast device its window. */
+    private fun itemsOn(p: Player): List<EngineItem> = if (p === player) queueItems else castItems
+
+    private fun itemAt(p: Player, index: Int): EngineItem? = itemsOn(p).getOrNull(index)
+
+    /** The queue index of an entry; -1 when it isn't queued. */
+    private fun queueIndexOf(entryId: String?): Int = if (entryId == null) -1 else queueItems.indexOfFirst { it.entryId == entryId }
+
+    private fun offsetOf(item: EngineItem?): Long = item?.let { startOffsets[it.entryId] } ?: 0L
+
+    /** The entry playing (or, on a Cast device that finished, the one Play starts from). */
+    private fun currentEntryId(): String? = when {
+        casting && castEnded -> castEndedEntry
+        else -> itemAt(active, active.currentMediaItemIndex)?.entryId
+    }
+
+    /** The Cast device's repeat mode: its own Repeat All would only go round a window, so windows go round by [refreshCastWindow]. */
+    private fun castRepeat(): Int =
+        if (repeat == RepeatMode.ALL && CastWindow.isPartial(queueItems.size)) Player.REPEAT_MODE_OFF else repeat.media3
 
     /** Each player with converted streams made seekable (see [Seekable]). */
     private val seekables = mutableMapOf<Player, Player>()
@@ -192,8 +224,9 @@ class Media3Engine(private val context: Context) : PlayerEngine {
      */
     private inner class Seekable(private val wrapped: Player) : ForwardingPlayer(wrapped) {
         private val onCast get() = wrapped !== player
-        private fun offset() = startOffsets[currentMediaItemIndex] ?: 0L
-        private fun converted() = queueItems.getOrNull(currentMediaItemIndex)?.takeIf { it.seeksByRestart(onCast) && it.durationMillis > 0 }
+        private fun item() = itemAt(wrapped, currentMediaItemIndex)
+        private fun offset() = offsetOf(item())
+        private fun converted() = item()?.takeIf { it.seeksByRestart(onCast) && it.durationMillis > 0 }
 
         override fun getCurrentPosition() = super.getCurrentPosition() + offset()
         override fun getContentPosition() = super.getContentPosition() + offset()
@@ -245,8 +278,9 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     }
 
     /**
-     * Seeks on the active player, restarting a converted stream at the new
-     * point. While a dropped stream waits for its next try, the try comes now.
+     * Seeks on the active player (`index`: in that player's list), restarting
+     * a converted stream at the new point. While a dropped stream waits for
+     * its next try, the try comes now.
      */
     private fun seekWithin(index: Int, positionMs: Long) {
         val from = active.currentMediaItemIndex
@@ -258,16 +292,16 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     private fun moveWithin(index: Int, positionMs: Long) {
         val p = active
         if (casting && castEnded) {
-            castEndedSkip(index)
+            castEndedSkip(castItems.getOrNull(index)?.entryId)
             return
         }
-        val item = queueItems.getOrNull(index)
+        val item = itemAt(p, index)
         if (item == null || !item.seeksByRestart(casting)) {
             p.seekTo(index, positionMs)
             return
         }
         val target = positionMs.coerceIn(0, (item.durationMillis - 1_000).coerceAtLeast(0))
-        if (target == 0L && (startOffsets[index] ?: 0L) == 0L) {
+        if (target == 0L && offsetOf(item) == 0L) {
             // Its own stream, from the start: an ordinary move.
             p.seekTo(index, 0)
             return
@@ -275,12 +309,17 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         if (casting) {
             // The receiver's queue is loaded again, this item's stream started at the point:
             // one request, where swapping one item would be two that race.
-            loadOnCast(PlaybackSnapshot(index, target, p.playWhenReady, repeat))
+            val queueIndex = queueIndexOf(item.entryId)
+            if (queueIndex < 0) return
+            val moved = p.currentMediaItemIndex != index
+            loadOnCast(PlaybackSnapshot(queueIndex, target, p.playWhenReady, repeat))
+            // A new load isn't reported as a change of track: say so here.
+            if (moved) listener?.onIndexChanged(queueIndex, automatic = false)
             return
         }
         restarting = true
         try {
-            if (target == 0L) startOffsets.remove(index) else startOffsets[index] = target
+            if (target == 0L) startOffsets.remove(item.entryId) else startOffsets[item.entryId] = target
             player.replaceMediaItem(index, mediaItem(item, StreamUrls.startingAt(item.url, target), onCast = false))
             if (player.currentMediaItemIndex != index) player.seekTo(index, 0)
         } finally {
@@ -291,10 +330,12 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     /** Puts every other track's own stream back, so Previous or Repeat start it from 0:00. */
     private fun restoreOtherTracks() {
         val p = active
-        val current = p.currentMediaItemIndex
-        for (index in startOffsets.keys.filter { it != current }) {
-            startOffsets.remove(index)
-            queueItems.getOrNull(index)?.let { p.replaceMediaItem(index, mediaItem(it, it.url(casting), casting)) }
+        val items = itemsOn(p)
+        val current = items.getOrNull(p.currentMediaItemIndex)?.entryId
+        for (entry in startOffsets.keys.filter { it != current }) {
+            startOffsets.remove(entry)
+            val index = items.indexOfFirst { it.entryId == entry }
+            if (index >= 0) p.replaceMediaItem(index, mediaItem(items[index], items[index].url(casting), casting))
         }
     }
 
@@ -310,7 +351,11 @@ class Media3Engine(private val context: Context) : PlayerEngine {
                 reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
             // Skips and seeks are logged where they're asked for (seekWithin).
             if (automatic && source === player) beginStart(StreamStartLog.Reason.NEXT, alreadyPlaying = player.isPlaying)
-            listener?.onIndexChanged(source.currentMediaItemIndex, automatic)
+            val entry = itemAt(source, source.currentMediaItemIndex)?.entryId
+            // The Cast device's window moves along with it.
+            if (source !== player) refreshCastWindow()
+            val index = queueIndexOf(entry)
+            if (index >= 0) listener?.onIndexChanged(index, automatic)
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -397,12 +442,12 @@ class Media3Engine(private val context: Context) : PlayerEngine {
      */
     private fun holdPosition(index: Int) {
         val item = queueItems.getOrNull(index)?.takeIf { it.seeksByRestart(casting = false) } ?: return
-        val offset = startOffsets[index] ?: 0L
+        val offset = offsetOf(item)
         val position = StreamReconnect.resumePosition(offset, player.currentPosition, item.durationMillis)
         if (position == offset) return // A try that failed before playing: it already starts there.
         restarting = true
         try {
-            if (position == 0L) startOffsets.remove(index) else startOffsets[index] = position
+            if (position == 0L) startOffsets.remove(item.entryId) else startOffsets[item.entryId] = position
             player.replaceMediaItem(index, mediaItem(item, StreamUrls.startingAt(item.url, position), onCast = false))
             player.seekTo(index, 0)
         } finally {
@@ -445,8 +490,15 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     private fun castIdle(cast: Player) {
         when (castConnection?.idleReason()) {
             MediaStatus.IDLE_REASON_FINISHED -> if (!castEnded && !cast.hasNextMediaItem() && queueItems.isNotEmpty()) {
-                castEnded = true
-                castEndedIndex = cast.currentMediaItemIndex.coerceIn(0, queueItems.lastIndex)
+                val entry = castItems.getOrNull(cast.currentMediaItemIndex)?.entryId
+                val index = queueIndexOf(entry)
+                if (index >= 0 && index < queueItems.lastIndex) {
+                    // A window that ran out before the queue did (it's normally moved along first): the rest follows.
+                    loadOnCast(PlaybackSnapshot(index + 1, 0, playWhenReady = true, repeat))
+                    listener?.onIndexChanged(index + 1, automatic = true)
+                    return
+                }
+                castEndedEntry = entry?.takeIf { index >= 0 } ?: queueItems.first().entryId
                 listener?.onEnded()
             }
             MediaStatus.IDLE_REASON_ERROR -> listener?.onError("Playback failed on the Cast device.")
@@ -454,10 +506,60 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     }
 
     /** A move while the Cast device holds nothing to play: remembered for Play. */
-    private fun castEndedSkip(index: Int) {
-        if (index !in queueItems.indices || index == castEndedIndex) return
-        castEndedIndex = index
+    private fun castEndedSkip(entryId: String?) {
+        val index = queueIndexOf(entryId)
+        if (index < 0 || entryId == castEndedEntry) return
+        castEndedEntry = entryId
         listener?.onIndexChanged(index, automatic = false)
+    }
+
+    /**
+     * Keeps the Cast device's list the window around its playing item: the
+     * items after it as the queue has them (those already there in the same
+     * order are left alone, so the next stays loaded), the ones before
+     * trimmed (or replaced when the queue changed there), and its repeat
+     * mode. Called as it moves on and after the queue changes.
+     */
+    private fun refreshCastWindow() {
+        val cast = remote ?: return
+        if (!casting || castEnded) return
+        val cur = cast.currentMediaItemIndex
+        val currentItem = castItems.getOrNull(cur) ?: return
+        val queueIndex = queueIndexOf(currentItem.entryId)
+        if (queueIndex < 0) return
+        val window = CastWindow.indices(queueItems.size, queueIndex, repeat).map { queueItems[it] }
+        val at = window.indexOfFirst { it.entryId == currentItem.entryId }
+        val wantedBefore = window.take(at)
+        val wantedAfter = window.drop(at + 1)
+        replaceFollowing(cast, cur, castItems.drop(cur + 1), wantedAfter, onCast = true)
+        val oldBefore = castItems.take(cur)
+        var before = oldBefore
+        if (oldBefore.map { it.entryId }.takeLast(wantedBefore.size) == wantedBefore.map { it.entryId }) {
+            // Only played items to drop: a few at a time.
+            val extra = oldBefore.size - wantedBefore.size
+            if (extra > CastWindow.BEHIND) {
+                cast.removeMediaItems(0, extra)
+                before = oldBefore.drop(extra)
+            }
+        } else {
+            if (cur > 0) cast.removeMediaItems(0, cur)
+            if (wantedBefore.isNotEmpty()) cast.addMediaItems(0, wantedBefore.map { mediaItem(it, it.url(true), onCast = true) })
+            before = wantedBefore
+        }
+        castItems.clear()
+        castItems += before + currentItem + wantedAfter
+        cast.repeatMode = castRepeat()
+    }
+
+    /**
+     * Makes the items after `p`'s item `current` the `wanted` ones: those
+     * that already follow in the same order stay (the next keeps what it has
+     * loaded, for a gapless join), the rest is removed and added.
+     */
+    private fun replaceFollowing(p: Player, current: Int, existing: List<EngineItem>, wanted: List<EngineItem>, onCast: Boolean) {
+        val keep = CastWindow.sharedStart(existing, wanted)
+        if (keep < existing.size) p.removeMediaItems(current + 1 + keep, p.mediaItemCount)
+        if (keep < wanted.size) p.addMediaItems(wanted.drop(keep).map { mediaItem(it, it.url(onCast), onCast) })
     }
 
     init {
@@ -489,31 +591,42 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         endStart()
         if (source === player) player.stop()
         startOffsets.clear()
-        castEnded = false
+        castEndedEntry = null
+        castItems.clear()
         if (!hadQueue) return
         if (target === cast) loadOnCast(snapshot) else loadHere(snapshot)
     }
 
     /** Where `source` is: its track, the point in it (with a restarted stream's start), play/pause. */
+    /** Where `source` is (a queue index): its track, the point in it (with a restarted stream's start), play/pause. */
     private fun snapshotOf(source: Player): PlaybackSnapshot {
-        if (source !== player && castEnded) return PlaybackSnapshot(castEndedIndex, 0, playWhenReady = false, repeat)
-        val index = source.currentMediaItemIndex
+        if (source !== player && castEnded) {
+            return PlaybackSnapshot(queueIndexOf(castEndedEntry).coerceAtLeast(0), 0, playWhenReady = false, repeat)
+        }
+        val item = itemAt(source, source.currentMediaItemIndex)
+        val index = queueIndexOf(item?.entryId).coerceAtLeast(0)
         val ended = source.playbackState == Player.STATE_ENDED
-        val position = if (ended) 0 else source.currentPosition + (startOffsets[index] ?: 0L)
+        val position = if (ended) 0 else source.currentPosition + offsetOf(item)
         return PlaybackSnapshot(index, position, playWhenReady = source.playWhenReady && !ended, repeat)
     }
 
-    /** Loads the queue on the Cast device from `at`. */
+    /** Loads the queue (the window around `at`, a queue index) on the Cast device from `at`. */
     private fun loadOnCast(at: PlaybackSnapshot) {
         val cast = remote ?: return
-        val plan = CastHandover.plan(queueItems, at, toCast = true) ?: return
+        if (queueItems.isEmpty()) return
+        val index = at.index.coerceIn(0, queueItems.lastIndex)
+        val window = CastWindow.indices(queueItems.size, index, repeat)
+        val items = window.map { queueItems[it] }
+        val plan = CastHandover.plan(items, at.copy(index = window.indexOf(index)), toCast = true) ?: return
         startOffsets.clear()
-        if (plan.startOffsetMillis > 0) startOffsets[plan.startIndex] = plan.startOffsetMillis
-        castEnded = false
+        if (plan.startOffsetMillis > 0) startOffsets[items[plan.startIndex].entryId] = plan.startOffsetMillis
+        castEndedEntry = null
+        castItems.clear()
+        castItems += items
         // Both are sent with the queue (autoplay and the queue's repeat mode).
-        cast.repeatMode = plan.repeat.media3
+        cast.repeatMode = castRepeat()
         if (cast.playWhenReady != plan.playWhenReady) cast.playWhenReady = plan.playWhenReady
-        cast.setMediaItems(queueItems.mapIndexed { i, item -> mediaItem(item, plan.urls[i], onCast = true) }, plan.startIndex, plan.startPositionMillis)
+        cast.setMediaItems(items.mapIndexed { i, item -> mediaItem(item, plan.urls[i], onCast = true) }, plan.startIndex, plan.startPositionMillis)
         cast.volume = volume
     }
 
@@ -521,7 +634,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     private fun loadHere(at: PlaybackSnapshot) {
         val plan = CastHandover.plan(queueItems, at, toCast = false) ?: return
         startOffsets.clear()
-        if (plan.startOffsetMillis > 0) startOffsets[plan.startIndex] = plan.startOffsetMillis
+        if (plan.startOffsetMillis > 0) startOffsets[queueItems[plan.startIndex].entryId] = plan.startOffsetMillis
         player.repeatMode = plan.repeat.media3
         player.volume = volume
         player.setMediaItems(queueItems.mapIndexed { i, item -> mediaItem(item, plan.urls[i], onCast = false) }, plan.startIndex, plan.startPositionMillis)
@@ -552,15 +665,30 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     }
 
     override fun replaceAfterCurrent(items: List<EngineItem>) {
-        val p = active
-        val current = if (casting && castEnded) castEndedIndex else p.currentMediaItemIndex
-        if (!(casting && castEnded)) {
-            p.removeMediaItems(current + 1, p.mediaItemCount)
-            p.addMediaItems(items.map { mediaItem(it, it.url(casting), casting) })
+        val current = queueIndexOf(currentEntryId())
+        if (current < 0) return
+        replaceAroundCurrent(queueItems.take(current), items)
+    }
+
+    override fun replaceAroundCurrent(before: List<EngineItem>, after: List<EngineItem>) {
+        val current = queueIndexOf(currentEntryId())
+        if (current < 0) return
+        val currentItem = queueItems[current]
+        if (!casting) {
+            // ExoPlayer holds the queue item for item: the playing one stays, everything round it changes.
+            if (queueItems.take(current).map { it.entryId } != before.map { it.entryId }) {
+                if (current > 0) player.removeMediaItems(0, current)
+                if (before.isNotEmpty()) player.addMediaItems(0, before.map { mediaItem(it, it.url, onCast = false) })
+            }
+            replaceFollowing(player, before.size, queueItems.drop(current + 1), after, onCast = false)
         }
-        while (queueItems.size > current + 1) queueItems.removeAt(queueItems.lastIndex)
-        queueItems += items
-        startOffsets.keys.removeAll { it > current }
+        queueItems.clear()
+        queueItems += before + currentItem + after
+        val queued = queueItems.mapTo(HashSet()) { it.entryId }
+        startOffsets.keys.retainAll(queued)
+        if (castEndedEntry != null && castEndedEntry !in queued) castEndedEntry = currentItem.entryId
+        // While casting ExoPlayer holds nothing that plays: it's loaded from the queue when casting ends.
+        if (casting) refreshCastWindow()
     }
 
     override fun updateCastUrls(urls: Map<String, String>) {
@@ -574,7 +702,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
     override fun play() {
         if (casting) {
-            if (castEnded) loadOnCast(PlaybackSnapshot(castEndedIndex, 0, playWhenReady = true, repeat)) else active.play()
+            if (castEnded) loadOnCast(PlaybackSnapshot(queueIndexOf(castEndedEntry).coerceAtLeast(0), 0, playWhenReady = true, repeat)) else active.play()
             return
         }
         if (player.playbackState == Player.STATE_IDLE) {
@@ -589,12 +717,30 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
     override fun pause() = active.pause()
     override fun seekTo(millis: Long) = seekable.seekTo(millis)
-    override fun skipTo(index: Int) = seekable.seekTo(index, 0)
+    /** `index`: a queue index (on a Cast device, mapped to its window; outside it, the window moves there). */
+    override fun skipTo(index: Int) {
+        val item = queueItems.getOrNull(index) ?: return
+        if (!casting) {
+            seekable.seekTo(index, 0)
+            return
+        }
+        if (castEnded) {
+            castEndedSkip(item.entryId)
+            return
+        }
+        val onCast = castItems.indexOfFirst { it.entryId == item.entryId }
+        if (onCast >= 0) {
+            seekable.seekTo(onCast, 0)
+        } else {
+            loadOnCast(PlaybackSnapshot(index, 0, active.playWhenReady, repeat))
+            listener?.onIndexChanged(index, automatic = false)
+        }
+    }
 
     override fun setRepeatMode(mode: RepeatMode) {
         repeat = mode
         if (casting && castEnded) return
-        active.repeatMode = mode.media3
+        if (casting) refreshCastWindow() else player.repeatMode = mode.media3
     }
 
     override fun setVolume(volume: Float) {
@@ -616,8 +762,9 @@ class Media3Engine(private val context: Context) : PlayerEngine {
             active.clearMediaItems()
         }
         queueItems.clear()
+        castItems.clear()
         startOffsets.clear()
-        castEnded = false
+        castEndedEntry = null
     }
 
     override val positionMillis: Long get() = if (casting && castEnded) 0 else seekable.currentPosition
@@ -696,7 +843,8 @@ class Media3Engine(private val context: Context) : PlayerEngine {
      * TV's cover carries the token.
      */
     private fun mediaItem(item: EngineItem, url: String, onCast: Boolean) = MediaItem.Builder()
-        .setMediaId(item.id)
+        // The queue entry: unique, where a track may be queued twice (the session's queue, Android Auto's).
+        .setMediaId(item.entryId)
         .setUri(url)
         .apply { if (onCast) setMimeType(StreamUrls.mimeType(url)) }
         .setMediaMetadata(

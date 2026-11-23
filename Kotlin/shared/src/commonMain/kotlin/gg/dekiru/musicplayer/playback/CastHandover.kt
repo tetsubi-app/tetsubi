@@ -56,3 +56,51 @@ object CastHandover {
         )
     }
 }
+
+/**
+ * Which queue items a Cast device holds: the whole queue when it's short,
+ * else a window around the playing item (a few behind for Previous, the
+ * next [AHEAD] ahead), moved along as it plays (`Media3Engine`). A long
+ * queue (several albums) in one load could be more than the receiver
+ * takes. Plain Kotlin, so it's tested on its own.
+ */
+object CastWindow {
+    /** Items kept before the playing one (for Previous). */
+    const val BEHIND = 5
+
+    /** Items queued after the playing one. */
+    const val AHEAD = 20
+
+    /** A queue this long or shorter goes to the receiver whole. */
+    const val WHOLE = BEHIND + 1 + AHEAD
+
+    /** Whether a queue of `size` is sent in windows (the receiver's own Repeat All would only go round the window). */
+    fun isPartial(size: Int): Boolean = size > WHOLE
+
+    /**
+     * The queue indices the receiver holds, in its order, with `current`
+     * among them: all of them for a short queue; else up to [BEHIND] before
+     * and [AHEAD] after, going round to the start with Repeat All.
+     */
+    fun indices(size: Int, current: Int, repeat: RepeatMode): List<Int> {
+        if (size <= 0) return emptyList()
+        if (!isPartial(size)) return (0 until size).toList()
+        val at = current.coerceIn(0, size - 1)
+        val ahead = (1..AHEAD).mapNotNull { step ->
+            val i = at + step
+            when {
+                i < size -> i
+                repeat == RepeatMode.ALL -> i - size
+                else -> null
+            }
+        }
+        return (maxOf(0, at - BEHIND)..at).toList() + ahead
+    }
+
+    /** How many items `existing` and `wanted` share at their start, by queue entry. */
+    fun sharedStart(existing: List<EngineItem>, wanted: List<EngineItem>): Int {
+        var n = 0
+        while (n < existing.size && n < wanted.size && existing[n].entryId == wanted[n].entryId) n++
+        return n
+    }
+}

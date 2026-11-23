@@ -31,8 +31,8 @@ fun AppSession.widgetLive(): Flow<WidgetLive> =
                         discIds = player.playingDiscIds,
                         isPlaying = player.isPlaying,
                         maniacMode = player.maniacMode,
-                        queueSeconds = player.albumLength,
-                        remainingSeconds = player.albumRemaining,
+                        queueSeconds = player.queueLength,
+                        remainingSeconds = player.queueRemaining,
                         readAt = nowMillis(),
                     )
                 }

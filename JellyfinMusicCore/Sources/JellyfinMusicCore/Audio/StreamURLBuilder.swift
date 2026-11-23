@@ -43,13 +43,24 @@ public struct StreamURLBuilder {
         format: AudioFormat = .alac,
         maxBitrate: Int? = nil
     ) -> URL? {
+        url(trackId: track.id, container: track.mediaSource?.container, format: format, maxBitrate: maxBitrate)
+    }
+
+    /// The same from a track's id and its source file's container (what a
+    /// saved queue keeps).
+    public func url(
+        trackId: String,
+        container: String?,
+        format: AudioFormat = .alac,
+        maxBitrate: Int? = nil
+    ) -> URL? {
         if let maxBitrate {
-            return cappedURL(for: track, bitrate: maxBitrate)
+            return cappedURL(trackId: trackId, bitrate: maxBitrate)
         }
         // Choose the right endpoint.
         //  * If the source already matches the requested container, direct-play.
         //  * Otherwise transcode via /Audio/{id}/universal.
-        let sourceContainerNormalized = track.mediaSource?.container?.lowercased()
+        let sourceContainerNormalized = container?.lowercased()
         let requestedContainer = Self.containerFor(format)
 
         let canDirectPlay = sourceContainerNormalized == requestedContainer
@@ -58,10 +69,10 @@ public struct StreamURLBuilder {
         let path: String
         if canDirectPlay {
             // Original file, untouched.
-            path = "Audio/\(track.id)/stream.\(format.fileExtension)"
+            path = "Audio/\(trackId)/stream.\(format.fileExtension)"
             query = [URLQueryItem(name: "static", value: "true")]
         } else {
-            path = "Audio/\(track.id)/universal"
+            path = "Audio/\(trackId)/universal"
             query = [
                 URLQueryItem(name: "UserId", value: userId),
                 URLQueryItem(name: "DeviceId", value: api.deviceId),
@@ -87,7 +98,7 @@ public struct StreamURLBuilder {
     /// with no length and no byte ranges, and AVPlayer refuses that
     /// (CoreMedia error -12939). Checked against the server with AVPlayer,
     /// directly and through a Cloudflare tunnel.
-    private func cappedURL(for track: JellyfinTrack, bitrate: Int) -> URL? {
+    private func cappedURL(trackId: String, bitrate: Int) -> URL? {
         var query = [
             URLQueryItem(name: "UserId", value: userId),
             URLQueryItem(name: "DeviceId", value: api.deviceId),
@@ -101,7 +112,7 @@ public struct StreamURLBuilder {
         if let token = api.accessToken {
             query.append(URLQueryItem(name: "ApiKey", value: token))
         }
-        return api.buildURL("Audio/\(track.id)/universal", queryItems: query)
+        return api.buildURL("Audio/\(trackId)/universal", queryItems: query)
     }
 
     static func audioCodecFor(_ format: AudioFormat) -> String? {

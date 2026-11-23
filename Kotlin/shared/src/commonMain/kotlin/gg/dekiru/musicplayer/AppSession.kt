@@ -9,6 +9,8 @@ import gg.dekiru.musicplayer.data.settings.FavoritesStore
 import gg.dekiru.musicplayer.data.update.UpdateChecker
 import gg.dekiru.musicplayer.downloads.DownloadManager
 import gg.dekiru.musicplayer.downloads.DownloadSettings
+import gg.dekiru.musicplayer.playback.PlayQueueSaver
+import gg.dekiru.musicplayer.playback.PlayQueueStore
 import gg.dekiru.musicplayer.playback.PlaybackSettings
 import gg.dekiru.musicplayer.playback.PlayerController
 import gg.dekiru.musicplayer.playback.effects.EffectsSettings
@@ -57,6 +59,9 @@ class AppSession(val authenticator: Authenticator, val environment: AppEnvironme
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    /** The listening queue, saved between runs (restored at sign-in, forgotten at sign-out). */
+    private val queueStore = PlayQueueStore.inDataFolder(environment.dataDir)
+
     /** The GitHub update check (Android and Linux): looked at once when the signed-in app opens. */
     val updates = UpdateChecker(environment.preferences, scope, ::nowMillis)
 
@@ -78,25 +83,43 @@ class AppSession(val authenticator: Authenticator, val environment: AppEnvironme
         return true
     }
 
-    /** Starts a fresh player and download manager for `api`. */
+    /**
+     * Starts a fresh player and download manager for `api`, and puts back
+     * the queue saved for this server and user (paused where it was).
+     */
     fun signIn(api: JellyfinApi) {
         _player.value?.stop()
-        _player.value = PlayerController(
+        val player = PlayerController(
             api, environment.playerEngine, playbackSettings, scope, environment.isExpensiveNetwork,
             isOnline = environment.isOnline, downloads = { _downloads.value },
+            queueSaver = PlayQueueSaver(scope, queueStore),
         )
+        _player.value = player
         _downloads.value?.close()
         _downloads.value = DownloadManager(
             api, environment.downloadsDir, downloadSettings, scope, environment.isExpensiveNetwork, environment.downloadRunner,
             playable = environment.playerEngine.directPlayFormats, isOnline = environment.isOnline,
         )
         _api.value = api
+        // After the downloads, so downloaded entries play from their files.
+        queueStore.load(serverId = api.baseUrl, userId = api.userId)?.let(player::restore)
+    }
+
+    /** Writes the queue now: the app going to the background, the window closing. */
+    suspend fun saveQueue() {
+        _player.value?.saveQueueNow()
+    }
+
+    /** [saveQueue] without waiting (Android's onStop). */
+    fun saveQueueSoon() {
+        scope.launch { saveQueue() }
     }
 
     /** Stops playback and forgets the saved login. */
     fun signOut() {
         _player.value?.stop()
         _player.value = null
+        queueStore.clear()
         _downloads.value?.close()
         _downloads.value = null
         authenticator.signOut()

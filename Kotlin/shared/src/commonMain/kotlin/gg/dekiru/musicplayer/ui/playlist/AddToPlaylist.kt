@@ -410,9 +410,21 @@ fun PlaylistNameDialog(title: String, action: String, initial: String, onDismiss
 @Composable
 fun PlaylistNoticeBanner(model: AddToPlaylistModel, modifier: Modifier = Modifier) {
     val notice = model.notice ?: return
-    LaunchedEffect(notice) {
-        delay(if (notice.isError) 6_000 else 3_000)
-        model.dismissNotice()
+    NoticeBanner(notice.message, notice.isError, notice, model::dismissNotice, modifier)
+}
+
+/** What Play Next / Add to Queue did, as [PlaylistNoticeBanner]. */
+@Composable
+fun QueueNoticeBanner(player: gg.dekiru.musicplayer.playback.PlayerController, modifier: Modifier = Modifier) {
+    val notice = player.queueNotice ?: return
+    NoticeBanner(notice.message, notice.isError, notice, player::dismissQueueNotice, modifier)
+}
+
+@Composable
+private fun NoticeBanner(message: String, isError: Boolean, key: Any, onDismiss: () -> Unit, modifier: Modifier) {
+    LaunchedEffect(key) {
+        delay(if (isError) 6_000 else 3_000)
+        onDismiss()
     }
     Row(
         modifier
@@ -420,12 +432,12 @@ fun PlaylistNoticeBanner(model: AddToPlaylistModel, modifier: Modifier = Modifie
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .background(TetsubiColors.background, RoundedCornerShape(12.dp))
             .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-            .clickable(onClick = model::dismissNotice)
+            .clickable(onClick = onDismiss)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(if (notice.isError) "⚠" else "✓", color = TetsubiColors.pink, fontSize = 15.sp)
-        Text(notice.message, color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(if (isError) "⚠" else "✓", color = TetsubiColors.pink, fontSize = 15.sp)
+        Text(message, color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
     }
 }

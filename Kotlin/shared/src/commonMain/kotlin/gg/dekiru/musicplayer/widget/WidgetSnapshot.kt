@@ -32,9 +32,9 @@ data class WidgetSnapshot(
     val accentRGB: Int? = null,
     /** The saved art's file name, next to the snapshot; null when there's no picture. */
     val artFile: String? = null,
-    /** The whole album or playlist, in seconds (Now Playing's `albumLength`); 0 when not known. */
+    /** The whole album or playlist, in seconds (the player's `queueLength`); 0 when not known. */
     val queueSeconds: Double = 0.0,
-    /** What's left of the queue at [updatedAt], in seconds (Now Playing's `albumRemaining`). */
+    /** What's left of the queue at [updatedAt], in seconds (the player's `queueRemaining`). */
     val remainingSeconds: Double = 0.0,
     /** When it was written, in milliseconds since 1970. */
     val updatedAt: Long = 0,
@@ -113,9 +113,9 @@ data class WidgetLive(
     val discIds: List<String> = emptyList(),
     val isPlaying: Boolean = false,
     val maniacMode: Boolean = false,
-    /** The whole queue, in seconds (Now Playing's `albumLength`). */
+    /** The whole queue, in seconds (the player's `queueLength`). */
     val queueSeconds: Double = 0.0,
-    /** What was left of the queue at [readAt], in seconds (Now Playing's `albumRemaining`). */
+    /** What was left of the queue at [readAt], in seconds (the player's `queueRemaining`). */
     val remainingSeconds: Double = 0.0,
     /** When [remainingSeconds] was read, in milliseconds since 1970 (0: not known). */
     val readAt: Long = 0,

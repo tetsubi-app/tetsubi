@@ -31,8 +31,12 @@ internal enum class MpvEndReason {
 
 /** What the event thread passes on to the main thread. */
 internal sealed interface MpvEvent {
-    /** mpv began playing playlist entry `position`. */
-    data class StartFile(val position: Int) : MpvEvent
+    /**
+     * mpv began playing playlist entry `position`. `path`: what that entry
+     * was loaded from (`playlist/N/filename`), to check the position against
+     * the queue when entries before it were moved meanwhile; null: unknown.
+     */
+    data class StartFile(val position: Int, val path: String? = null) : MpvEvent
 
     /** mpv finished the playing entry. `error`: libmpv's error text for [MpvEndReason.ERROR]. */
     data class EndFile(val reason: MpvEndReason, val error: String? = null) : MpvEvent
@@ -59,12 +63,35 @@ internal fun mpvLoopOptions(mode: RepeatMode): Pair<String, String> = when (mode
 /** What `loadfile` is given: a downloaded file's path (`file://` URIs here aren't percent-encoded), else the URL. */
 internal fun mpvTarget(url: String): String = if (url.startsWith("file://")) url.removePrefix("file://") else url
 
-/** Commands that replace the entries after `current` (of `size`) with `urls`, leaving the playing one alone. */
-internal fun replaceAfterCommands(size: Int, current: Int, urls: List<String>): List<List<String>> = buildList {
+/**
+ * Commands that replace the entries after `current` (of `size`) with `urls`,
+ * leaving the playing one alone, and the first `keep` entries after it too
+ * (the same as before: the next stays opened ahead, for a gapless join).
+ */
+internal fun replaceAfterCommands(size: Int, current: Int, urls: List<String>, keep: Int = 0): List<List<String>> = buildList {
     // From the end, so each index is still right when it's removed.
-    for (i in size - 1 downTo current + 1) add(listOf("playlist-remove", "$i"))
+    for (i in size - 1 downTo current + 1 + keep) add(listOf("playlist-remove", "$i"))
     urls.forEach { add(listOf("loadfile", mpvTarget(it), "append")) }
 }
+
+/**
+ * Commands that replace the `current` entries before the playing one with
+ * `urls` (in a playlist of `size`), leaving the playing one alone: removed
+ * from the front, then each new one appended and moved into place.
+ */
+internal fun replaceBeforeCommands(size: Int, current: Int, urls: List<String>): List<List<String>> = buildList {
+    repeat(current) { add(listOf("playlist-remove", "0")) }
+    val rest = size - current
+    urls.forEachIndexed { i, url ->
+        add(listOf("loadfile", mpvTarget(url), "append"))
+        // playlist-move puts the entry before the target: the new one at `i`.
+        add(listOf("playlist-move", "${rest + i}", "$i"))
+    }
+}
+
+/** Whether mpv's `path` is `url`'s stream (also when restarted at a point, `StartTimeTicks`). */
+internal fun isStreamOf(path: String, url: String): Boolean =
+    StreamUrls.startingAt(path, 0) == StreamUrls.startingAt(mpvTarget(url), 0)
 
 /**
  * Commands that put `url` in place of entry `index` of a playlist of `size`
@@ -132,8 +159,8 @@ internal class MpvPlayback(
     var repeat = RepeatMode.OFF
         private set
 
-    /** Per queue index: where a restarted converted stream begins, in ms (absent: 0). */
-    private val startOffsets = mutableMapOf<Int, Long>()
+    /** Per queue entry: where a restarted converted stream begins, in ms (absent: 0). */
+    private val startOffsets = mutableMapOf<String, Long>()
 
     private var paused = true
     private var idle = true
@@ -142,7 +169,7 @@ internal class MpvPlayback(
     val isPlaying: Boolean get() = reportedPlaying
 
     /** Where the playing entry's stream begins in its track (a restarted converted stream), in ms. */
-    val currentOffsetMillis: Long get() = startOffsets[current] ?: 0L
+    val currentOffsetMillis: Long get() = currentItem?.let { startOffsets[it.entryId] } ?: 0L
 
     val currentItem: EngineItem? get() = items.getOrNull(current)
 
@@ -164,10 +191,31 @@ internal class MpvPlayback(
     }
 
     fun replaceAfterCurrent(newItems: List<EngineItem>) {
-        replaceAfterCommands(items.size, current, newItems.map { it.url }).forEach(send)
-        while (items.size > current + 1) items.removeAt(items.lastIndex)
-        items += newItems
-        startOffsets.keys.removeAll { it > current }
+        if (items.isEmpty()) return
+        replaceAroundCurrent(items.take(current), newItems)
+    }
+
+    /**
+     * The entries before and after the playing one become `before` and
+     * `after`; the playing one isn't touched (mpv carries on with it), nor
+     * are the entries after it that stay the same. mpv's positions of the
+     * entries shift meanwhile, so starts are checked by path ([started]).
+     */
+    fun replaceAroundCurrent(before: List<EngineItem>, after: List<EngineItem>) {
+        val playing = items.getOrNull(current) ?: return
+        val existingAfter = items.drop(current + 1)
+        val keep = CastWindow.sharedStart(existingAfter, after)
+        replaceAfterCommands(items.size, current, after.drop(keep).map { it.url }, keep).forEach(send)
+        if (items.take(current).map { it.entryId } != before.map { it.entryId }) {
+            replaceBeforeCommands(current + 1 + after.size, current, before.map { it.url }).forEach(send)
+        }
+        items.clear()
+        items += before + playing + after
+        val moved = before.size - current
+        current = before.size
+        pending = pending?.let { it + moved }
+        val queued = items.mapTo(HashSet()) { it.entryId }
+        startOffsets.keys.retainAll(queued)
     }
 
     fun play() {
@@ -212,7 +260,7 @@ internal class MpvPlayback(
             if (!unloaded) load(current)
             return false
         }
-        if (target == 0L) startOffsets.remove(current) else startOffsets[current] = target
+        if (target == 0L) startOffsets.remove(item.entryId) else startOffsets[item.entryId] = target
         // Ended or failed: the new stream waits for Play.
         val play = !unloaded
         replaceEntryCommands(items.size, current, StreamUrls.startingAt(item.url, target), play).forEach(send)
@@ -239,7 +287,7 @@ internal class MpvPlayback(
     /** One event from mpv, in the order mpv sent them. */
     fun handle(event: MpvEvent) {
         when (event) {
-            is MpvEvent.StartFile -> started(event.position)
+            is MpvEvent.StartFile -> started(checked(event.position, event.path))
             is MpvEvent.EndFile -> ended(event)
             is MpvEvent.Paused -> {
                 paused = event.paused
@@ -254,6 +302,21 @@ internal class MpvPlayback(
             }
             MpvEvent.MoveFailed -> pending = null
         }
+    }
+
+    /**
+     * The queue position of the entry mpv started: `position`, unless its
+     * path says another entry (entries before it moved after mpv read its
+     * position): then the entry with that stream nearest after the playing
+     * one. Unknown path, or none matches: `position` as given.
+     */
+    private fun checked(position: Int, path: String?): Int {
+        if (path == null || position < 0) return position
+        if (items.getOrNull(position)?.let { isStreamOf(path, it.url) } == true) return position
+        val matches = items.indices.filter { isStreamOf(path, items[it].url) }
+        if (matches.isEmpty()) return position
+        val expected = pending ?: (current + 1)
+        return matches.minBy { kotlin.math.abs(it - expected) }
     }
 
     private fun started(position: Int) {
@@ -305,14 +368,19 @@ internal class MpvPlayback(
 
     /** Puts entry `index`'s own stream back if it was restarted at a point. Returns whether it did. */
     private fun restoreOwnStream(index: Int): Boolean {
-        if (startOffsets.remove(index) == null) return false
-        replaceEntryCommands(items.size, index, items[index].url, play = false).forEach(send)
+        val item = items.getOrNull(index) ?: return false
+        if (startOffsets.remove(item.entryId) == null) return false
+        replaceEntryCommands(items.size, index, item.url, play = false).forEach(send)
         return true
     }
 
     /** Puts every other track's own stream back, so Previous or Repeat start it from 0:00. */
     private fun restoreOtherTracks() {
-        for (index in startOffsets.keys.filter { it != current }) restoreOwnStream(index)
+        val playing = currentItem?.entryId
+        for (entry in startOffsets.keys.filter { it != playing }) {
+            val index = items.indexOfFirst { it.entryId == entry }
+            if (index >= 0) restoreOwnStream(index) else startOffsets.remove(entry)
+        }
     }
 
     private fun formatSeconds(millis: Long): String = (millis.coerceAtLeast(0) / 1000.0).toString()

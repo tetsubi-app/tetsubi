@@ -348,7 +348,8 @@ final class PlaylistQueueTests: XCTestCase {
         XCTAssertTrue(PlaylistDetailViewModel.isCurrent(entries[3], playingPosition: 3, playingTrackId: simpleId))
 
         player.play(playlist: playlist, tracks: entries, startingAt: 0)
-        XCTAssertEqual(player.upNext.map(\.index), [1, 2, 3], "Up next rows are told apart by queue index")
+        XCTAssertEqual(Set(player.upNext.map(\.entryId)).count, 3, "Up next rows are told apart by queue entry")
+        XCTAssertEqual(player.upNext.map(\.entryId), Array(player.queueEntryIds.dropFirst()))
         XCTAssertEqual(player.upNext.last?.track.id, simpleId)
     }
 
@@ -379,15 +380,6 @@ final class PlaylistQueueTests: XCTestCase {
         XCTAssertEqual(player.queue.map(\.id).sorted(), entries.map(\.track.id).sorted())
     }
 
-    func testShufflePlanKeepsEachPlaceOnce() {
-        for _ in 0..<20 {
-            let plan = planQueue(tracks: Array(0..<6), forcedStartIndex: 4, shuffleOn: true)
-            XCTAssertEqual(plan.tracks.first, 4)
-            XCTAssertEqual(plan.startIndex, 0)
-            XCTAssertEqual(plan.tracks.sorted(), Array(0..<6))
-        }
-    }
-
     func testManiacModeStartsAtTheFirstSongInOrder() {
         player.setShuffle(true)
         player.setManiacMode(true)
@@ -398,23 +390,17 @@ final class PlaylistQueueTests: XCTestCase {
         XCTAssertEqual(player.currentSourcePosition, 0)
     }
 
-    /// Turning Maniac Mode on mid-playlist puts the rest back in playlist
-    /// order, with both rows of a repeated song kept.
+    /// Turning Maniac Mode on mid-playlist puts the queue back in playlist
+    /// order (the whole queue, as shuffle off does), the playing song
+    /// carrying on, with both rows of a repeated song kept.
     func testManiacModePutsAShuffledPlaylistBackInOrder() {
         player.setShuffle(true)
         player.play(playlist: playlist, tracks: entries, startingAt: 1)
         player.setManiacMode(true)
         XCTAssertEqual(player.currentTrack?.title, "Roman Road")
-        XCTAssertEqual(player.queue.map(\.title), ["Roman Road", "Perfectly Simple", "Elsewhere", "Perfectly Simple"])
+        XCTAssertEqual(player.queue.map(\.title), ["Perfectly Simple", "Roman Road", "Elsewhere", "Perfectly Simple"])
+        XCTAssertEqual(player.currentIndex, 1)
         XCTAssertEqual(player.currentSourcePosition, 1)
-    }
-
-    func testOrderRestoreWithTheSameSongTwice() {
-        // Places in the playlist of a shuffled queue; the song at places 0
-        // and 3 is the same one. Entry 1 is playing.
-        let order = orderAfterCurrent(positions: [2, 3, 1, 0], current: 1)
-        XCTAssertEqual(order, [0, 1, 3, 2])
-        XCTAssertEqual(order.map { [2, 3, 1, 0][$0] }, [2, 3, 0, 1])
     }
 
     func testTheEndOfThePlaylistIsLikeTheEndOfAnAlbum() {
@@ -434,6 +420,64 @@ final class PlaylistQueueTests: XCTestCase {
         player.stop()
         XCTAssertNil(player.queueSourceId)
         XCTAssertNil(player.currentSourcePosition)
+    }
+
+    // MARK: Play Next / Add to Queue
+
+    func testPlayNextAndAddToQueueKeepThePlayingSong() {
+        player.play(playlist: playlist, tracks: Array(entries.prefix(2)))
+        let playing = player.currentTrack
+        XCTAssertNil(player.addToQueue(playlist: playlist, tracks: [entries[2]], online: true))
+        XCTAssertNil(player.playNext(playlist: playlist, tracks: [entries[3]], online: true))
+        XCTAssertEqual(player.currentTrack, playing, "the playing song carries on")
+        XCTAssertEqual(player.currentIndex, 0)
+        XCTAssertEqual(player.queue.map(\.title), ["Perfectly Simple", "Roman Road", "Perfectly Simple", "Elsewhere"])
+        XCTAssertEqual(player.upNext.map(\.track.title), ["Roman Road", "Perfectly Simple", "Elsewhere"])
+        XCTAssertEqual(player.queueSourceId, playlist.id)
+        XCTAssertEqual(player.playQueue.displayGroups.count, 3, "the playlist, then each queued batch")
+    }
+
+    func testQueueTimesCoverTheWholeQueue() {
+        player.play(playlist: playlist, tracks: Array(entries.prefix(2)))
+        let album = player.queueRemaining
+        XCTAssertEqual(player.currentGroupRemaining, album)
+        player.addToQueue(playlist: playlist, tracks: [entries[2]], online: true)
+        XCTAssertEqual(player.queueRemaining, album + entries[2].track.duration, accuracy: 0.01)
+        XCTAssertEqual(player.currentGroupRemaining, album, accuracy: 0.01)
+    }
+
+    func testAddingIntoAnEmptyQueuePlays() {
+        XCTAssertNil(player.addToQueue(playlist: playlist, tracks: entries, online: true))
+        XCTAssertEqual(player.queue.count, 4)
+        XCTAssertEqual(player.currentTrack?.title, "Perfectly Simple")
+        XCTAssertTrue(player.isPlaying)
+    }
+
+    func testOfflineOnlySongsOnThisDeviceAreQueued() {
+        player.play(playlist: playlist, tracks: entries)
+        XCTAssertEqual(player.addToQueue(playlist: playlist, tracks: entries, online: false), .nothingDownloaded)
+        XCTAssertEqual(player.queue.count, 4, "nothing added")
+    }
+
+    func testManiacModeStillAddsButDoesntSkip() {
+        player.play(playlist: playlist, tracks: Array(entries.prefix(2)))
+        player.setManiacMode(true)
+        XCTAssertNil(player.playNext(playlist: playlist, tracks: [entries[2]], online: true))
+        XCTAssertEqual(player.queue.count, 3)
+        let last = player.queueEntryIds[2]
+        player.skipTo(entryId: last)
+        player.removeFromQueue(entryIds: [last])
+        player.clearUpcoming()
+        XCTAssertEqual(player.queue.count, 3)
+        XCTAssertEqual(player.currentIndex, 0)
+    }
+
+    func testRemovingThePlayingSongPlaysTheNext() {
+        player.play(playlist: playlist, tracks: entries)
+        player.removeFromQueue(entryIds: [player.queueEntryIds[0]])
+        XCTAssertEqual(player.currentTrack?.title, "Roman Road")
+        XCTAssertEqual(player.queue.count, 3)
+        XCTAssertEqual(player.position, 0)
     }
 
     // MARK: Which page shows "Now playing"

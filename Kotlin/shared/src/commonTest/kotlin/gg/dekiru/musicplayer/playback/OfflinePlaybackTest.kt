@@ -167,23 +167,24 @@ class OfflinePlaybackTest {
     }
 
     @Test
-    fun shuffleIsIgnoredAndTogglingItLeavesTheQueueInOrder() = runTest {
+    fun aDownloadedAlbumShufflesAcrossTheQueueToo() = runTest {
+        // Changed with the listening queue: downloads used to ignore shuffle and always play in order.
         val dir = tempDir()
         writeDownload(dir, "al", "Album", tracks = 8)
         val s = setup(dir)
-        s.player.changeShuffle(true)
         s.player.play(album("al"), startTrackId = "al-t5")
         settle()
         val inOrder = (1..8).map { "al-t$it" }
         assertEquals(inOrder, s.engine.items.map { it.id })
-        assertEquals(inOrder, s.player.queue.map { it.id })
-        assertEquals(0, s.engine.index)
-        assertTrue(s.player.shuffle, "the setting is kept for the next streamed album")
-
-        // Toggling shuffle or Maniac Mode doesn't reorder a local queue.
-        s.player.changeShuffle(false)
+        assertEquals(0, s.engine.index, "a download plays from track 1")
+        // Shuffle reorders it now, the playing track first; off puts it back in order.
         s.player.changeShuffle(true)
+        assertEquals("al-t1", s.engine.items.first().id)
+        assertEquals(inOrder.toSet(), s.engine.items.map { it.id }.toSet())
+        assertEquals(1, s.engine.loads, "the playing track carries on")
+        s.player.changeShuffle(false)
         assertEquals(inOrder, s.engine.items.map { it.id })
+        s.player.changeShuffle(true)
         s.player.changeManiacMode(true)
         assertEquals(inOrder, s.engine.items.map { it.id })
         assertTrue(s.engine.items.all { it.url.startsWith("file://") })

@@ -115,8 +115,14 @@ extension AudioFormat {
     /// The format a track is stored in on the server, or `nil` if unrecognised.
     public static func source(of track: JellyfinTrack) -> AudioFormat? {
         guard let source = track.mediaSource else { return nil }
-        let codec = source.codecs?.lowercased() ?? ""
-        let container = source.container?.lowercased() ?? ""
+        return self.source(codec: source.codecs, container: source.container)
+    }
+
+    /// The same from the codec and container alone (a saved queue's track).
+    public static func source(codec: String?, container: String?) -> AudioFormat? {
+        guard codec != nil || container != nil else { return nil }
+        let codec = codec?.lowercased() ?? ""
+        let container = container?.lowercased() ?? ""
         if codec.contains("flac") || container == "flac" { return .flac }
         if codec.contains("alac") { return .alac }
         if codec.contains("opus") { return .opus }

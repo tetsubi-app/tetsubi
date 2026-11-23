@@ -93,6 +93,9 @@ public final class AlbumDetailViewModel {
         return queue.contains { $0.albumId == queueSourceId }
     }
 
+    /// Whether there's a player to queue into (Play Next, Add to Queue).
+    var hasPlayer: Bool { player != nil }
+
     /// Maniac Mode: tracks can't be started individually.
     var canPlayIndividualTracks: Bool { !(player?.maniacMode ?? false) }
 
@@ -315,6 +318,25 @@ public final class AlbumDetailViewModel {
         }
     }
 
+    /// Queues the album (every disc) right after the playing album, with a
+    /// short confirmation. Allowed in Maniac Mode.
+    public func playNext() {
+        guard let player else { return }
+        player.playNext(album: album, discs: discs) { added in
+            PlaylistEvents.shared.show(added ? "Playing next" : Self.notQueuedMessage, isError: !added)
+        }
+    }
+
+    /// Queues the album (every disc) at the end of the queue.
+    public func addToQueue() {
+        guard let player else { return }
+        player.addToQueue(album: album, discs: discs) { added in
+            PlaylistEvents.shared.show(added ? "Added to queue" : Self.notQueuedMessage, isError: !added)
+        }
+    }
+
+    nonisolated static let notQueuedMessage = "Couldn't add this album. Check the connection, or download it first."
+
     /// The server IDs of these tracks, for "Add to Playlist…". None when
     /// offline, and none for rows built from a download (their IDs
     /// aren't the server's).
@@ -447,11 +469,22 @@ public struct AlbumDetailView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
+                    Button {
+                        viewModel.playNext()
+                    } label: {
+                        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                    }
+                    Button {
+                        viewModel.addToQueue()
+                    } label: {
+                        Label("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+                    }
                     addToPlaylistButton(viewModel.tracks)
+                        .disabled(viewModel.playlistTrackIds(viewModel.tracks).isEmpty)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
-                .disabled(viewModel.playlistTrackIds(viewModel.tracks).isEmpty)
+                .disabled(!viewModel.hasPlayer)
                 .accessibilityLabel("More")
                 .accessibilityIdentifier("AlbumDetailView.moreMenu")
             }

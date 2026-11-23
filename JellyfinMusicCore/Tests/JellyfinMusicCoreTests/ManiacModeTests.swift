@@ -69,21 +69,6 @@ final class ManiacModeTests: XCTestCase {
         wait(for: [posted], timeout: 1)
     }
 
-    // MARK: Un-shuffling the rest of the album
-
-    func testRestAfterCurrentGoesBackInAlbumOrder() {
-        let album = ["t1", "t2", "t3", "t4", "t5", "t6"]
-        // Shuffled queue; t4 played, t2 playing.
-        let queue = ["t4", "t2", "t6", "t1", "t5", "t3"]
-        let order = orderAfterCurrent(positions: queue.map { album.firstIndex(of: $0)! }, current: 1)
-        XCTAssertEqual(order.map { queue[$0] }, ["t4", "t2", "t1", "t3", "t5", "t6"])
-    }
-
-    func testAlreadyInOrderIsUnchanged() {
-        XCTAssertEqual(orderAfterCurrent(positions: [0, 1, 2], current: 0), [0, 1, 2])
-        XCTAssertEqual(orderAfterCurrent(positions: [0, 1, 2], current: 2), [0, 1, 2])
-    }
-
     // MARK: End of the album
 
     func testFinishingTheAlbumClosesNowPlaying() {

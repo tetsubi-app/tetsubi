@@ -101,6 +101,8 @@ fun AlbumScreen(
     onAddToPlaylist: ((List<String>) -> Unit)? = null,
     /** The artist line: that artist's albums, on this tab. */
     onOpenArtist: ((JellyfinArtist) -> Unit)? = null,
+    /** Offline, the ⋯ menu's "Add to Playlist…" is greyed out (Play Next and Add to Queue still work). */
+    isOnline: Boolean = true,
 ) {
     LaunchedEffect(model) { model.load() }
     val manager = model.downloadManager
@@ -127,6 +129,10 @@ fun AlbumScreen(
                 TopBar(
                     model.album.displayName, onBack,
                     onAddToPlaylist = onAddToPlaylist?.takeIf { model.tracks.isNotEmpty() }?.let { add -> { add(model.tracks.map { it.id }) } },
+                    isOnline = isOnline,
+                    // The listening queue (the player confirms with "Playing next" / "Added to queue").
+                    onPlayNext = player?.takeIf { it.isSupported }?.let { p -> { p.playNext(model.album) } },
+                    onAddToQueue = player?.takeIf { it.isSupported }?.let { p -> { p.addToQueue(model.album) } },
                 )
             }
             item { Header(api, model, artSize = if (wide) 240.dp else 160.dp, localArt = manager.coverPath(model.album), onOpenArtist) }
@@ -145,7 +151,14 @@ fun AlbumScreen(
 }
 
 @Composable
-private fun TopBar(title: String, onBack: () -> Unit, onAddToPlaylist: (() -> Unit)?) {
+private fun TopBar(
+    title: String,
+    onBack: () -> Unit,
+    onAddToPlaylist: (() -> Unit)?,
+    isOnline: Boolean = true,
+    onPlayNext: (() -> Unit)? = null,
+    onAddToQueue: (() -> Unit)? = null,
+) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back" }) {
             Text("‹ Back", color = TetsubiColors.blue, fontSize = 16.sp)
@@ -154,15 +167,27 @@ private fun TopBar(title: String, onBack: () -> Unit, onAddToPlaylist: (() -> Un
             title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 16.dp),
         )
-        if (onAddToPlaylist != null) {
-            Box(Modifier.padding(end = 8.dp)) { AddToPlaylistMenu("More", onAddToPlaylist) }
+        val items = buildList {
+            onPlayNext?.let { add(MenuItem("Play Next", action = it)) }
+            onAddToQueue?.let { add(MenuItem("Add to Queue", action = it)) }
+            onAddToPlaylist?.let { add(MenuItem("Add to Playlist…", enabled = isOnline, action = it)) }
+        }
+        if (items.isNotEmpty()) {
+            Box(Modifier.padding(end = 8.dp)) { MoreMenu("More", items) }
         }
     }
 }
 
-/** The ⋯ button with "Add to Playlist…" (a track's, a disc's, the album's). */
+/** The ⋯ button with "Add to Playlist…" (a track's, a disc's). */
 @Composable
-private fun AddToPlaylistMenu(label: String, onAddToPlaylist: () -> Unit) {
+private fun AddToPlaylistMenu(label: String, onAddToPlaylist: () -> Unit) =
+    MoreMenu(label, listOf(MenuItem("Add to Playlist…", action = onAddToPlaylist)))
+
+private class MenuItem(val title: String, val enabled: Boolean = true, val action: () -> Unit)
+
+/** A ⋯ button and its menu. */
+@Composable
+private fun MoreMenu(label: String, items: List<MenuItem>) {
     var open by remember { mutableStateOf(false) }
     Box {
         Box(
@@ -172,13 +197,16 @@ private fun AddToPlaylistMenu(label: String, onAddToPlaylist: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) { Text("⋯", color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp, fontWeight = FontWeight.Bold) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text("Add to Playlist…", color = Color.White) },
-                onClick = {
-                    open = false
-                    onAddToPlaylist()
-                },
-            )
+            for (item in items) {
+                DropdownMenuItem(
+                    text = { Text(item.title, color = if (item.enabled) Color.White else Color.White.copy(alpha = 0.4f)) },
+                    enabled = item.enabled,
+                    onClick = {
+                        open = false
+                        item.action()
+                    },
+                )
+            }
         }
     }
 }

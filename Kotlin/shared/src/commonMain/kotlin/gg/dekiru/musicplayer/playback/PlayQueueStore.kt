@@ -7,6 +7,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -16,6 +18,7 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import kotlin.concurrent.Volatile
 
 /**
  * The queue as saved between runs, restored paused at the same entry and
@@ -129,8 +132,9 @@ class PlayQueueStore(val path: String) {
 /**
  * Saves the queue on every change without writing on every change: the
  * latest snapshot is written [intervalMillis] after the first unsaved change
- * (at most one write per interval), on [ioDispatcher]. Call from one thread
- * (the main one).
+ * (at most one write per interval), on [ioDispatcher]. A change made while
+ * a write is under way is written an interval later. Writes never overlap
+ * and happen in the order asked. Call from one thread (the main one).
  */
 class PlayQueueSaver(
     private val scope: CoroutineScope,
@@ -143,29 +147,49 @@ class PlayQueueSaver(
 
     private var pending: PlayQueueSnapshot? = null
     private var job: Job? = null
+    private val writing = Mutex()
+
+    /** Set by [cancel], read where the write happens. */
+    @Volatile
+    private var cancelled = false
 
     /** Whether a snapshot is waiting to be written. */
     val hasPending: Boolean get() = pending != null
 
     fun schedule(snapshot: PlayQueueSnapshot) {
+        if (cancelled) return
         pending = snapshot
         if (job?.isActive == true) return
         job = scope.launch {
-            delay(intervalMillis)
-            writePending()
+            // Round again for a snapshot that came in during the write.
+            while (pending != null) {
+                delay(intervalMillis)
+                writePending()
+            }
         }
     }
 
-    /** Writes a waiting snapshot now (the app going to the background or closing). */
+    /** Writes a waiting snapshot now (the app going to the background or closing), after any write under way. */
     suspend fun flush() {
         job?.cancel()
         job = null
         writePending()
     }
 
-    private suspend fun writePending() {
-        val snapshot = pending ?: return
+    /**
+     * Nothing more is written: a waiting snapshot is dropped and later ones
+     * are ignored (signing out, before the saved queue is removed).
+     */
+    fun cancel() {
+        cancelled = true
         pending = null
-        withContext(ioDispatcher) { write(snapshot) }
+        job?.cancel()
+        job = null
+    }
+
+    private suspend fun writePending() = writing.withLock {
+        val snapshot = pending ?: return@withLock
+        pending = null
+        withContext(ioDispatcher) { if (!cancelled) write(snapshot) }
     }
 }
