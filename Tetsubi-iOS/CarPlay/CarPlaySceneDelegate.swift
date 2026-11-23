@@ -5,7 +5,9 @@ import UIKit
 import JellyfinMusicCore
 
 /// CarPlay audio UI: Home / Artists / Playlists / Downloads tabs, album and
-/// playlist pages with Play and Shuffle, and the system Now Playing screen.
+/// playlist pages with Play and Shuffle, and the system Now Playing screen
+/// with its "Queue" button (`CarPlayQueueScreen`). Play here replaces the
+/// queue without asking.
 ///
 /// Uses `AppSession.shared`, so it shares the phone app's player and queue.
 /// CarPlay can launch the app without the phone UI, so it restores the saved
@@ -24,6 +26,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     private var session: AppSession { AppSession.shared }
     private var maniacObserver: NSObjectProtocol?
+    /// Now Playing's "Queue" button and the list it opens.
+    private var queueScreen: CarPlayQueueScreen?
 
     // MARK: Connect / disconnect
 
@@ -47,6 +51,9 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         tabs.delegate = self
         interfaceController.setRootTemplate(tabs, animated: false, completion: nil)
         configureNowPlaying()
+        let queueScreen = CarPlayQueueScreen(interfaceController: interfaceController)
+        queueScreen.attach()
+        self.queueScreen = queueScreen
         // Maniac Mode switched on the phone: update the buttons here too.
         maniacObserver = NotificationCenter.default.addObserver(
             forName: PlayerManager.maniacModeDidChange, object: nil, queue: .main
@@ -65,6 +72,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         didDisconnectInterfaceController interfaceController: CPInterfaceController
     ) {
         self.interfaceController = nil
+        queueScreen?.detach()
+        queueScreen = nil
         if let maniacObserver { NotificationCenter.default.removeObserver(maniacObserver) }
         maniacObserver = nil
     }
