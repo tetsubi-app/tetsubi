@@ -52,9 +52,13 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 ### Audio and playback
 
-**A converted stream for AVPlayer must be HLS.** A plain HTTP transcode from `/Audio/{id}/universal` (`TranscodingProtocol=http`) comes back chunked, with no length and no byte ranges, and AVPlayer refuses it (AVFoundation -11850, CoreMedia -12939). The mobile-data stream in `StreamURLBuilder` therefore asks for `TranscodingProtocol=hls` with `TranscodingContainer=mp4`; this was checked with AVPlayer against the server directly and through a Cloudflare tunnel. The original file (`stream.<ext>?static=true`) supports byte ranges and is unaffected.
+**Stream the original file whenever AVPlayer plays it.** `StreamURLBuilder.plan(codec:container:)` decides from the track's codec and container (a restored queue keeps both in `QueueTrack`): MP3, AAC and ALAC in the MP4 family (m4a, mp4, m4b; also ffprobe's "mov,mp4,m4a,…" list), ADTS AAC, FLAC, WAV and AIFF (PCM) play as `stream.<the file's own extension>?static=true`. Everything else (Opus, Vorbis, WMA, APE, WavPack, DSD, a playable codec in a container AVFoundation doesn't read such as FLAC in Ogg, unknown) is converted. Until 2026-11 the app asked for ALAC and direct-played only when the file's container equalled ALAC's, so every MP3, FLAC and AAC track went through a plain HTTP transcode that AVPlayer refused: an all-MP3 library (the App Review demo server) played nothing. Android does the same through `StreamUrls` and `PlayerEngine.directPlayFormats`.
 
-**The equaliser and visualiser do not run on HLS streams.** The audio tap in `AudioEffects` needs the asset's audio track, and an HLS asset has none, so on the converted mobile-data stream the effects are silently skipped. They work for original streams and downloads.
+**A converted stream for AVPlayer must be HLS.** A plain HTTP transcode from `/Audio/{id}/universal` (`TranscodingProtocol=http`) comes back chunked, with no length and no byte ranges, and AVPlayer refuses it (AVFoundation -11850, CoreMedia -12939). Conversions therefore ask for `TranscodingProtocol=hls` with `TranscodingContainer=mp4` (fMP4 segments): a lossy source as AAC at 320 kbps, a lossless or unknown one as ALAC (Apple's own lossless HLS codec; FLAC in fMP4 HLS played too). AAC, ALAC and FLAC HLS were checked playing in AVPlayer against Jellyfin 12.4 in the iOS simulator in 2026-11, over the internet.
+
+**Give the server exactly one reason to convert.** `/universal` passes its reasons on in the variant playlist's URL (`TranscodeReasons=`). One reason plays; several, written with a comma and a space ("ContainerNotSupported, VideoCodecNotSupported, AudioCodecNotSupported", what asking "m4a" of an MP3 gives), make AVPlayer's request for the variant playlist get HTTP 400 (CoreMedia -16845, shown as NSURLError -1008), though URLSession fetches the same URL fine. So `Container=` is the source's own container restricted to the target codec (`mp3|aac`, `ogg|alac`, `mov|aac,mp4|aac,…`), leaving only `AudioCodecNotSupported`. The mobile-data cap works the same way (AAC at the cap via `AudioBitRate`, no `MaxStreamingBitrate`), except for an AAC source, which asks for its plain container with `MaxStreamingBitrate` so the only reason is the bitrate (under the cap the server sends the file). The old mobile URL (`Container=m4a` for everything) only ever worked for m4a sources: it failed for MP3 and FLAC. A server-side bitrate limit for remote clients could still add a second reason; not seen yet.
+
+**The equaliser and visualiser do not run on HLS streams.** The audio tap in `AudioEffects` needs the asset's audio track, and an HLS asset has none, so on the converted mobile-data stream the effects are silently skipped (converted streams of formats AVPlayer can't play, and everything on mobile data with the cap). They work for original streams and downloads.
 
 **The playback error message ends with the player's own reason.** `PlayerManager.failureDetail` adds the error codes, any HTTP status, the kind of stream (original, converted, HLS, file) and the kind of network, for example "(AVFoundation -11850 / -12939, converted, mobile data)". Ask for that text when someone reports a track that will not play.
 
@@ -107,6 +111,8 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 **A force-quit cancels background tasks and delivers resume data on the next launch.** iOS marks these with `NSURLErrorBackgroundTaskCancelledReasonKey`; a cancel with no reason key is the user's own Cancel and must not be retried. Interrupted tracks retry up to `maxRetries`, continuing from resume data when there is some. This was unverified on a device.
 
 **Resuming needs Range support.** Direct-play URLs (`stream.<ext>?static=true`) should support it; transcoded `/universal` streams restart from zero.
+
+**Downloads are always a file AVPlayer plays.** `AudioFormat.downloadFormat` keeps "Original (as served)" for MP3, AAC, ALAC, FLAC and WAV, and `StreamURLBuilder.downloadURL` fetches the original file when it already is the chosen format in a container the saved extension describes (MP4-family files are saved as .m4a). Opus is saved in Ogg, which AVFoundation doesn't read, so an Opus original (or the old Opus preference, no longer offered on iOS and Mac) downloads as FLAC, as Android does for formats its player can't decode; AIFF and FLAC-in-Ogg are converted to WAV and FLAC. Downloads convert over plain HTTP, which URLSession takes. Opus files downloaded before this are not found and replaced (Android does that).
 
 **Keep paused-download state outside `DownloadPaths.rootDir`.** Any folder with files under the root counts as a downloaded album, so resume points live in `Application Support/PausedDownloads/`. `restorePausedDownloads` and `restoreFailedDownloads` must both run before `refreshDownloaded`.
 
@@ -174,7 +180,7 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **Do not put the A to Z strip beside a `LazyVGrid` in an `HStack`.** It squeezed the grid to one column. Overlay the strip and reserve `AlphaIndexBar.width` of trailing padding.
 
-**Present Now Playing from one sheet at the app root.** `PlayerManager.isNowPlayingPresented` drives a single `.sheet` in `AppRootView`. There is one mini-player bar per tab on iOS before 26.1, so a sheet on the bar would mean several sheets competing.
+**Present Now Playing from one sheet at the app root.** `PlayerManager.isNowPlayingPresented` drives a single `.sheet` in `AppRootView`. There is one mini-player bar per tab on iOS before 26.1, so a sheet on the bar would mean several sheets competing. On iPad it is a full-screen cover instead (`NowPlayingPresentation`): an iPad sheet is a form about 580 pt wide, under the 640 pt the two columns need, so they never showed there. It is closed with its chevron button (no swipe down). iPhone, even a Max on its side (regular width), and the Mac keep the sheet.
 
 **`tabViewBottomAccessory(isEnabled:)` needs iOS 26.1.** Guard it with `#available(iOS 26.1, *)`; older systems and macOS use a `safeAreaInset` capsule on each tab.
 
@@ -216,7 +222,7 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **A sheet on the Mac keeps a narrow default width unless it is told to fit its content.** The Now Playing sheet stayed about 470 pt wide whatever `.frame(idealWidth:)` said. Adding `.presentationSizing(.fitted)` (macOS 15 and later) makes the sheet take the ideal size; `NowPlayingView.nowPlayingSheetFrame()` does this, opening wide only when the main window has room (`macSheetIdealWidth`, `macSheetIdealHeight`, fed by `UIScale.windowWidth` and `windowHeight`).
 
-**Now Playing has two columns when it is wide.** From 640 pt wide and 520 pt tall (before the Mac's window scaling) the cover, title, progress and buttons go on the left and "Up next" on the right (`NowPlayingView.isWide`). The cover is sized from the height that is left (`wideArtSize`), so the buttons are not cropped. The height rule keeps an iPhone on its side on one column. An unfolded iPhone Duo is about 670 pt wide by my estimate and is meant to get two columns; the simulated Duo started folded and could not be unfolded, so only the iPad was checked on screen.
+**Now Playing has two columns when it is wide.** From 640 pt wide and 520 pt tall (before the Mac's window scaling) the cover, title, progress and buttons go on the left and "Up next" on the right (`NowPlayingView.isWide`). The cover is sized from the height that is left (`wideArtSize`), so the buttons are not cropped. The height rule keeps an iPhone on its side on one column. An unfolded iPhone Duo is about 670 pt wide by my estimate and is meant to get two columns; the simulated Duo started folded and could not be unfolded, so only the iPad was checked on screen (before the iPad's Now Playing became a full-screen cover; the cover has not been checked on screen yet).
 
 **Space plays and pauses on the Mac through a key monitor, not a menu shortcut.** A bare Space menu shortcut would also take the spaces typed in Search and the playlist name field. `SpaceKeyMonitor` watches `keyDown` and acts only when no text field or focused button has the keyboard (`SpaceKeyRule`, which is tested). ⌘P in the Playback menu still works.
 
@@ -314,9 +320,9 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 
 **The image endpoint has no user prefix.** It is `/Items/{id}/Images/Primary`; the `/Users/{userId}/…` variant returns 404.
 
-**Direct play is `/Audio/{id}/stream.<ext>?static=true`.** The older `/Users/{id}/Items/{id}/Stream` path returns 404.
+**Direct play is `/Audio/{id}/stream.<ext>?static=true`.** Use the file's own extension (its container), not the one of a format you would like. The older `/Users/{id}/Items/{id}/Stream` path returns 404.
 
-**Transcoding is `/Audio/{id}/universal` and needs a full set of parameters.** `UserId`, `DeviceId`, `Container`, `TranscodingContainer` and `TranscodingProtocol` (plus `AudioCodec`) are required; without them it returns 401. The mobile-data cap adds `MaxStreamingBitrate` and `AudioBitRate`.
+**Transcoding is `/Audio/{id}/universal` and needs a full set of parameters.** `UserId`, `DeviceId`, `Container`, `TranscodingContainer` and `TranscodingProtocol` (plus `AudioCodec`) are required; without them it returns 401. The mobile-data cap adds `AudioBitRate` (and `MaxStreamingBitrate` for an AAC source); see "Give the server exactly one reason to convert".
 
 **Report playback or play counts never change.** `POST /Sessions/Playing` and `/Sessions/Playing/Stopped` with `ItemId` and `PositionTicks`; without them Recently Played goes stale.
 

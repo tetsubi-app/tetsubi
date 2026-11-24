@@ -298,6 +298,7 @@ public final class DownloadManager {
 
     private static func loadDefaultFormat() -> AudioFormat? {
         UserDefaults.standard.string(forKey: defaultFormatKey).flatMap(AudioFormat.init(rawValue:))
+            .flatMap { $0.playsOnApple ? $0 : nil }
     }
 
     // MARK: - Dependencies
@@ -816,7 +817,7 @@ public final class DownloadManager {
         var downloads: [(JellyfinTrack, Int, AudioFormat, URL)] = []
         for (track, number) in missing {
             let trackFormat = AudioFormat.downloadFormat(for: track, preferred: preferred)
-            guard let url = stream.url(for: track, format: trackFormat) else {
+            guard let url = stream.downloadURL(for: track, format: trackFormat) else {
                 // Without this the album would wait forever for the track.
                 teardownAlbum(albumID: albumID, error: "No download link for \"\(track.displayName)\"")
                 return

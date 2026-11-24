@@ -230,22 +230,46 @@ private extension View {
     /// The single full-screen Now Playing sheet, opened by the bar or by
     /// playing an album (`PlayerManager.isNowPlayingPresented`). Its artist
     /// line calls `onShowArtist`; `onDismiss` runs once the sheet has gone.
+    ///
+    /// iPad: a full-screen cover, as a sheet there is a form about 580 pt
+    /// wide and Now Playing's two columns need 640 (`NowPlayingView.isWide`).
+    /// iPhone and Mac keep the sheet.
+    @ViewBuilder
     func nowPlayingSheet(player: PlayerManager?,
                          onShowArtist: @escaping (JellyfinArtist) -> Void,
                          onDismiss: @escaping () -> Void) -> some View {
-        sheet(isPresented: Binding(
+        let isPresented = Binding(
             get: { player?.isNowPlayingPresented ?? false },
             set: { player?.isNowPlayingPresented = $0 }
-        ), onDismiss: onDismiss) {
-            if let player {
-                NowPlayingView(manager: player, onShowArtist: onShowArtist) {
-                    player.isNowPlayingPresented = false
-                }
-                .presentationCornerRadius(20)
-                #if os(macOS)
-                .nowPlayingSheetFrame()
-                #endif
+        )
+        #if os(iOS)
+        if NowPlayingPresentation.usesFullScreenCover(idiom: UIDevice.current.userInterfaceIdiom) {
+            fullScreenCover(isPresented: isPresented, onDismiss: onDismiss) {
+                nowPlayingContent(player: player, onShowArtist: onShowArtist)
             }
+        } else {
+            sheet(isPresented: isPresented, onDismiss: onDismiss) {
+                nowPlayingContent(player: player, onShowArtist: onShowArtist)
+            }
+        }
+        #else
+        sheet(isPresented: isPresented, onDismiss: onDismiss) {
+            nowPlayingContent(player: player, onShowArtist: onShowArtist)
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private func nowPlayingContent(player: PlayerManager?,
+                                   onShowArtist: @escaping (JellyfinArtist) -> Void) -> some View {
+        if let player {
+            NowPlayingView(manager: player, onShowArtist: onShowArtist) {
+                player.isNowPlayingPresented = false
+            }
+            .presentationCornerRadius(20)
+            #if os(macOS)
+            .nowPlayingSheetFrame()
+            #endif
         }
     }
 
@@ -284,3 +308,15 @@ private extension View {
         #endif
     }
 }
+
+#if os(iOS)
+/// How Now Playing is presented on iOS.
+enum NowPlayingPresentation {
+    /// iPad covers the screen (the two-column layout needs ≥ 640 pt, more
+    /// than an iPad sheet's width); iPhone keeps the sheet, even on its side
+    /// where a Max is regular width.
+    static func usesFullScreenCover(idiom: UIUserInterfaceIdiom) -> Bool {
+        idiom == .pad
+    }
+}
+#endif

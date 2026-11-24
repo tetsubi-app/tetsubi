@@ -166,8 +166,6 @@ public final class PlayerManager {
     /// Each entry's place in the album or playlist it was queued from
     /// (a place, not a track ID: a playlist can hold the same song twice).
     private var sourcePositions: [String: Int] = [:]
-    /// The format asked of the server for streams.
-    private var streamFormat: AudioFormat = .alac
     private var timeObserverToken: Any?
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var lastPeriodicSave = Date.distantPast
@@ -344,9 +342,9 @@ public final class PlayerManager {
         pt.bitDepth = t.bitDepth
         pt.qualityLabel = PlaybackTrack.qualityLabel(format: AudioFormat.source(codec: t.codec, container: t.container),
                                                      bitrate: t.bitrate)
-        if localURL == nil, NetworkMonitor.shared.isExpensive, let cap = PlaybackSettings.mobileDataBitrate {
-            pt.qualityLabel = "AAC \(cap / 1000) kbps"
-            pt.bitDepth = nil
+        if localURL == nil {
+            pt.describeStream(codec: t.codec, container: t.container,
+                              mobileCap: NetworkMonitor.shared.isExpensive ? PlaybackSettings.mobileDataBitrate : nil)
         }
         return pt
     }
@@ -638,9 +636,9 @@ public final class PlayerManager {
 
     // MARK: - Playback control
 
-    /// Play an album from the given index, replacing the queue. Default
-    /// `.alac` because it is universally decodable by AVURLAsset on Apple
-    /// platforms.
+    /// Play an album from the given index, replacing the queue. Streams
+    /// don't use `format`: what is streamed follows each track's source
+    /// (`StreamURLBuilder.plan`); it only reaches the downloaded-album path.
     ///
     /// If the album is fully downloaded locally, it plays from disk
     /// automatically. Otherwise it fetches the track list and streams
@@ -793,7 +791,6 @@ public final class PlayerManager {
             return refusal
         case .success(let (items, first)):
             lastError = nil
-            streamFormat = format
             addOrder.finish(addOrder.replace()) { [self] in
                 place(items, group: Self.group(for: playlist), how: .replace(startIndex: first))
             }
@@ -909,7 +906,6 @@ public final class PlayerManager {
                 return
             }
             self.addOrder.finish(turn) {
-                self.streamFormat = format
                 let sources = tracks.map { QueueSource(track: $0, album: album) }
                 completion?(self.place(self.items(sources: sources, order: Array(sources.indices)),
                                        group: group, how: how))
@@ -926,8 +922,7 @@ public final class PlayerManager {
         case .success(let (items, _)):
             guard !items.isEmpty else { return nil }
             addOrder.finish(addOrder.reserve()) { [self] in
-                streamFormat = format
-                place(items, group: Self.group(for: playlist), how: how)
+                    place(items, group: Self.group(for: playlist), how: how)
             }
             return nil
         }
@@ -937,7 +932,6 @@ public final class PlayerManager {
                              how: Placement) -> Bool {
         guard let first = tracks.first else { return false }
         let online = NetworkMonitor.shared.isConnected
-        streamFormat = format
         // Rows built from a download (ids "<album>/<file>") play their files;
         // the rest stream, so offline they're left out.
         var localByAlbum: [String: [QueueItem]] = [:]
@@ -1076,7 +1070,6 @@ public final class PlayerManager {
         forcedStartIndex: Int?,
         format: AudioFormat
     ) {
-        streamFormat = format
         let sources = tracks.map { QueueSource(track: $0, album: album) }
         place(items(sources: sources, order: Array(sources.indices)), group: Self.group(for: album),
               how: .replace(startIndex: forcedStartIndex))
@@ -1106,11 +1099,10 @@ public final class PlayerManager {
             if pt.trackNumber == 0 { pt = pt.withTrackNumber(i + 1) }
             var qt = QueueTrack(track: source.track, album: source.album)
             qt.trackNumber = pt.trackNumber
-            // On mobile data the stream is AAC at the cap, whatever the file is.
-            // Lossy, so no bit depth; the sample rate stays the file's.
-            if let cap, source.localURL == nil {
-                pt.qualityLabel = "AAC \(cap / 1000) kbps"
-                pt.bitDepth = nil
+            // On mobile data the stream is AAC at the cap, whatever the file is;
+            // a source AVPlayer can't play is converted.
+            if source.localURL == nil {
+                pt.describeStream(codec: qt.codec, container: qt.container, mobileCap: cap)
             }
             return QueueItem(queueTrack: qt, playback: pt, sourcePosition: place)
         }
@@ -1293,7 +1285,7 @@ public final class PlayerManager {
         // of the original file.
         let cap = NetworkMonitor.shared.isExpensive ? PlaybackSettings.mobileDataBitrate : nil
         guard let url = stream.url(trackId: entry.track.id, container: entry.track.container,
-                                   format: streamFormat, maxBitrate: cap) else {
+                                   codec: entry.track.codec, maxBitrate: cap) else {
             print("[PlayerManager] StreamURLBuilder returned nil for track \(entry.track.id)")
             return nil
         }

@@ -198,34 +198,10 @@ final class StreamURLBuilderTests: XCTestCase {
         return StreamURLBuilder(api: api, userId: "user-1")
     }
 
-    /// A track whose `MediaSource.container == flac` and a target of
-    /// `.alac` should pick the universal transcode endpoint.
-    func testFlacSourceToALACTargetUsesUniversalEndpoint() throws {
-        let track = Self.makeTrack(id: "trk-1", container: "flac")
-        let url = try XCTUnwrap(makeBuilder().url(
-            for: track,
-            format: .alac
-        ))
-        // Universal endpoint: /Audio/{id}/universal
-        XCTAssertTrue(url.absoluteString.contains("/Audio/trk-1/universal"),
-                      "Expected universal endpoint, got \(url.absoluteString)")
-        // The format param should be the requested target container.
-        XCTAssertTrue(url.absoluteString.contains("Container=m4a"),
-                      "Expected Container=m4a (ALAC), got \(url.absoluteString)")
-        XCTAssertTrue(url.absoluteString.contains("UserId=user-1"),
-                      "Universal endpoint needs UserId, got \(url.absoluteString)")
-        XCTAssertTrue(url.absoluteString.contains("DeviceId="),
-                      "Universal endpoint needs DeviceId, got \(url.absoluteString)")
-    }
-
-    /// A track whose source already matches the target should direct-play
-    /// via `/Audio/{id}/stream`.
-    func testMatchingSourceUsesStreamEndpoint() throws {
+    /// A FLAC file is streamed as it is: AVFoundation plays FLAC.
+    func testFlacSourceDirectPlays() throws {
         let track = Self.makeTrack(id: "trk-2", container: "flac")
-        let url = try XCTUnwrap(makeBuilder().url(
-            for: track,
-            format: .flac
-        ))
+        let url = try XCTUnwrap(makeBuilder().url(for: track))
         XCTAssertTrue(url.absoluteString.contains("/Audio/trk-2/stream.flac"),
                       "Expected Stream endpoint, got \(url.absoluteString)")
         // ApiKey is added so AVURLAsset (which doesn't add headers) can authenticate.
@@ -797,5 +773,239 @@ final class TrackTitleTests: XCTestCase {
 
     func testNeverEmpty() {
         XCTAssertEqual(TrackTitle.clean("BrokenMan - ", artists: ["BrokenMan"]).title.isEmpty, false)
+    }
+}
+
+// MARK: - What AVPlayer streams: original or converted (HLS)
+
+final class StreamPlanTests: XCTestCase {
+
+    private func builder() -> StreamURLBuilder {
+        let api = JellyfinAPI(baseURL: URL(string: "http://jellyfin-box:8096")!, accessToken: "test-token")
+        api.setUserId("user-1")
+        return StreamURLBuilder(api: api, userId: "user-1")
+    }
+
+    private func track(_ container: String?, _ codec: String?) -> JellyfinTrack {
+        JellyfinTrack(id: "t1", name: nil, serverId: nil, indexNumber: 1, runTimeTicks: nil,
+                      album: nil, albumId: nil, albumArtists: nil, imageTags: nil,
+                      mediaSource: MediaSource(id: nil, container: container, videoType: nil,
+                                               mediaType: nil, size: nil, name: nil, codecs: codec))
+    }
+
+    private let album = JellyfinAlbum(id: "al", name: "A", serverId: nil, premiereDate: nil, productionYear: nil,
+                                      albumArtists: nil, album: nil, imageTags: nil, runTimeTicks: nil,
+                                      type: "MusicAlbum", userData: nil)
+
+    private func query(_ url: URL) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    }
+
+    func testDecisionTable() {
+        typealias P = StreamURLBuilder.StreamPlan
+        let cases: [(String?, String?, P)] = [
+            ("mp3", "mp3", .original(fileExtension: "mp3")),
+            ("flac", "flac", .original(fileExtension: "flac")),
+            ("m4a", "aac", .original(fileExtension: "m4a")),
+            ("m4a", "alac", .original(fileExtension: "m4a")),
+            ("mp4", "aac", .original(fileExtension: "mp4")),
+            ("m4b", "aac", .original(fileExtension: "m4b")),
+            ("mov,mp4,m4a,3gp,3g2,mj2", "aac", .original(fileExtension: "mp4")),
+            ("aac", "aac", .original(fileExtension: "aac")),
+            ("wav", "pcm_s16le", .original(fileExtension: "wav")),
+            ("aiff", "pcm_s16be", .original(fileExtension: "aiff")),
+            ("MP3", "MP3", .original(fileExtension: "mp3")),
+            ("flac", nil, .original(fileExtension: "flac")),
+            // Not AVPlayer's: converted, lossy to AAC, lossless or unknown to ALAC.
+            ("ogg", "opus", .converted(.aac)),
+            ("opus", "opus", .converted(.aac)),
+            ("ogg", "vorbis", .converted(.aac)),
+            ("webm", "opus", .converted(.aac)),
+            ("asf", "wmav2", .converted(.aac)),
+            ("asf", "wmalossless", .converted(.alac)),
+            ("ape", "ape", .converted(.alac)),
+            ("wv", "wavpack", .converted(.alac)),
+            ("dsf", "dsd_lsbf_planar", .converted(.alac)),
+            ("ogg", "flac", .converted(.alac)),
+            ("wav", "adpcm_ms", .converted(.alac)),
+            ("xyz", "mystery", .converted(.alac)),
+            (nil, nil, .converted(.alac)),
+            // A saved queue with only the codec.
+            (nil, "mp3", .original(fileExtension: "mp3")),
+            (nil, "opus", .converted(.aac)),
+        ]
+        for (container, codec, expected) in cases {
+            XCTAssertEqual(StreamURLBuilder.plan(codec: codec, container: container), expected,
+                           "\(container ?? "nil") / \(codec ?? "nil")")
+        }
+    }
+
+    /// The all-MP3 library that failed: each track is the original file,
+    /// with its own extension, never `/universal`.
+    func testMP3PlaysOriginalWithItsOwnExtension() throws {
+        let url = try XCTUnwrap(builder().url(for: track("mp3", "mp3")))
+        XCTAssertEqual(url.path, "/Audio/t1/stream.mp3")
+        XCTAssertEqual(query(url)["static"], "true")
+        XCTAssertEqual(query(url)["ApiKey"], "test-token")
+    }
+
+    func testPlayableFormatsNeverUseUniversal() throws {
+        for (container, codec, ext) in [("mp3", "mp3", "mp3"), ("flac", "flac", "flac"), ("m4a", "aac", "m4a"),
+                                         ("m4a", "alac", "m4a"), ("wav", "pcm_s24le", "wav"),
+                                         ("aiff", "pcm_s16be", "aiff")] {
+            let url = try XCTUnwrap(builder().url(for: track(container, codec)))
+            XCTAssertEqual(url.path, "/Audio/t1/stream.\(ext)", "\(container)/\(codec)")
+        }
+    }
+
+    /// A lossy source AVPlayer can't play: AAC 320 kbps as HLS (never plain HTTP).
+    func testOpusIsConvertedToAACOverHLS() throws {
+        let url = try XCTUnwrap(builder().url(for: track("ogg", "opus")))
+        XCTAssertEqual(url.path, "/Audio/t1/universal")
+        let q = query(url)
+        XCTAssertEqual(q["TranscodingProtocol"], "hls")
+        XCTAssertEqual(q["TranscodingContainer"], "mp4")
+        XCTAssertEqual(q["AudioCodec"], "aac")
+        // The source's own container, restricted to the target codec: one reason to convert.
+        XCTAssertEqual(q["Container"], "ogg|aac")
+        XCTAssertEqual(q["AudioBitRate"], "320000")
+        XCTAssertNil(q["MaxStreamingBitrate"])
+        XCTAssertEqual(q["UserId"], "user-1")
+        XCTAssertNotNil(q["DeviceId"])
+        XCTAssertEqual(q["ApiKey"], "test-token")
+    }
+
+    /// A lossless (or unknown) source AVPlayer can't play: ALAC as HLS, no bitrate.
+    func testLosslessUnplayableIsConvertedToALACOverHLS() throws {
+        for (container, codec) in [("ape", "ape"), ("wv", "wavpack"), ("xyz", nil)] {
+            let url = try XCTUnwrap(builder().url(for: track(container, codec)))
+            let q = query(url)
+            XCTAssertEqual(url.path, "/Audio/t1/universal")
+            XCTAssertEqual(q["TranscodingProtocol"], "hls")
+            XCTAssertEqual(q["AudioCodec"], "alac")
+            XCTAssertEqual(q["Container"], "\(container)|alac")
+            XCTAssertNil(q["AudioBitRate"])
+            XCTAssertNil(q["MaxStreamingBitrate"])
+        }
+    }
+
+    /// The converted stream is still recognised as converted (start watchdog, error text).
+    func testConvertedStreamIsWatched() throws {
+        let converted = try XCTUnwrap(builder().url(for: track("ogg", "vorbis")))
+        XCTAssertEqual(PlayerManager.firstResponseLimit(for: converted), PlayerManager.firstResponseSeconds)
+        let original = try XCTUnwrap(builder().url(for: track("mp3", "mp3")))
+        XCTAssertNil(PlayerManager.firstResponseLimit(for: original))
+    }
+
+    /// Mobile data with the cap: AAC HLS at the cap. A non-AAC source asks
+    /// for its own container restricted to AAC (one reason to convert:
+    /// several give a variant playlist AVPlayer gets HTTP 400 for).
+    func testMobileCapIsAACOverHLS() throws {
+        for (container, codec) in [("mp3", "mp3"), ("flac", "flac"), ("ogg", "opus"), ("m4a", "alac")] {
+            let url = try XCTUnwrap(builder().url(for: track(container, codec), maxBitrate: 128_000))
+            let q = query(url)
+            XCTAssertEqual(url.path, "/Audio/t1/universal")
+            XCTAssertEqual(q["Container"], "\(container)|aac")
+            XCTAssertEqual(q["TranscodingContainer"], "mp4")
+            XCTAssertEqual(q["TranscodingProtocol"], "hls")
+            XCTAssertEqual(q["AudioCodec"], "aac")
+            XCTAssertNil(q["MaxStreamingBitrate"])
+            XCTAssertEqual(q["AudioBitRate"], "128000")
+        }
+    }
+
+    /// An AAC source is converted only when over the cap (the server's
+    /// single bitrate reason); under it the server sends the file.
+    func testMobileCapOnAACSourceUsesTheBitrateLimit() throws {
+        let url = try XCTUnwrap(builder().url(for: track("mov,mp4,m4a", "aac"), maxBitrate: 256_000))
+        let q = query(url)
+        XCTAssertEqual(q["Container"], "mov,mp4,m4a")
+        XCTAssertEqual(q["TranscodingProtocol"], "hls")
+        XCTAssertEqual(q["MaxStreamingBitrate"], "256000")
+        XCTAssertEqual(q["AudioBitRate"], "256000")
+    }
+
+    func testHLSContainerFromFFprobeList() {
+        XCTAssertEqual(StreamURLBuilder.hlsContainer(source: "mov,mp4,m4a", codec: "alac"), "mov|alac,mp4|alac,m4a|alac")
+        XCTAssertEqual(StreamURLBuilder.hlsContainer(source: nil, codec: "aac"), "m4a|aac")
+    }
+
+    /// A restored queue keeps the container and codec, and streams the same way.
+    func testRestoredQueueTrackUsesItsCodec() throws {
+        let saved = QueueTrack(track: track("m4a", "AAC"), album: album)
+        let data = try JSONEncoder().encode(saved)
+        let restored = try JSONDecoder().decode(QueueTrack.self, from: data)
+        XCTAssertEqual(restored.codec, "aac")
+        let url = try XCTUnwrap(builder().url(trackId: restored.id, container: restored.container,
+                                               codec: restored.codec))
+        XCTAssertEqual(url.path, "/Audio/t1/stream.m4a")
+        let opus = QueueTrack(track: track("ogg", "opus"), album: album)
+        let converted = try XCTUnwrap(builder().url(trackId: opus.id, container: opus.container, codec: opus.codec))
+        XCTAssertEqual(query(converted)["TranscodingProtocol"], "hls")
+    }
+
+    /// Now Playing names what is actually streamed.
+    func testQualityLabelFollowsTheStream() {
+        var pt = PlaybackTrack(track: track("ogg", "opus"), album: album)
+        pt.bitDepth = 16
+        pt.describeStream(codec: "opus", container: "ogg", mobileCap: nil)
+        XCTAssertEqual(pt.qualityLabel, "AAC 320 kbps")
+        XCTAssertNil(pt.bitDepth)
+
+        var ape = PlaybackTrack(track: track("ape", "ape"), album: album)
+        ape.describeStream(codec: "ape", container: "ape", mobileCap: nil)
+        XCTAssertEqual(ape.qualityLabel, "ALAC")
+
+        var mp3 = PlaybackTrack(track: track("mp3", "mp3"), album: album)
+        let before = mp3.qualityLabel
+        mp3.describeStream(codec: "mp3", container: "mp3", mobileCap: nil)
+        XCTAssertEqual(mp3.qualityLabel, before)
+        XCTAssertEqual(before, "MP3")
+
+        mp3.describeStream(codec: "mp3", container: "mp3", mobileCap: 128_000)
+        XCTAssertEqual(mp3.qualityLabel, "AAC 128 kbps")
+    }
+
+    // MARK: Downloads
+
+    func testOriginalDownloadsArePlayableFiles() throws {
+        let b = builder()
+        for (container, codec, ext) in [("mp3", "mp3", "mp3"), ("flac", "flac", "flac"), ("m4a", "aac", "m4a"),
+                                         ("m4a", "alac", "m4a"), ("mp4", "aac", "mp4"), ("wav", "pcm_s16le", "wav")] {
+            let t = track(container, codec)
+            let format = AudioFormat.downloadFormat(for: t, preferred: nil)
+            let url = try XCTUnwrap(b.downloadURL(for: t, format: format))
+            XCTAssertEqual(url.path, "/Audio/t1/stream.\(ext)", "\(container)/\(codec)")
+        }
+    }
+
+    /// Opus (Ogg) isn't a file AVPlayer plays, so "Original" downloads FLAC,
+    /// over plain HTTP (URLSession takes that).
+    func testUnplayableOriginalDownloadsAsFLAC() throws {
+        let t = track("ogg", "opus")
+        XCTAssertEqual(AudioFormat.downloadFormat(for: t, preferred: nil), .flac)
+        XCTAssertEqual(AudioFormat.downloadFormat(for: t, preferred: .opus), .flac)
+        XCTAssertEqual(AudioFormat.downloadFormat(for: track("flac", "flac"), preferred: .opus), .flac)
+        let url = try XCTUnwrap(builder().downloadURL(for: t, format: .flac))
+        XCTAssertEqual(url.path, "/Audio/t1/universal")
+        XCTAssertEqual(query(url)["Container"], "flac")
+        XCTAssertEqual(query(url)["TranscodingProtocol"], "http")
+    }
+
+    /// AIFF counts as WAV; saved as .wav it is converted, not copied.
+    func testAIFFDownloadIsConvertedToWAV() throws {
+        let t = track("aiff", "pcm_s16be")
+        XCTAssertEqual(AudioFormat.downloadFormat(for: t, preferred: nil), .wav)
+        let url = try XCTUnwrap(builder().downloadURL(for: t, format: .wav))
+        XCTAssertEqual(url.path, "/Audio/t1/universal")
+        XCTAssertEqual(query(url)["Container"], "wav")
+    }
+
+    func testPreferredFormatDownloadConverts() throws {
+        let t = track("flac", "flac")
+        let url = try XCTUnwrap(builder().downloadURL(for: t, format: .mp3))
+        XCTAssertEqual(url.path, "/Audio/t1/universal")
+        XCTAssertEqual(query(url)["AudioCodec"], "mp3")
     }
 }

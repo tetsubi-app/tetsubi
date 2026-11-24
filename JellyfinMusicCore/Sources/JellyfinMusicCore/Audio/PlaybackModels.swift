@@ -154,6 +154,25 @@ public struct PlaybackTrack: Sendable, Identifiable, Hashable {
         return "\(khz)kHz/\(bitDepth)-bit"
     }
 
+    /// Describes what is streamed when it isn't the file itself: AAC at the
+    /// cap on mobile data, or the format the server converts a source
+    /// AVPlayer can't play to (`StreamURLBuilder.plan`). Lossy, so no bit
+    /// depth; the sample rate stays the file's. Unchanged for an original.
+    public mutating func describeStream(codec: String?, container: String?, mobileCap: Int?) {
+        if let mobileCap {
+            qualityLabel = "AAC \(mobileCap / 1000) kbps"
+            bitDepth = nil
+            return
+        }
+        guard case .converted(let format) = StreamURLBuilder.plan(codec: codec, container: container) else { return }
+        if format == .aac {
+            qualityLabel = "AAC \(StreamURLBuilder.convertedAACBitrate / 1000) kbps"
+            bitDepth = nil
+        } else {
+            qualityLabel = format.displayName
+        }
+    }
+
     /// "ALAC 905 kbps", "FLAC" (bitrate unknown), or nil (format unknown).
     public static func qualityLabel(format: AudioFormat?, bitrate: Int?) -> String? {
         guard let format else { return nil }

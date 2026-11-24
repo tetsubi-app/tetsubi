@@ -113,7 +113,7 @@ public struct SettingsView: View {
                         ) {
                             Text("Original (as served)")
                                 .tag(AudioFormat?.none)
-                            ForEach(AudioFormat.allCases, id: \.self) { fmt in
+                            ForEach(AudioFormat.allCases.filter(\.playsOnApple), id: \.self) { fmt in
                                 Text(fmt.displayName)
                                     .tag(AudioFormat?.some(fmt))
                             }

@@ -70,11 +70,12 @@ final class CappedStreamURLTests: XCTestCase {
         let q = Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems ?? []).map { ($0.name, $0.value ?? "") })
         XCTAssertEqual(q["AudioCodec"], "aac")
-        XCTAssertEqual(q["Container"], "m4a")
+        // The source's container restricted to AAC: the server's one reason is the codec.
+        XCTAssertEqual(q["Container"], "m4a|aac")
         // HLS, not plain HTTP: AVPlayer refuses a chunked transcode with no byte ranges.
         XCTAssertEqual(q["TranscodingProtocol"], "hls")
         XCTAssertEqual(q["TranscodingContainer"], "mp4")
-        XCTAssertEqual(q["MaxStreamingBitrate"], "128000")
+        XCTAssertNil(q["MaxStreamingBitrate"])
         XCTAssertEqual(q["AudioBitRate"], "128000")
         XCTAssertEqual(q["ApiKey"], "test-token")
         XCTAssertEqual(q["UserId"], "user-1")

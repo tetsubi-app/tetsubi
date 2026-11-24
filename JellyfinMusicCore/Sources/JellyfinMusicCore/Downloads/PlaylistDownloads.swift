@@ -404,7 +404,7 @@ public final class PlaylistDownloads {
             playlists: { api.playlists(completion: $0) },
             entries: { api.playlistTracks($0, completion: $1) },
             format: { AudioFormat.downloadFormat(for: $0, preferred: preferredFormat()) },
-            url: { stream.url(for: $0, format: $1) },
+            url: { stream.downloadURL(for: $0, format: $1) },
             start: { info, url in
                 var request = URLRequest(url: url)
                 // "Download over cellular" off → the session waits for Wi‑Fi.

@@ -141,12 +141,24 @@ extension AudioFormat {
     /// - `preferred == nil` means "original": whatever Jellyfin stores.
     /// - A preferred format is honoured unless the original is already of
     ///   lower or equal quality (e.g. an MP3 is never transcoded up to FLAC).
+    ///
+    /// The result is always a format AVPlayer plays from a file: Opus (in
+    /// Ogg, which AVFoundation doesn't read) becomes FLAC, as Android does
+    /// for formats its player can't decode.
     public static func downloadFormat(for track: JellyfinTrack, preferred: AudioFormat?) -> AudioFormat {
-        let original = source(of: track)
+        let chosen = choose(original: source(of: track), preferred: preferred)
+        return chosen.playsOnApple ? chosen : .flac
+    }
+
+    private static func choose(original: AudioFormat?, preferred: AudioFormat?) -> AudioFormat {
         guard let preferred else { return original ?? .flac }
         guard let original else { return preferred }
         if original == preferred { return original }
         return original.qualityRank <= preferred.qualityRank && !(original.isLossless && preferred.isLossless)
             ? original : preferred
     }
+
+    /// Whether AVPlayer plays a file of this format (as saved, with
+    /// `fileExtension`). Opus is saved in Ogg, which it doesn't.
+    public var playsOnApple: Bool { self != .opus }
 }
