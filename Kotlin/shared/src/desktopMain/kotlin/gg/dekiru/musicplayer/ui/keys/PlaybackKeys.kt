@@ -3,12 +3,12 @@ package gg.dekiru.musicplayer.ui.keys
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.awtEventOrNull
 import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.type
 import gg.dekiru.musicplayer.playback.PlayerController
 
@@ -23,7 +23,7 @@ class PlaybackKeys {
 
     /** For the window's `onKeyEvent`: true when the event was a playback key. */
     fun handle(event: KeyEvent, player: PlayerController?): Boolean {
-        val code = event.awtEventOrNull?.keyCode ?: return false
+        val code = event.key.nativeKeyCode
         if (event.type == KeyEventType.KeyUp) held.remove(code)
         val action = PlaybackKeyRule.action(
             awtKeyCode = code,
