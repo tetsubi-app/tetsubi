@@ -205,7 +205,7 @@ class MpvEngine(
 
     override fun setVolume(volume: Float) = send(listOf("set", "volume", mpvVolume(volume)))
 
-    /** There's no lock screen or media keys yet on Linux (MPRIS later): nothing to switch. */
+    /** Media keys and the desktop's panel go through the app's controller (`MprisBridge`), which knows Maniac Mode itself. */
     override fun setSkipControlsEnabled(enabled: Boolean) = Unit
 
     override fun stop() {

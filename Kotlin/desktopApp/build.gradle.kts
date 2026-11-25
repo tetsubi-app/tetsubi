@@ -1,7 +1,7 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
-// The Linux (desktop) app: window, and later the sidebar, menus, MPRIS and
-// packaging (see ../Linux/plans). Screens and logic come from :shared.
+// The Linux (desktop) app: the window, media keys (MPRIS) and packaging.
+// Screens and logic come from :shared.
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.compose.compiler)
@@ -40,12 +40,31 @@ compose.desktop {
             packageVersion = providers.gradleProperty("tetsubi.versionName").get() + "." +
                 providers.gradleProperty("tetsubi.versionCode").get()
             description = "A music player for Jellyfin"
+            // On top of Compose's default runtime modules: D-Bus (dbus-java, for MPRIS and the
+            // keyring) reads the user ID for the bus's EXTERNAL sign-in through jdk.security.auth
+            // (UnixSystem) and sets socket options through jdk.net.
+            modules("jdk.security.auth", "jdk.net")
             vendor = "DEKIRU Ltd"
             linux {
-                // Playback needs libmpv at run time. Compose has no setting for jpackage's
-                // --linux-package-deps, so the release workflow adds it to the .deb (see docs/gotchas.md).
+                // Playback needs libmpv at run time: see the package dependencies below.
                 iconFile.set(project.file("icons/tetsubi.png"))
             }
         }
+    }
+}
+
+// Playback needs libmpv, which the app loads at run time (JNA), so jpackage
+// doesn't find it, and Compose's DSL has no setting for jpackage's
+// --linux-package-deps: it goes in as a raw jpackage argument. The .deb takes
+// either Debian/Ubuntu package (libmpv2 on Debian 12 / Ubuntu 24.04 and later,
+// libmpv1 on Ubuntu 22.04); the .rpm asks for the library itself, which
+// Fedora's mpv-libs and openSUSE's libmpv2 both provide. Compose writes these
+// unquoted into jpackage's argument file, one per line, so they must have no
+// spaces (dpkg reads `a|b` as `a | b`). The release workflow checks both
+// packages (see docs/gotchas.md).
+tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>().configureEach {
+    when {
+        name.endsWith("Deb") -> freeArgs.addAll("--linux-package-deps", "libmpv2|libmpv1")
+        name.endsWith("Rpm") -> freeArgs.addAll("--linux-package-deps", "libmpv.so.2()(64bit)")
     }
 }

@@ -125,6 +125,12 @@ kotlin {
             implementation(libs.kotlinx.coroutines.swing)
             // libmpv's C API for playback (MpvEngine).
             implementation(libs.jna)
+            // D-Bus: MPRIS (media keys, now playing) and the keyring (Secret Service).
+            // The unix-socket transport uses Java's own UNIX sockets: no native library.
+            implementation(libs.dbus.java.core)
+            implementation(libs.dbus.java.transport.unixsocket)
+            // dbus-java logs through SLF4J; without a provider SLF4J warns on every start.
+            runtimeOnly(libs.slf4j.nop)
         }
     }
 }

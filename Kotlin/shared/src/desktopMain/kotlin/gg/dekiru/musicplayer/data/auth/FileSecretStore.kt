@@ -12,8 +12,8 @@ import java.util.concurrent.TimeUnit
  * The login in a file only this user can read
  * (`$XDG_DATA_HOME/gg.dekiru.musicplayer/login.properties`, else `~/.local/share/gg.dekiru.musicplayer/`).
  *
- * A stand-in until the Linux phase moves it into the system keyring
- * (Secret Service), with this as the fallback when no keyring runs.
+ * Used where there's no keyring (Secret Service) to keep it in
+ * ([desktopSecretStore]), and for the plain settings file.
  */
 class FileSecretStore(private val file: File) : SecretStore {
 
@@ -35,6 +35,10 @@ class FileSecretStore(private val file: File) : SecretStore {
         if (value == null) values.remove(key) else values.setProperty(key, value)
         save()
     }
+
+    /** Everything in it (moving a login into the keyring). */
+    @Synchronized
+    fun all(): Map<String, String> = values.stringPropertyNames().associateWith { values.getProperty(it) }
 
     @Synchronized
     override fun clear() {

@@ -2,8 +2,8 @@ package gg.dekiru.musicplayer.data.auth
 
 /**
  * Small encrypted key–value storage for the login (the iOS Keychain's job).
- * Android: Keystore-backed ([AndroidSecretStore]). Linux: Secret Service
- * later; a private file for now ([FileSecretStore]).
+ * Android: Keystore-backed ([AndroidSecretStore]). Linux: the desktop's
+ * keyring (Secret Service), else a private file (`desktopSecretStore`).
  */
 interface SecretStore {
     fun get(key: String): String?

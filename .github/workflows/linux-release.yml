@@ -49,31 +49,37 @@ jobs:
         working-directory: Kotlin
         run: ./gradlew --no-daemon :desktopApp:packageReleaseDeb :desktopApp:packageReleaseRpm :desktopApp:packageReleaseAppImage
 
-      # Playback needs libmpv, which the app loads at run time (JNA), so
-      # jpackage doesn't see it, and Compose has no setting for jpackage's
-      # --linux-package-deps: add it to the .deb's Depends here. libmpv2 on
-      # Debian 12 / Ubuntu 24.04 and later, libmpv1 on Ubuntu 22.04.
-      # (The .rpm isn't changed: Fedora users install mpv-libs.)
-      - name: Make the .deb depend on libmpv
+      # Playback needs libmpv, which the app loads at run time (JNA).
+      # desktopApp/build.gradle.kts passes it to jpackage (--linux-package-deps)
+      # for both packages; check it got there. The .deb's is added here if it
+      # didn't (the way it was done before), the .rpm's must be there.
+      - name: Check the packages depend on libmpv
         run: |
           set -euo pipefail
           DEB=$(ls Kotlin/desktopApp/build/compose/binaries/main-release/deb/*.deb)
-          fakeroot sh -c '
-            set -e
+          if ! dpkg-deb -f "$DEB" Depends | grep -q libmpv; then
+            echo "jpackage left libmpv out of the .deb: adding it"
+            fakeroot sh -c '
+              set -e
+              rm -rf debx
+              dpkg-deb -R "$1" debx
+              if grep -q "^Depends: *[^ ]" debx/DEBIAN/control; then
+                sed -i "s/^Depends: *\(.*\)$/Depends: \1, libmpv2 | libmpv1/" debx/DEBIAN/control
+              else
+                sed -i "/^Depends:/d" debx/DEBIAN/control
+                echo "Depends: libmpv2 | libmpv1" >> debx/DEBIAN/control
+              fi
+              dpkg-deb -b debx "$1"
+            ' sh "$DEB"
             rm -rf debx
-            dpkg-deb -R "$1" debx
-            if grep -q "^Depends: *[^ ]" debx/DEBIAN/control; then
-              sed -i "s/^Depends: *\(.*\)$/Depends: \1, libmpv2 | libmpv1/" debx/DEBIAN/control
-            else
-              sed -i "/^Depends:/d" debx/DEBIAN/control
-              echo "Depends: libmpv2 | libmpv1" >> debx/DEBIAN/control
-            fi
-            dpkg-deb -b debx "$1"
-          ' sh "$DEB"
-          rm -rf debx
+          fi
           DEPENDS=$(dpkg-deb -f "$DEB" Depends)
-          echo "Depends: $DEPENDS"
+          echo ".deb Depends: $DEPENDS"
           case "$DEPENDS" in *libmpv*) ;; *) exit 1 ;; esac
+          RPM=$(ls Kotlin/desktopApp/build/compose/binaries/main-release/rpm/*.rpm)
+          REQUIRES=$(rpm -qp --requires "$RPM")
+          echo ".rpm Requires:"; echo "$REQUIRES"
+          echo "$REQUIRES" | grep -q 'libmpv\.so\.2' || exit 1
 
       - name: Make the AppImage file
         run: |
@@ -95,15 +101,18 @@ jobs:
 
       # Make sure the release build still starts: it should still be running
       # after 20 seconds (timeout's exit code 124), with libmpv loaded (the
-      # app logs "Playback is off" when it can't load or start it).
+      # app logs "Playback is off" when it can't load or start it), and on its
+      # own session bus as an MPRIS player (it logs "Tetsubi MPRIS: ..." when
+      # it can't get on the bus, e.g. a runtime missing a module D-Bus needs).
       - name: Start the app once
         run: |
           set +e
-          xvfb-run -a timeout 20 Kotlin/desktopApp/build/compose/binaries/main-release/app/tetsubi/bin/tetsubi 2>&1 | tee start.log
+          xvfb-run -a dbus-run-session -- timeout 20 Kotlin/desktopApp/build/compose/binaries/main-release/app/tetsubi/bin/tetsubi 2>&1 | tee start.log
           code=${PIPESTATUS[0]}
           echo "exit code $code"
           test "$code" -eq 124 || exit 1
           if grep -q "Tetsubi playback: Playback is off" start.log; then exit 1; fi
+          if grep -q "Tetsubi MPRIS:" start.log; then exit 1; fi
 
       - name: Attach to the release
         env:

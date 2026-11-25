@@ -18,6 +18,8 @@ appcompat = "1.7.1"
 work = "2.11.0"
 glance = "1.2.0"
 jna = "5.19.1"
+dbus-java = "5.2.2"
+slf4j = "2.0.17"
 
 android-compileSdk = "37"
 android-targetSdk = "37"
@@ -54,6 +56,9 @@ androidx-mediarouter = { module = "androidx.mediarouter:mediarouter", version.re
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+dbus-java-core = { module = "com.github.hypfvieh:dbus-java-core", version.ref = "dbus-java" }
+dbus-java-transport-unixsocket = { module = "com.github.hypfvieh:dbus-java-transport-native-unixsocket", version.ref = "dbus-java" }
+slf4j-nop = { module = "org.slf4j:slf4j-nop", version.ref = "slf4j" }
 androidx-glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glance" }
 
 [plugins]

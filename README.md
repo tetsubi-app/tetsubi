@@ -28,7 +28,7 @@ Tetsubi is made by DEKIRU Ltd. It isn't affiliated with Jellyfin. Made with AI.
 | iOS, iPadOS | In testing (TestFlight) |
 | macOS | Runs; not yet distributed |
 | Android | In testing (signed APK on the [releases page](https://github.com/tetsubi-app/tetsubi/releases)) |
-| Linux | In testing: .deb, .rpm and AppImage on the [releases page](https://github.com/tetsubi-app/tetsubi/releases); plays through libmpv (install mpv); no media keys yet |
+| Linux | In testing: .deb, .rpm and AppImage on the [releases page](https://github.com/tetsubi-app/tetsubi/releases); plays through libmpv (install mpv); media keys and the desktop's now-playing panel through MPRIS; the login is kept in the desktop's keyring |
 
 ## Layout
 
