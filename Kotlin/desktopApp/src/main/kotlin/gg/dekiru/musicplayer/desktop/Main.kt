@@ -1,5 +1,6 @@
 package gg.dekiru.musicplayer.desktop
 
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -15,11 +16,14 @@ import gg.dekiru.musicplayer.data.settings.desktopEnvironment
 import gg.dekiru.musicplayer.playback.mpris.MprisBridge
 import gg.dekiru.musicplayer.resources.Res
 import gg.dekiru.musicplayer.resources.disc
+import gg.dekiru.musicplayer.ui.keys.PlaybackKeys
 import org.jetbrains.compose.resources.painterResource
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.awt.Dimension
 import java.awt.Frame
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import java.io.File
 
 fun main() {
@@ -47,6 +51,9 @@ fun main() {
         onQuit = { quit?.invoke() },
     )
 
+    // Space and the Pause key play or pause, Ctrl+P too, Ctrl+arrows skip (as on the Mac).
+    val keys = PlaybackKeys()
+
     application {
         quit = {
             mpris?.close()
@@ -58,11 +65,20 @@ fun main() {
         }
         Window(
             onCloseRequest = { quit?.invoke() },
+            // onKeyEvent, not onPreviewKeyEvent: only presses a text field or button didn't take.
+            onKeyEvent = { keys.handle(it, session.player.value) },
             title = "Tetsubi",
             state = rememberWindowState(size = DpSize(1100.dp, 760.dp)),
             icon = painterResource(Res.drawable.disc),
         ) {
             mainWindow = window
+            DisposableEffect(window) {
+                val focus = object : WindowAdapter() {
+                    override fun windowLostFocus(e: WindowEvent?) = keys.reset()
+                }
+                window.addWindowFocusListener(focus)
+                onDispose { window.removeWindowFocusListener(focus) }
+            }
             // Same minimum as the Mac app.
             window.minimumSize = Dimension(820, 560)
             App(session)

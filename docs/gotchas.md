@@ -494,6 +494,8 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 
 **`DesktopEntry` is a guess.** It is `tetsubi-tetsubi` (the name jpackage's .deb and .rpm install the .desktop file under) or `tetsubi` inside the AppImage (`$APPIMAGE` set); the panel uses it for the app's icon. Unverified on a desktop.
 
+**Keys in the window follow the Mac.** Space and Ctrl+P play or pause, Ctrl+→ and Ctrl+← skip (none in Maniac Mode), and so do the Pause/Break key (which some laptops put on an F key) and a media Play/Pause key if one reaches the window rather than the desktop. `PlaybackKeys` is the window's `onKeyEvent`, not `onPreviewKeyEvent`, so a focused text field keeps its spaces and Ctrl+arrows, as `SpaceKeyRule` does on the Mac; the rule itself is `PlaybackKeyRule`. A held key acts once (held from press to release; AWT asks X11 for detectable auto-repeat). The keyboard's media keys outside the window go through MPRIS instead. Unverified on a device.
+
 **Tests use a bus of their own.** `PrivateBus` (desktopTest) starts `dbus-daemon` with a config that activates nothing, so tests never reach the desktop's bus or start the real keyring by accident; `KeyringSecretStoreTest` starts `gnome-keyring-daemon --unlock` against it with a throwaway home. Both are skipped where the daemons aren't installed (a Mac). Checked on Ubuntu 24.04 with GNOME Keyring 46 and playerctl, not on a desktop session.
 
 **`:desktopApp` needs `components-resources` as a direct dependency.** Without it the desktop app cannot load images from the shared module.
