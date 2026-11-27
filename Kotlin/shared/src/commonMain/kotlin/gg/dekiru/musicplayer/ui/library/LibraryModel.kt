@@ -367,7 +367,7 @@ class LibraryModel(
         /** The gap between cards on wide layouts (today's comfortable gap). */
         const val WIDE_SPACING = 12f
 
-        /** Android is wide from this window width (dp) up, as iPad's regular width; the desktop always is. */
+        /** Wide from this window width (dp) up, as iPad's regular width, on Android and the desktop alike. */
         const val WIDE_WIDTH = 600f
 
         /** Text grows with the card up to this; never smaller than a phone's. */
@@ -376,8 +376,8 @@ class LibraryModel(
         /** Cover sizes asked of the server, few so the image cache keeps hitting. */
         val IMAGE_SIZES = listOf(300, 600, 1000, 1500)
 
-        /** Wide (zoom buttons, cards fill their columns): the desktop always, Android from [WIDE_WIDTH] dp. */
-        fun isWide(isAndroid: Boolean, windowWidth: Float): Boolean = !isAndroid || windowWidth >= WIDE_WIDTH
+        /** Wide (zoom buttons, cards fill their columns): from [WIDE_WIDTH] dp of window, whatever the platform. */
+        fun isWide(windowWidth: Float): Boolean = windowWidth >= WIDE_WIDTH
 
         /**
          * The grid for [width] (dp, inside the edges). Phones (not [wide]):

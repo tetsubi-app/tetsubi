@@ -20,7 +20,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import gg.dekiru.musicplayer.data.settings.Preferences
-import gg.dekiru.musicplayer.platformName
 
 /**
  * Cards per row on wide layouts (as iOS `gridColumns`): one remembered
@@ -59,11 +58,11 @@ class GridZoom(private val preferences: Preferences) {
     }
 }
 
-/** Wide layouts (zoom buttons, cards that fill their columns): the desktop always; Android from 600 dp of window. */
+/** Wide layouts (zoom buttons, cards that fill their columns): from 600 dp of window width, on every platform (follows a resized desktop window live). */
 @Composable
 fun isWideLayout(): Boolean {
     val width = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
-    return LibraryModel.isWide(platformName == "Android", width.value)
+    return LibraryModel.isWide(width.value)
 }
 
 /** Zoom out (−) then in (+), dimmed at the ends (as iOS's two toolbar buttons). */

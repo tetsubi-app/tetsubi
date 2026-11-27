@@ -150,11 +150,12 @@ class LibraryModelTest {
     // Wide grids (cards per row, zoom)
 
     @Test
-    fun wideIsTheDesktopOrA600dpAndroidWindow() {
-        assertTrue(LibraryModel.isWide(isAndroid = false, windowWidth = 400f))
-        assertFalse(LibraryModel.isWide(isAndroid = true, windowWidth = 411f))
-        assertTrue(LibraryModel.isWide(isAndroid = true, windowWidth = 600f))
-        assertFalse(LibraryModel.isWide(isAndroid = true, windowWidth = 599.9f))
+    fun wideIsA600dpWindowOnEveryPlatform() {
+        assertFalse(LibraryModel.isWide(windowWidth = 360f))
+        assertFalse(LibraryModel.isWide(windowWidth = 411f))
+        assertTrue(LibraryModel.isWide(windowWidth = 600f))
+        assertFalse(LibraryModel.isWide(windowWidth = 599.9f))
+        assertTrue(LibraryModel.isWide(windowWidth = 1100f))
     }
 
     @Test
