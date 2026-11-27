@@ -661,11 +661,14 @@ extension View {
         // `s` from the sheet's actual size, e.g. 1100 × 760 window → 940 × 700
         // sheet → s 1.15.
         let s = NowPlayingView.scale(width: window.width, height: window.height, wide: true)
-        let sized = frame(minWidth: 460,
-                          idealWidth: NowPlayingView.macSheetIdealWidth(windowWidth: window.width, s: s),
+        // A narrow window (down to 360 wide) must not be forced wider by the sheet.
+        let minWidth = window.width > 0 ? min(460, window.width) : 460
+        let minHeight = window.height > 0 ? min(560, window.height) : 560
+        let sized = frame(minWidth: minWidth,
+                          idealWidth: max(minWidth, min(NowPlayingView.macSheetIdealWidth(windowWidth: window.width, s: s), window.width > 0 ? window.width : .infinity)),
                           maxWidth: .infinity,
-                          minHeight: 560,
-                          idealHeight: NowPlayingView.macSheetIdealHeight(windowHeight: window.height, s: s),
+                          minHeight: minHeight,
+                          idealHeight: max(minHeight, min(NowPlayingView.macSheetIdealHeight(windowHeight: window.height, s: s), window.height > 0 ? window.height : .infinity)),
                           maxHeight: .infinity)
         // The default sheet sizing kept the width at about 470 whatever the
         // frame said; "fitted" takes the content's ideal size.

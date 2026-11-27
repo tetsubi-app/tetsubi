@@ -20,6 +20,8 @@ public struct AppRootView: View {
     @State private var paths: [AppTab: NavigationPath] = [:]
     /// Now Playing's artist line: shown once the sheet has closed.
     @State private var artistAfterNowPlaying: JellyfinArtist?
+    /// Mac: the window's width class, live while it is resized.
+    @State private var widthClass: WindowWidthClass = .expanded
 
     /// Shared with CarPlay (and the Mac window); see `AppSession`.
     private var session: AppSession { AppSession.shared }
@@ -72,6 +74,7 @@ public struct AppRootView: View {
         .measuresUIScale()
         // iPad full width: bigger grid cards and the +/− buttons.
         .measuresWideLayout()
+        .followsWindowWidth($widthClass)
     }
 
     // MARK: - Tabs
@@ -79,74 +82,23 @@ public struct AppRootView: View {
     private func mainTabs(
         activeAPI: JellyfinAPI
     ) -> some View {
-        TabView(selection: $selectedTab) {
-            NavigationStack(path: path(.home)) {
-                HomeView(api: activeAPI, player: player, downloadManager: downloadManager,
-                         onShowPlaylists: {
-                             libraryTabRequest = .playlists
-                             selectedTab = .library
-                         })
-                .appTheme()
-                .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
+        Group {
+            if widthClass.usesTabBar && isMac {
+                compactTabs(activeAPI: activeAPI)
+            } else {
+                TabView(selection: $selectedTab) {
+                    tabContent(.home, activeAPI: activeAPI)
+                        .tabItem { Label("Home", systemImage: AppTab.home.systemImage) }.tag(AppTab.home)
+                    tabContent(.library, activeAPI: activeAPI)
+                        .tabItem { Label("Library", systemImage: AppTab.library.systemImage) }.tag(AppTab.library)
+                    tabContent(.search, activeAPI: activeAPI)
+                        .tabItem { Label("Search", systemImage: AppTab.search.systemImage) }.tag(AppTab.search)
+                    tabContent(.downloads, activeAPI: activeAPI)
+                        .tabItem { Label("Downloads", systemImage: AppTab.downloads.systemImage) }.tag(AppTab.downloads)
+                    tabContent(.settings, activeAPI: activeAPI)
+                        .tabItem { Label("Settings", systemImage: AppTab.settings.systemImage) }.tag(AppTab.settings)
+                }
             }
-            .nowPlayingInset(player: player)
-            .tabItem { Label("Home", systemImage: "house") }
-            .tag(AppTab.home)
-
-            NavigationStack(path: path(.library)) {
-                LibraryView(
-                    api: activeAPI,
-                    player: player,
-                    downloadManager: downloadManager,
-                    tabRequest: $libraryTabRequest
-                )
-                .appTheme()
-                .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
-            }
-            .nowPlayingInset(player: player)
-            .tabItem { Label("Library", systemImage: "square.grid.2x2") }
-            .tag(AppTab.library)
-
-            NavigationStack(path: path(.search)) {
-                SearchView(
-                    api: activeAPI,
-                    player: player,
-                    downloadManager: downloadManager
-                )
-                .appTheme()
-                .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
-            }
-            .nowPlayingInset(player: player)
-            .tabItem { Label("Search", systemImage: "magnifyingglass") }
-            .tag(AppTab.search)
-
-            NavigationStack(path: path(.downloads)) {
-                DownloadsView(downloadManager: downloadManager, player: player)
-                .appTheme()
-                .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
-            }
-            .nowPlayingInset(player: player)
-            .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
-            .tag(AppTab.downloads)
-
-            NavigationStack(path: path(.settings)) {
-                SettingsView(
-                    onSignOut: {
-                        DispatchQueue.main.async {
-                            session.signOut()
-                            self.paths = [:]   // no pages from the old server
-                            self.showLogin = true
-                        }
-                    },
-                    downloadManager: downloadManager,
-                    player: player
-                )
-                .appTheme()
-                .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
-            }
-            .nowPlayingInset(player: player)
-            .tabItem { Label("Settings", systemImage: "gearshape") }
-            .tag(AppTab.settings)
         }
         .nowPlayingAccessory(player: player)
         .nowPlayingSheet(player: player, onShowArtist: { artist in
@@ -166,7 +118,12 @@ public struct AppRootView: View {
         }
         // Play on an album or playlist with more queued: Replace / Play Next / Add to Queue.
         .queuePromptHost()
-        .sidebarTabsOnMac()
+        .sidebarTabsOnMac(compact: widthClass.usesTabBar)
+        // Mac, narrow window: the phone-style bar below the mini player; the
+        // native top tab bar (and its » overflow) is hidden.
+        .compactTabBarOnMac(isOn: widthClass.usesTabBar, selection: $selectedTab) { tab in
+            paths[tab] = NavigationPath()
+        }
         // Lets the Mac menu bar (AppCommands) reach the player and tabs.
         .focusedSceneValue(\.playerManager, player)
         .focusedSceneValue(\.selectedAppTab, $selectedTab)
@@ -176,6 +133,87 @@ public struct AppRootView: View {
         // Tapping the home-screen widget with nothing playing opens Home.
         .onReceive(NotificationCenter.default.publisher(for: AppSession.showHome)) { _ in
             selectedTab = .home
+        }
+    }
+
+    private var isMac: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// Mac, narrow window: no TabView (its native bar can't be hidden on the
+    /// Mac and collapses into an overflow menu), so the tab in front is shown
+    /// with `CompactTabBar` below it. Only that tab is built: a tab kept alive
+    /// out of sight would leak its toolbar (Search's field) into the others.
+    /// The selection and every tab's pushed pages live here, so they survive.
+    private func compactTabs(activeAPI: JellyfinAPI) -> some View {
+        tabContent(selectedTab, activeAPI: activeAPI)
+    }
+
+    @ViewBuilder
+    private func tabContent(_ tab: AppTab, activeAPI: JellyfinAPI) -> some View {
+        switch tab {
+        case .home:
+            NavigationStack(path: path(.home)) {
+                HomeView(api: activeAPI, player: player, downloadManager: downloadManager,
+                         onShowPlaylists: {
+                             libraryTabRequest = .playlists
+                             selectedTab = .library
+                         })
+                .appTheme()
+                .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
+            }
+            .nowPlayingInset(player: player)
+        case .library:
+            NavigationStack(path: path(.library)) {
+                LibraryView(
+                    api: activeAPI,
+                    player: player,
+                    downloadManager: downloadManager,
+                    tabRequest: $libraryTabRequest
+                )
+                .appTheme()
+                .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
+            }
+            .nowPlayingInset(player: player)
+        case .search:
+            NavigationStack(path: path(.search)) {
+                SearchView(
+                    api: activeAPI,
+                    player: player,
+                    downloadManager: downloadManager
+                )
+                .appTheme()
+                .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
+            }
+            .nowPlayingInset(player: player)
+        case .downloads:
+            NavigationStack(path: path(.downloads)) {
+                DownloadsView(downloadManager: downloadManager, player: player)
+                .appTheme()
+                .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
+            }
+            .nowPlayingInset(player: player)
+        case .settings:
+            NavigationStack(path: path(.settings)) {
+                SettingsView(
+                    onSignOut: {
+                        DispatchQueue.main.async {
+                            session.signOut()
+                            self.paths = [:]   // no pages from the old server
+                            self.showLogin = true
+                        }
+                    },
+                    downloadManager: downloadManager,
+                    player: player
+                )
+                .appTheme()
+                .modifier(AlbumDestination(api: activeAPI, player: player, downloadManager: downloadManager))
+            }
+            .nowPlayingInset(player: player)
         }
     }
 
@@ -210,15 +248,57 @@ public struct AppRootView: View {
     }
 }
 
+// MARK: - Window width
+
+private extension View {
+    /// Mac: tracks the window's width class and passes it down, with the
+    /// wide-grid flag it implies. Does nothing on iOS (the size class does that).
+    @ViewBuilder
+    func followsWindowWidth(_ widthClass: Binding<WindowWidthClass>) -> some View {
+        #if os(macOS)
+        self
+            .onGeometryChange(for: WindowWidthClass.self) { WindowWidthClass.of(width: $0.size.width) } action: {
+                widthClass.wrappedValue = $0
+            }
+            .environment(\.windowWidthClass, widthClass.wrappedValue)
+            .environment(\.isWideLayout, widthClass.wrappedValue.usesWideGrids)
+        #else
+        self
+        #endif
+    }
+}
+
 // MARK: - Now-playing placement
 
 private extension View {
     /// Mac: show the tabs as a sidebar (macOS 15+); macOS 14 keeps tabs.
     @ViewBuilder
-    func sidebarTabsOnMac() -> some View {
+    func sidebarTabsOnMac(compact: Bool) -> some View {
         #if os(macOS)
-        if #available(macOS 15.0, *) {
+        if compact {
+            // A narrow window gets the phone layout: plain tabs, no sidebar.
+            self
+        } else if #available(macOS 15.0, *) {
             self.tabViewStyle(.sidebarAdaptable)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+
+    /// Mac, compact width: hides the native tab bar and docks `CompactTabBar`
+    /// under the content (and so under the mini player). The TabView stays, so
+    /// each tab keeps its state when the window crosses 600 pt.
+    @ViewBuilder
+    func compactTabBarOnMac(isOn: Bool, selection: Binding<AppTab>,
+                            popToRoot: @escaping (AppTab) -> Void) -> some View {
+        #if os(macOS)
+        if isOn {
+            self.safeAreaInset(edge: .bottom, spacing: 0) {
+                CompactTabBar(selection: selection, onReselect: popToRoot)
+            }
         } else {
             self
         }

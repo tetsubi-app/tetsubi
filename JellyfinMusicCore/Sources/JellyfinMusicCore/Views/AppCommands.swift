@@ -16,6 +16,17 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// The tab's SF Symbol, shared by the tab items and the compact bar.
+    public var systemImage: String {
+        switch self {
+        case .home:      "house"
+        case .library:   "square.grid.2x2"
+        case .search:    "magnifyingglass"
+        case .downloads: "arrow.down.circle"
+        case .settings:  "gearshape"
+        }
+    }
+
     /// ⌘1 … ⌘4 in the View menu (Settings uses ⌘,).
     var shortcut: KeyEquivalent? {
         switch self {

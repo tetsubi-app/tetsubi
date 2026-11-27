@@ -26,7 +26,7 @@ struct macOSApp: App {
         Window("Tetsubi", id: "main") {
             AppRootView()
                 .modelContainer(modelContainer)
-                .frame(minWidth: 820, minHeight: 560)
+                .frame(minWidth: 360, minHeight: 480)
         }
         .defaultSize(width: 1100, height: 760)
         .commands { AppCommands() }

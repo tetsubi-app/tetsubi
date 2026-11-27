@@ -230,6 +230,12 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **The Mac playback bar is limited to Settings' content width** (`readableWidthOnMac`, 720 pt, growing with the window) and has a 16 pt gap under it; the window has no safe area to provide one.
 
+**The Mac window goes down to 360 × 480 and the layout follows its width, not the platform.** `WindowWidthClass` (compact under 600 pt, medium 600 to 1023, expanded 1024 and up) is tracked live from the window by `followsWindowWidth` in `AppRootView`; it sets `isWideLayout` (phone-sized cards and no zoom buttons when compact) and chooses between the sidebar and the compact bar. The Kotlin apps use the same 600 rule (`isWide(windowWidth)`).
+
+**Compact Mac windows use a bottom `CompactTabBar`, because the native tab bar cannot be moved or hidden.** `ToolbarPlacement.tabBar` is not available on macOS, and a narrow `TabView` puts its tabs on top and, at about 360 pt, inside a `>>` overflow menu. In compact `AppRootView` does not build the `TabView` at all: it shows only the selected tab's content and docks the bar with `safeAreaInset(.bottom)`, below the mini player. Selection and navigation paths live in `AppRootView`, so they survive crossing 600 pt; per-view state such as scroll position resets when switching tabs in compact. Keeping visited tabs alive in a hidden `ZStack` was tried and leaked Search's toolbar into other tabs. In the sidebar layout the mini player has been seen to vanish once an Album page is pushed (not checked against older builds).
+
+**The Mac remembers its window size and position through AppKit's autosave** (`NSWindow Frame main` in the app's defaults, written by SwiftUI for the single `Window`), so no code of our own is involved. It flushes a moment after a resize. A dev build shares the installed app's bundle ID, defaults and login, so back up `defaults export gg.dekiru.musicplayer.macos` before testing a window change, and ad-hoc sign it (`codesign -s -`) or launchd will refuse to start it.
+
 **Mac builds can be installed by copying the app to Applications, but a running copy may refuse to quit** (an open sheet can cancel the quit request). Quit it by hand or end the process first, then relaunch; the signed-in session lives in the Keychain and is kept.
 
 ## Listening queue
@@ -479,6 +485,8 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 **Storage names carry the app ID, never the app's name.** Android's SharedPreferences files (`secrets`, `settings`, `app`), the Keystore alias (`secrets`), the WorkManager work name (`downloads`) and the desktop folders (`gg.dekiru.musicplayer` under each XDG directory) are name-free on purpose, like the bundle IDs. Changing any of them after a release would need code that moves the old data across.
 
 **The login is a plain file for now.** `FileSecretStore` writes `$XDG_DATA_HOME/gg.dekiru.musicplayer/login.properties` with mode 600; Secret Service support is planned. Settings are in `$XDG_CONFIG_HOME/gg.dekiru.musicplayer/settings.properties` and caches under `$XDG_CACHE_HOME/gg.dekiru.musicplayer`.
+
+**The desktop window goes down to 360 × 480 and remembers its size and position.** `Main.kt` saves the bounds 500 ms after a resize or move stops, and on close, as `window.bounds` (`x,y,width,height,maximised`) in `settings.properties`. `WindowPlacementRules.resolve` (pure, tested in `WindowBoundsTest`) never restores below the minimum, moves the window fully onto the screen it mostly sits on, and falls back to the centred 1100 × 760 default if less than 120 × 60 of it is visible on any screen. Layout is chosen by window width like Android: wide from 600 dp, so a narrow desktop window shows the phone layout. The bottom tab bar shows at every width; there is no sidebar yet.
 
 **`:desktopApp` needs `components-resources` as a direct dependency.** Without it the desktop app cannot load images from the shared module.
 
