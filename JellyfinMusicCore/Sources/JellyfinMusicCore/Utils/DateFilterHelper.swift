@@ -12,6 +12,14 @@ public struct DatedAlbum: Sendable {
 /// on today's month-day, ignoring the year.  No minimum distance limit.
 public struct DateFilterHelper {
 
+    /// The calendar for reading a release date's month, day and year. `JellyfinAlbum.releaseDate` is the
+    /// release day at midnight UTC, so it must be read in UTC whatever the phone's time zone is.
+    static let releaseCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+
     /// Returns albums whose release month/day match today's month/day,
     /// sorted by most recent (fewest years ago) first.
     ///
@@ -28,13 +36,13 @@ public struct DateFilterHelper {
 
         return albums.compactMap { album in
             let rd = album.releaseDate
-            let albumMD = calendar.dateComponents([.month, .day], from: rd)
+            let albumMD = releaseCalendar.dateComponents([.month, .day], from: rd)
             guard todayMD.month == albumMD.month,
                   todayMD.day == albumMD.day else {
                 return nil
             }
             let todayYear = calendar.component(.year, from: today)
-            let rdYear = calendar.component(.year, from: rd)
+            let rdYear = releaseCalendar.component(.year, from: rd)
             let yearsAgo = todayYear - rdYear
             return yearsAgo > 0 ? (yearsAgo, rd) : nil
         }.sorted { $0.yearsAgo < $1.yearsAgo }
@@ -55,9 +63,11 @@ public struct DateFilterHelper {
         return albums
             .compactMap { album -> (album: JellyfinAlbum, yearsAgo: Int, releaseDate: Date)? in
                 guard let rd = album.releaseDate else { return nil }
-                let md = calendar.dateComponents([.month, .day], from: rd)
+                // A release date is a calendar day, kept as midnight UTC: read its day in UTC, not in the
+                // phone's time zone (which, west of UTC, would show the day before).
+                let md = releaseCalendar.dateComponents([.month, .day], from: rd)
                 guard md.month == todayMD.month, md.day == todayMD.day else { return nil }
-                let yearsAgo = todayYear - calendar.component(.year, from: rd)
+                let yearsAgo = todayYear - releaseCalendar.component(.year, from: rd)
                 return yearsAgo > 0 ? (album, yearsAgo, rd) : nil
             }
             .sorted { $0.yearsAgo < $1.yearsAgo }

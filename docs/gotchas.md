@@ -328,7 +328,7 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 
 **`PremiereDate` is a fractional-second ISO string.** A value such as `1994-10-31T00:00:00.0000000Z` defeats `ISO8601DateFormatter` with `.withInternetDateTime`. Slice the leading `yyyy-MM-dd` and parse that, and filter out year-one junk dates.
 
-**The server cannot match "this month and day in any year".** On This Day fetches every album's ID, name and release date only (`EnableImages=false`, `EnableUserData=false`, `EnableTotalRecordCount=false`), matches on the device, then fetches just the matches in full.
+**The server cannot match "this month and day in any year".** On This Day fetches every album's ID, name and release date only (`EnableImages=false`, `EnableUserData=false`, `EnableTotalRecordCount=false`), matches on the device, then fetches just the matches in full. A release date is a calendar day: Swift holds it as midnight UTC, so its month and day are read with a UTC calendar (`DateFilterHelper.releaseCalendar`) while "today" uses the phone's time zone; reading both in the phone's zone showed the previous day's albums on a phone west of UTC. Kotlin's `LocalDate` has no time zone and is unaffected.
 
 **Album `SearchTerm` matches titles only.** Searching an artist's name finds no albums, so `AlbumSearch` also calls `/Artists/AlbumArtists?searchTerm=` and adds those artists' albums.
 
