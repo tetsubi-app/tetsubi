@@ -70,8 +70,10 @@ public enum ServerDiscovery {
     }
 
     private static func isIPAddress(_ host: String) -> Bool {
+        // `URLComponents.host` keeps an IPv6 address's square brackets ("[::1]"); inet_pton wants none.
+        let bare = host.hasPrefix("[") && host.hasSuffix("]") ? String(host.dropFirst().dropLast()) : host
         var v4 = in_addr(), v6 = in6_addr()
-        return inet_pton(AF_INET, host, &v4) == 1 || inet_pton(AF_INET6, host, &v6) == 1
+        return inet_pton(AF_INET, bare, &v4) == 1 || inet_pton(AF_INET6, bare, &v6) == 1
     }
 
     /// Keeps one entry per server (the first reply wins), sorted by name.

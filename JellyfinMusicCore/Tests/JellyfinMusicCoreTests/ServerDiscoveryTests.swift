@@ -17,6 +17,13 @@ final class ServerDiscoveryTests: XCTestCase {
         XCTAssertEqual(server?.address, "http://192.168.1.50:8096")
     }
 
+    func testIPv6LoopbackAddressIsSwappedForTheSender() {
+        // A server listening on IPv6 can report "http://[::1]:8096", which URLComponents hands back with brackets.
+        let json = #"{"Address":"http://[::1]:8096","Id":"abc123","Name":"Mini-PC"}"#
+        let server = ServerDiscovery.parse(Data(json.utf8), senderIP: "192.168.1.50")
+        XCTAssertEqual(server?.address, "http://192.168.1.50:8096")
+    }
+
     func testHostnameAddressIsKept() {
         XCTAssertEqual(
             ServerDiscovery.preferredAddress(reported: "https://music.example.com", senderIP: "192.168.1.50"),

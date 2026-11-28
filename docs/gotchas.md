@@ -368,7 +368,7 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 
 **macOS refuses to send to 255.255.255.255 with several interfaces up.** Send to each interface's own broadcast address as well.
 
-**A Docker server replies with its container address.** When the reply's address is a bare IP that is not the sender's, `preferredAddress` swaps in the sender's IP; hostnames are kept.
+**A Docker server replies with its container address.** When the reply's address is a bare IP that is not the sender's, `preferredAddress` swaps in the sender's IP; hostnames are kept. With IPv6 switched on, Jellyfin can report `http://[::1]:8096`: Swift's `URLComponents.host` keeps the brackets (`[::1]`), so the IP check must strip them (it did not, and phones were offered the loopback address). Kotlin treats any host containing `:` as an IP.
 
 **Stop the receive loop on a real socket error.** A failed `recvfrom` that was not a timeout once spun about four million times in 2.5 seconds.
 

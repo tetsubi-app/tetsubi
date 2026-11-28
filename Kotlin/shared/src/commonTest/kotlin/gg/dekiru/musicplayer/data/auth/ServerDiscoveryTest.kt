@@ -26,6 +26,12 @@ class ServerDiscoveryTest {
     }
 
     @Test
+    fun ipv6LoopbackAddressIsSwappedForTheSender() = assertEquals(
+        "http://192.168.1.50:8096",
+        ServerDiscovery.preferredAddress("http://[::1]:8096", senderIp = "192.168.1.50"),
+    )
+
+    @Test
     fun hostnameAddressIsKept() = assertEquals(
         "https://music.example.com",
         ServerDiscovery.preferredAddress("https://music.example.com", senderIp = "192.168.1.50"),
