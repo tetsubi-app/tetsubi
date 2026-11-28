@@ -582,10 +582,12 @@ extension View {
         let minHeight = window.height > 0 ? min(560, window.height) : 560
         let sized = frame(minWidth: minWidth,
                           idealWidth: max(minWidth, min(NowPlayingLayout.macSheetIdealWidth(windowWidth: window.width), window.width > 0 ? window.width : .infinity)),
-                          maxWidth: .infinity,
+                          // Capped at the window, and recomputed as it is resized
+                          // (UIScale is observed), so an open sheet follows a shrinking window.
+                          maxWidth: window.width > 0 ? max(window.width, minWidth) : .infinity,
                           minHeight: minHeight,
                           idealHeight: max(minHeight, min(NowPlayingLayout.macSheetIdealHeight(windowHeight: window.height), window.height > 0 ? window.height : .infinity)),
-                          maxHeight: .infinity)
+                          maxHeight: window.height > 0 ? max(window.height, minHeight) : .infinity)
         // The default sheet sizing kept the width at about 470 whatever the
         // frame said; "fitted" takes the content's ideal size.
         if #available(macOS 15.0, *) {

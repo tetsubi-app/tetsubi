@@ -180,6 +180,8 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **Xcode 27 has no Simulator app, so `xcrun simctl` cannot tap.** For checks on simulators a temporary launch hook (environment variables passed with `SIMCTL_CHILD_`) signs in and picks the tab; remove it before committing. Screenshots with `xcrun simctl io <udid> screenshot`. A shell call keeps no environment from the last one, so export the variables in the same command that launches.
 
+**Rotating an iPad simulator, and opening its sidebar, goes through Device Hub.** `requestGeometryUpdate` fails there ("windowing mode does not allow programmatic changes"). Select the iPad in Device Hub's list, then use the rotate button under the device (or Device > Enter Resize Mode); the sidebar toggle is tappable in the same window. Landscape iPad shows the sidebar by default; its toggle gives the top tab bar.
+
 **Never wrap the root view in a `NavigationStack`.** An extra stack around `AppRootView` made every tab's own stack lose its bar, including titles, toolbars and the search field.
 
 **Declare the album `navigationDestination` on every tab's stack.** A stack without `AlbumDestination` broke album links elsewhere after that tab had been visited.
@@ -489,6 +491,10 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 **To see playback screens on a Mac without libmpv, use a temporary fake player engine in `desktopApp`'s `Main.kt` and revert it.** Compose desktop ignores System Events (AX) clicks; use real mouse events (CGEvent) for UI checks, and an isolated `XDG_*` set so the user's settings are untouched.
 
 **An adaptive grid can leave ragged last rows.** The shared grid accepts that (the last row is left aligned) rather than stretching cards.
+
+**Use `SeekSlider`, not Material's `Slider`, for playback position.** Material 3's default thumb draws a tall bar at the left of a thin track. `SeekSlider` (Now Playing and the mini player) has a 4 dp track, blue progress and a 12 dp round thumb that grows to 16 dp on hover, drag or focus, on a fixed-size box so the track never shifts. Progress is blue everywhere, not the art-derived accent.
+
+**`SettingsRow` lets the label wrap and caps the value.** The label takes the remaining width (two lines, ellipsis) and the value is limited to 60% of the row with a 12 dp gap, so long labels like "Default format" never touch their value. Artists with no picture use the lighter `surface` placeholder, circle capped at 240 (two-pane) or 200 (stacked), as on Apple.
 
 **Japanese text falls back to the system font.** DEKIRU Sans has no CJK glyphs; the fallback looks fine, and bundling a CJK face was rejected because of its size (about 5 MB a weight).
 

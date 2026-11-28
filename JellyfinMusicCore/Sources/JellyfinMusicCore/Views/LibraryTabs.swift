@@ -314,9 +314,9 @@ struct ArtistAlbumsView: View {
         VStack(spacing: 0) {
             PageHeader(nil, onBack: { dismiss() }) { PageControls(density: true) }
             DetailPage { metrics in
-                // Smaller when stacked and a lighter placeholder: many artists
-                // have no picture, and a big grey disc dominated the page.
-                let artSize = metrics.twoPane ? metrics.artSize : min(metrics.artSize, 200)
+                // Smaller than an album's cover and a lighter placeholder: many
+                // artists have no picture, and a big grey disc dominated the page.
+                let artSize = min(metrics.artSize, metrics.twoPane ? 240 : 200)
                 AlbumArtView(request: api?.imageURLRequest(for: artist.id, size: 600), size: artSize,
                              cornerRadius: artSize / 2, placeholderColor: TetsubiColors.surface)
                 DetailTitleBlock(metrics: metrics, title: artist.name,
