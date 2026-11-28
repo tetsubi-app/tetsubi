@@ -67,81 +67,29 @@ final class GridExportTests: XCTestCase {
 
     // MARK: Albums the page shows
 
-    func testPageShowsExactlyTheExportedAlbums() {
-        func shown(_ count: Int, _ chosen: Int) -> [String] {
-            GridExport.shownAlbums(albums(count), chosen: chosen).map(\.id)
-        }
-        // Enough for every size: n² for the chosen n.
-        XCTAssertEqual(shown(60, 3), (0..<9).map { "a\($0)" })
-        XCTAssertEqual(shown(60, 4), (0..<16).map { "a\($0)" })
-        XCTAssertEqual(shown(60, 5), (0..<25).map { "a\($0)" })
-        XCTAssertEqual(shown(25, 5).count, 25)
-        // Too few for the choice: the biggest that fits.
-        XCTAssertEqual(shown(24, 5).count, 16)
-        XCTAssertEqual(shown(15, 5).count, 9)
-        XCTAssertEqual(shown(15, 4).count, 9)
-        XCTAssertEqual(shown(20, 4).count, 16)
-        XCTAssertEqual(shown(20, 3).count, 9)
-        // Under 9 (no export): all of them.
-        XCTAssertEqual(shown(8, 5), (0..<8).map { "a\($0)" })
-        XCTAssertEqual(shown(1, 3), ["a0"])
-        XCTAssertEqual(shown(0, 5), [])
-        // A repeat counts once, at its most recent place.
+    /// The page's grid shows every album the list holds, each once (at its
+    /// most recent place); the export's size no longer sets what or how many.
+    func testPageShowsEveryAlbumOnce() {
+        XCTAssertEqual(GridExport.distinct(albums(60)).count, 60)
+        XCTAssertEqual(GridExport.distinct([]).count, 0)
         var list = albums(10)
         list.insert(list[0], at: 2)
-        XCTAssertEqual(GridExport.shownAlbums(list, chosen: 3).map(\.id), (0..<9).map { "a\($0)" })
+        XCTAssertEqual(GridExport.distinct(list).map(\.id), (0..<10).map { "a\($0)" })
     }
 
+    /// Changing the export's size is remembered and leaves the albums shown alone.
     @MainActor
-    func testGridFollowsTheChosenSize() {
+    func testSizeChoiceIsRememberedButDoesNotChangeTheGrid() {
         let defaults = UserDefaults(suiteName: "GridExportTests.follow")!
         defaults.removePersistentDomain(forName: "GridExportTests.follow")
         let settings = GridExportSettings(defaults: defaults)
         let list = albums(30)
-        XCTAssertEqual(GridExport.shownAlbums(list, chosen: settings.size).count, 25)
         settings.size = 3
-        XCTAssertEqual(GridExport.shownAlbums(list, chosen: settings.size).count, 9)
+        XCTAssertEqual(GridExport.distinct(list).count, 30)
         settings.size = 4
-        XCTAssertEqual(GridExport.shownAlbums(list, chosen: settings.size).count, 16)
         XCTAssertEqual(defaults.integer(forKey: "recentlyPlayed.exportSize"), 4)
+        XCTAssertEqual(GridExport.albums(list, size: settings.size)?.count, 16)
         defaults.removePersistentDomain(forName: "GridExportTests.follow")
-    }
-
-    /// The page's grid is as many across as the export's size; below 9
-    /// albums the Library's usual columns (nil).
-    func testPageColumnsFollowTheExportSize() {
-        let list = albums(30)
-        XCTAssertEqual(GridExport.gridColumns(list, chosen: 3), 3)
-        XCTAssertEqual(GridExport.gridColumns(list, chosen: 4), 4)
-        XCTAssertEqual(GridExport.gridColumns(list, chosen: 5), 5)
-        XCTAssertEqual(GridExport.gridColumns(albums(12), chosen: 5), 3)   // the size used
-        XCTAssertNil(GridExport.gridColumns(albums(8), chosen: 5))
-        XCTAssertNil(GridExport.gridColumns(albums(8) + albums(8), chosen: 3))   // each album once
-    }
-
-    /// Covers fill exactly n columns on any width; the text grows with
-    /// the card but never below a phone's.
-    func testFixedColumnsFillTheirColumns() {
-        let phone3 = LibraryView.gridMetrics(width: 393 - 8, columns: 3, displayScale: 3)
-        XCTAssertEqual(phone3.columns, 3)
-        XCTAssertEqual(phone3.spacing, 12)
-        XCTAssertEqual(phone3.cardWidth, (385 - 24) / 3, accuracy: 0.001)
-        XCTAssertEqual(phone3.imageSize, 600)
-
-        let phone5 = LibraryView.gridMetrics(width: 360 - 8, columns: 5)
-        XCTAssertEqual(phone5.columns, 5)
-        XCTAssertEqual(phone5.cardWidth, (352 - 48) / 5, accuracy: 0.001)
-        XCTAssertEqual(phone5.textScale, 1)   // the phone's text, cut short
-
-        let mac5 = LibraryView.gridMetrics(width: 1000, columns: 5)
-        XCTAssertEqual(mac5.cardWidth, (1000 - 48) / 5, accuracy: 0.001)
-        XCTAssertEqual(mac5.textScale, (1000 - 48) / 5 / 120, accuracy: 0.001)
-
-        XCTAssertEqual(LibraryView.gridMetrics(width: 3000, columns: 3).textScale, 3)   // at most 3×
-        // The Mac's UI scale grows the gap and the card the text is measured against.
-        let scaled = LibraryView.gridMetrics(width: 1000, scale: 1.5, columns: 4)
-        XCTAssertEqual(scaled.spacing, 18)
-        XCTAssertEqual(scaled.textScale, (1000 - 54) / 4 / 180, accuracy: 0.001)
     }
 
     // MARK: Tiles

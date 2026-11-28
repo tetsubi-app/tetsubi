@@ -65,13 +65,12 @@ public struct ServerConfigView: View {
         // No NavigationStack: it would paint an opaque system background
         // over the app's background picture (AppRootView applies appTheme).
         ScrollView {
-            VStack(spacing: 20) {
+            // One centred card (max 440): logo, title, server, the two ways in.
+            VStack(spacing: Spacing.l) {
                 header
 
-                // Server URL — shared by both flows.
-                box {
-                    VStack(alignment: .leading, spacing: 14) {
-                    field("Server URL") {
+                VStack(alignment: .leading, spacing: Spacing.m) {
+                    field("Server address") {
                         TextField(Self.exampleURL, text: $serverURL)
                             .autocorrectionDisabled()
                             #if os(iOS)
@@ -85,8 +84,9 @@ public struct ServerConfigView: View {
                             }
                     }
                     discoveryList
-                    }
                 }
+
+                Hairline()
 
                 // The two login modes swap in place.
                 if mode == .quickConnect {
@@ -95,9 +95,12 @@ public struct ServerConfigView: View {
                     manualPanel
                 }
             }
-            .padding()
-            .frame(maxWidth: 440.scaled)
+            .padding(Spacing.xl)
+            .frame(maxWidth: 440)
+            .background(TetsubiColors.surface, in: RoundedRectangle(cornerRadius: Radii.panel))
+            .padding(Spacing.l)
             .frame(maxWidth: .infinity)
+            .padding(.vertical, Spacing.xl)
         }
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
@@ -125,151 +128,134 @@ public struct ServerConfigView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: Spacing.s) {
             // The app icon's disc (DiscLogo in each app's asset catalog).
             Image("DiscLogo")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 112.scaled, height: 112.scaled)
-                .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+                .frame(width: 88, height: 88)
                 .accessibilityHidden(true)
             Text("Sign in to Jellyfin")
-                .font(.plex(.title2).bold())
+                .font(TetsubiType.pageTitle)
+                .foregroundStyle(TetsubiColors.textPrimary)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
             Text("Tetsubi")
-                .font(.plex(.subheadline))
-                .foregroundStyle(Color.albumArtistText)
+                .font(TetsubiType.body)
+                .foregroundStyle(TetsubiColors.textSecondary)
         }
-        .padding(.top, 40)
-        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Quick Connect panel
 
     private var quickConnectPanel: some View {
-        box {
-            VStack(spacing: 12) {
-                Text("Quick Connect")
-                    .font(.plex(.headline))
-                Text("Approve this login on your Jellyfin server, or in the Jellyfin app on another device you're signed into.")
-                    .font(.plex(.footnote))
-                    .foregroundStyle(Color.albumArtistText)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: Spacing.m) {
+            Text("Quick Connect")
+                .font(TetsubiType.sectionTitle)
+                .foregroundStyle(TetsubiColors.textPrimary)
+            Text("Approve this login on your Jellyfin server, or in the Jellyfin app on another device you're signed into.")
+                .font(TetsubiType.body)
+                .foregroundStyle(TetsubiColors.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
 
-                if isFindingServer {
-                    waiting("Finding server…")
-                } else {
+            if isFindingServer {
+                waiting("Finding server…")
+            } else {
                 switch quickConnect.state {
                 case .starting:
                     waiting("Requesting login code…")
                 case .pending(let code):
-                    VStack(spacing: 10) {
+                    VStack(spacing: Spacing.s) {
                         Text(code)
                             .font(.plex(size: 44, weight: .bold))
                             .monospacedDigit()
                             .tracking(4)
-                            .foregroundStyle(Color.appBlue)
+                            .foregroundStyle(TetsubiColors.blue)
                             .textSelection(.enabled)
-                            .padding(.vertical, 4)
+                            .padding(.vertical, Spacing.xs)
                         waiting("Waiting for approval…")
                     }
                 case .failed(let message):
                     errorText(message)
                 case .idle:
                     Text(hasServerURL ? "Press return to get a code." : "Choose your server above, or type its address.")
-                        .font(.plex(.footnote))
-                        .foregroundStyle(Color.albumYearText)
+                        .font(TetsubiType.body)
+                        .foregroundStyle(TetsubiColors.textTertiary)
                         .multilineTextAlignment(.center)
                 }
-                }
-
-                // Let the user bypass Quick Connect and sign in with credentials.
-                switchButton("Sign in with username & password") {
-                    quickConnect.cancel()
-                    mode = .manual
-                }
             }
-            .frame(maxWidth: .infinity)
+
+            // Let the user bypass Quick Connect and sign in with credentials.
+            ActionChip("Sign in with username & password", color: TetsubiColors.blue) {
+                quickConnect.cancel()
+                mode = .manual
+            }
+            .padding(.top, Spacing.xs)
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Username & password panel
 
     private var manualPanel: some View {
-        box {
-            VStack(spacing: 14) {
-                Text("Username & password")
-                    .font(.plex(.headline))
+        VStack(spacing: Spacing.m) {
+            Text("Username & password")
+                .font(TetsubiType.sectionTitle)
+                .foregroundStyle(TetsubiColors.textPrimary)
 
-                if let errorMessage {
-                    errorText(errorMessage)
-                }
-
-                field("Username") {
-                    TextField("Username", text: $username)
-                        .autocorrectionDisabled()
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .textContentType(.username)
-                        #endif
-                }
-
-                field("Password") {
-                    SecureField("Password", text: $password)
-                        #if os(iOS)
-                        .textContentType(.password)
-                        #endif
-                        .onSubmit { if !password.isEmpty && !isConnecting { connect() } }
-                }
-
-                Button {
-                    connect()
-                } label: {
-                    HStack(spacing: 8) {
-                        if isConnecting { ProgressView().controlSize(.small) }
-                        Text(isConnecting ? "Signing in…" : "Sign in")
-                            .bold()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.appBlue)
-                .disabled(isConnecting || password.isEmpty || !hasServerURL)
-                .padding(.top, 4)
-
-                // Back to Quick Connect, with a fresh code.
-                switchButton("Use Quick Connect instead") {
-                    errorMessage = nil
-                    mode = .quickConnect
-                    startQuickConnect()
-                }
-                .disabled(isConnecting)
+            if let errorMessage {
+                errorText(errorMessage)
             }
-            .frame(maxWidth: .infinity)
+
+            field("Username") {
+                TextField("Username", text: $username)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    .textContentType(.username)
+                    #endif
+            }
+
+            field("Password") {
+                SecureField("Password", text: $password)
+                    #if os(iOS)
+                    .textContentType(.password)
+                    #endif
+                    .onSubmit { if !password.isEmpty && !isConnecting { connect() } }
+            }
+
+            PrimaryButton(isConnecting ? "Signing in…" : "Sign in",
+                          enabled: !password.isEmpty && hasServerURL, working: isConnecting, fullWidth: true) {
+                connect()
+            }
+            .padding(.top, Spacing.xs)
+
+            // Back to Quick Connect, with a fresh code.
+            ActionChip("Use Quick Connect instead", color: TetsubiColors.blue) {
+                errorMessage = nil
+                mode = .quickConnect
+                startQuickConnect()
+            }
+            .disabled(isConnecting)
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Servers on the network
 
     private var discoveryList: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             HStack {
                 Text("On your network")
-                    .font(.plex(.caption))
-                    .foregroundStyle(Color.albumArtistText)
+                    .font(TetsubiType.caption)
+                    .foregroundStyle(TetsubiColors.textSecondary)
                 Spacer()
                 if isSearching {
                     ProgressView().controlSize(.small)
                 } else {
-                    Button {
-                        searchNetwork()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Color.appBlue)
-                    .accessibilityLabel("Search again")
+                    ActionChip("Search again", color: TetsubiColors.blue) { searchNetwork() }
                 }
             }
 
@@ -277,8 +263,8 @@ public struct ServerConfigView: View {
                 Text(isSearching || !hasSearched
                      ? "Looking for servers…"
                      : "No servers found. Type your server's address above.")
-                    .font(.plex(.footnote))
-                    .foregroundStyle(Color.albumYearText)
+                    .font(TetsubiType.body)
+                    .foregroundStyle(TetsubiColors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -287,26 +273,27 @@ public struct ServerConfigView: View {
                 Button {
                     pick(server)
                 } label: {
-                    HStack(spacing: 10) {
+                    HStack(spacing: Spacing.m) {
                         Image(systemName: "server.rack")
-                            .foregroundStyle(Color.appBlue)
-                        VStack(alignment: .leading, spacing: 1) {
+                            .foregroundStyle(TetsubiColors.blue)
+                        VStack(alignment: .leading, spacing: 0) {
                             Text(server.name)
-                                .font(.plex(.subheadline).bold())
+                                .font(TetsubiType.rowTitle)
+                                .foregroundStyle(TetsubiColors.textPrimary)
                             Text(server.address)
-                                .font(.plex(.caption))
-                                .foregroundStyle(Color.albumArtistText)
+                                .font(TetsubiType.caption)
+                                .foregroundStyle(TetsubiColors.textSecondary)
                         }
                         Spacer()
                         if selected {
                             Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(Color.appBlue)
+                                .foregroundStyle(TetsubiColors.blue)
                         }
                     }
-                    .padding(10)
+                    .padding(Spacing.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(selected ? Color.appBlue.opacity(0.2) : Color.white.opacity(0.06),
-                                in: RoundedRectangle(cornerRadius: 8))
+                    .background(selected ? TetsubiColors.blueTint : TetsubiColors.surface,
+                                in: RoundedRectangle(cornerRadius: Radii.card))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -343,55 +330,39 @@ public struct ServerConfigView: View {
 
     // MARK: - Building blocks
 
-    /// A dark rounded box, as on Settings and Downloads.
-    private func box<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.appGroupBackground, in: RoundedRectangle(cornerRadius: 12))
-    }
-
     /// A labelled text field on a translucent fill.
     private func field<Field: View>(_ label: String, @ViewBuilder _ input: () -> Field) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(label)
-                .font(.plex(.caption))
-                .foregroundStyle(Color.albumArtistText)
+                .font(TetsubiType.caption)
+                .foregroundStyle(TetsubiColors.textSecondary)
             input()
+                .font(TetsubiType.body)
                 .textFieldStyle(.plain)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, Spacing.m)
                 .padding(.vertical, 10)
-                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.15)))
+                .background(TetsubiColors.surface, in: RoundedRectangle(cornerRadius: Radii.card))
+                .overlay(RoundedRectangle(cornerRadius: Radii.card).strokeBorder(TetsubiColors.hairline))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func waiting(_ text: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.s) {
             ProgressView().controlSize(.small)
             Text(text)
-                .font(.plex(.footnote))
-                .foregroundStyle(Color.albumArtistText)
+                .font(TetsubiType.body)
+                .foregroundStyle(TetsubiColors.textSecondary)
         }
     }
 
     private func errorText(_ message: String) -> some View {
         Label(message, systemImage: "exclamationmark.triangle.fill")
-            .font(.plex(.footnote))
-            .foregroundStyle(Color(red: 1, green: 0.55, blue: 0.55))
+            .font(TetsubiType.body)
+            .foregroundStyle(TetsubiColors.red)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// The link that swaps between the two sign-in methods.
-    private func switchButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .font(.plex(.footnote).bold())
-            .buttonStyle(.borderless)
-            .foregroundStyle(Color.appBlue)
-            .padding(.top, 2)
     }
 
     /// Works out the full address (`ServerAddress`: adds http://, tries

@@ -2,33 +2,62 @@
 
 import SwiftUI
 
+/// The equaliser: on/off, a preset, and ten bands. A pushed page on compact
+/// (`embedded` false: its own header with Back), a section of Settings'
+/// Playback on wide (`embedded` true: just the groups).
 public struct EqualizerView: View {
     @State private var enabled = AudioEffects.shared.equalizerEnabled
     @State private var gains = AudioEffects.shared.equalizerGains
     @State private var preset = PlaybackSettings.equalizerPreset
 
-    public init() {}
+    private let embedded: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    public init(embedded: Bool = false) { self.embedded = embedded }
 
     public var body: some View {
-        Form {
-            Section {
-                Toggle("Equaliser", isOn: $enabled)
-                Picker("Preset", selection: $preset) {
-                    ForEach(EqualizerPreset.allCases, id: \.self) { Text($0.displayName).tag($0) }
+        Group {
+            if embedded {
+                groups
+            } else {
+                VStack(spacing: 0) {
+                    PageHeader("Equaliser", onBack: { dismiss() })
+                    ScrollView {
+                        groups
+                            .padding(.top, Spacing.s)
+                            .padding(.bottom, Spacing.xxl)
+                    }
                 }
-                .disabled(!enabled)
-            } footer: {
-                Text("Changes apply straight away. When bands are boosted the overall level is lowered to avoid distortion. While the equaliser is on, there's a short pause between tracks — turn it off for gapless playback. The equaliser doesn't apply when playing over AirPlay.")
+                .ownsItsHeader(isDetail: true)
             }
-            .listRowBackground(Color.appGroupBackground)
+        }
+        .onChange(of: preset) { _, new in
+            PlaybackSettings.equalizerPreset = new
+            if let presetGains = new.gains { gains = presetGains }
+        }
+        .onChange(of: enabled) { _, _ in apply() }
+        .onChange(of: gains) { _, _ in apply() }
+    }
 
-            Section {
+    private var groups: some View {
+        VStack(alignment: .leading, spacing: Spacing.l) {
+            SettingsGroup(
+                title: embedded ? "Equaliser" : nil,
+                footer: "Changes apply straight away. When bands are boosted the overall level is lowered to avoid distortion. While the equaliser is on, there's a short pause between tracks — turn it off for gapless playback. The equaliser doesn't apply when playing over AirPlay."
+            ) {
+                SettingsToggleRow("Equaliser", isOn: $enabled)
+                SettingsMenuRow("Preset", selection: $preset,
+                                options: EqualizerPreset.allCases.map { ($0, $0.displayName) }, divider: false)
+                    .opacity(enabled ? 1 : 0.4)
+                    .disabled(!enabled)
+            }
+            SettingsGroup(title: "Bands (dB)") {
                 HStack(alignment: .bottom, spacing: 0) {
                     ForEach(AudioEffects.frequencies.indices, id: \.self) { i in
-                        VStack(spacing: 6) {
+                        VStack(spacing: Spacing.s) {
                             Text(gains[i] > 0 ? "+\(Int(gains[i].rounded()))" : "\(Int(gains[i].rounded()))")
-                                .font(.plex(.caption2).monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .font(TetsubiType.navLabel.monospacedDigit())
+                                .foregroundStyle(TetsubiColors.textSecondary)
                             VerticalSlider(value: Binding(
                                 get: { gains[i] },
                                 set: { gains[i] = $0; preset = .custom }
@@ -36,29 +65,18 @@ public struct EqualizerView: View {
                             .frame(height: 180)
                             .accessibilityLabel("\(Self.label(AudioEffects.frequencies[i])) hertz")
                             Text(Self.label(AudioEffects.frequencies[i]))
-                                .font(.plex(.caption2))
-                                .foregroundStyle(.secondary)
+                                .font(TetsubiType.navLabel)
+                                .foregroundStyle(TetsubiColors.textSecondary)
                         }
                         .frame(maxWidth: .infinity)
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(.horizontal, Spacing.s)
+                .padding(.vertical, Spacing.l)
                 .opacity(enabled ? 1 : 0.4)
                 .disabled(!enabled)
-            } header: {
-                Text("Bands (dB)")
             }
-            .listRowBackground(Color.appGroupBackground)
         }
-.formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .navigationTitle("Equaliser")
-        .onChange(of: preset) { _, new in
-            PlaybackSettings.equalizerPreset = new
-            if let presetGains = new.gains { gains = presetGains }
-        }
-        .onChange(of: enabled) { _, _ in apply() }
-        .onChange(of: gains) { _, _ in apply() }
     }
 
     private func apply() {
@@ -82,14 +100,14 @@ struct VerticalSlider: View {
             let span = range.upperBound - range.lowerBound
             let y: (Float) -> CGFloat = { CGFloat(1 - ($0 - range.lowerBound) / span) * height }
             ZStack(alignment: .top) {
-                Capsule().fill(Color.white.opacity(0.15)).frame(width: 4)
+                Capsule().fill(TetsubiColors.art).frame(width: 4)
                 // Fill from the 0 dB line to the value.
                 Capsule()
-                    .fill(Color.appPink)
+                    .fill(TetsubiColors.blue)
                     .frame(width: 4, height: abs(y(value) - y(0)))
                     .offset(y: min(y(value), y(0)))
                 Circle()
-                    .fill(Color.white)
+                    .fill(TetsubiColors.textPrimary)
                     .frame(width: 18, height: 18)
                     .offset(y: y(value) - 9)
             }

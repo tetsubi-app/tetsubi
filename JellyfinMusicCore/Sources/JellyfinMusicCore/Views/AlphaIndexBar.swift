@@ -28,6 +28,26 @@ public enum AlphaIndex {
     }
 }
 
+public extension AlphaIndex {
+    /// The first item's ID under each letter of the strip (`key` is the text it is filed by).
+    static func firstIDs<T>(_ items: [T], key: (T) -> String, id: (T) -> String) -> [String: String] {
+        var result: [String: String] = [:]
+        for item in items {
+            let bucket = bucket(for: key(item))
+            if result[bucket] == nil { result[bucket] = id(item) }
+        }
+        return result
+    }
+
+    /// Where a tap on `label` goes: that letter's first item, or the next
+    /// letter's that has one, or the last one there is.
+    static func target(for label: String, in firstIDs: [String: String]) -> String? {
+        let start = labels.firstIndex(of: label) ?? 0
+        let letter = labels[start...].first { firstIDs[$0] != nil } ?? labels.last { firstIDs[$0] != nil }
+        return letter.flatMap { firstIDs[$0] }
+    }
+}
+
 /// A vertical A–Z strip. Tap or drag to jump; letters with no albums are dimmed.
 struct AlphaIndexBar: View {
     let available: Set<String>

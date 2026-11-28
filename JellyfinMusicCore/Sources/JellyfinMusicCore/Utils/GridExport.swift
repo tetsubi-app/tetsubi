@@ -44,21 +44,11 @@ public enum GridExport {
         return Array(distinct.prefix(count))
     }
 
-    /// The albums the page's grid shows: exactly the ones the export takes,
-    /// the first n² (each album once) for the size used (`effectiveSize`:
-    /// the chosen one, else the biggest that fits). Under 9 albums (no
-    /// export): all there are.
-    public static func shownAlbums(_ albums: [JellyfinAlbum], chosen: Int) -> [JellyfinAlbum] {
+    /// The albums the page's grid shows: every one in the list, each once (by
+    /// ID, at its most recent place). The export's size does not narrow it.
+    public static func distinct(_ albums: [JellyfinAlbum]) -> [JellyfinAlbum] {
         var seen = Set<String>()
-        let distinct = albums.filter { seen.insert($0.id).inserted }
-        guard let size = effectiveSize(chosen: chosen, albumCount: distinct.count) else { return distinct }
-        return Array(distinct.prefix(size * size))
-    }
-
-    /// The page's columns: the size used (as many across as the export,
-    /// on every device); nil under 9 albums (the Library's usual columns).
-    public static func gridColumns(_ albums: [JellyfinAlbum], chosen: Int) -> Int? {
-        effectiveSize(chosen: chosen, albumCount: Set(albums.map(\.id)).count)
+        return albums.filter { seen.insert($0.id).inserted }
     }
 
     /// Whether a `size`×`size` grid can be filled from `albumCount` albums.

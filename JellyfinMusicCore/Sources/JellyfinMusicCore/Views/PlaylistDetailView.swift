@@ -446,6 +446,7 @@ public struct PlaylistDetailView: View {
     @State private var selection: Set<Int> = []
     #endif
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.windowWidthClass) private var windowClass
 
     // MARK: Init
 
@@ -460,53 +461,30 @@ public struct PlaylistDetailView: View {
     // MARK: Body
 
     public var body: some View {
-        // A ZStack, not a Group: the load below must not start again each
-        // time the page goes in or out of edit mode.
-        ZStack {
-            if viewModel.isEditing {
-                editList
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16.scaled) {
-                        headerSection
-                        actionsSection
+        VStack(spacing: 0) {
+            PageHeader(nil, onBack: { dismiss() }) { headerActions }
+            // A ZStack, not a Group: the load below must not start again each
+            // time the page goes in or out of edit mode.
+            ZStack {
+                if viewModel.isEditing {
+                    editList
+                } else {
+                    DetailPage { metrics in
+                        infoSection(metrics)
+                    } list: { _ in
                         statusSection
                         tracksSection
+                    } after: {
+                        EmptyView()
                     }
-                    .padding()
-                    .padding(.bottom, 64.scaled)  // space for now-playing bar
                 }
             }
         }
-        .navigationTitle(viewModel.playlist.name)
-        #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-        #endif
+        .ownsItsHeader(isDetail: true)
         .navigationDestination(item: Binding(get: { viewModel.albumToOpen },
                                              set: { viewModel.albumToOpen = $0 })) { album in
             AlbumDetailView(api: viewModel.api, album: album, player: player, downloadManager: downloadManager)
                 .appTheme()
-        }
-        .toolbar {
-            if player != nil, !viewModel.isEditing {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        QueueMenuItems { viewModel.queue($0) }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .accessibilityLabel("More")
-                    .accessibilityIdentifier("PlaylistDetailView.moreMenu")
-                }
-            }
-            if viewModel.showsEdit || viewModel.isEditing {
-                ToolbarItem(placement: .primaryAction) {
-                    Button(viewModel.isEditing ? "Done" : "Edit") {
-                        if viewModel.isEditing { viewModel.endEditing() } else { viewModel.beginEditing() }
-                    }
-                    .accessibilityIdentifier("PlaylistDetailView.editButton")
-                }
-            }
         }
         .renamePlaylistPrompt(isPresented: $isRenaming, name: $newName) { viewModel.rename(to: $0) }
         .confirmationDialog(PlaylistWording.deleteTitle(playlist: viewModel.playlist.name),
@@ -529,6 +507,23 @@ public struct PlaylistDetailView: View {
         }
     }
 
+    /// ⋯ (the listening queue), then Edit / Done.
+    @ViewBuilder
+    private var headerActions: some View {
+        if player != nil, !viewModel.isEditing {
+            HeaderMenuButton("More") {
+                QueueMenuItems { viewModel.queue($0) }
+            }
+            .accessibilityIdentifier("PlaylistDetailView.moreMenu")
+        }
+        if viewModel.showsEdit || viewModel.isEditing {
+            ActionChip(viewModel.isEditing ? "Done" : "Edit", color: viewModel.isEditing ? TetsubiColors.blue : TetsubiColors.textPrimary) {
+                if viewModel.isEditing { viewModel.endEditing() } else { viewModel.beginEditing() }
+            }
+            .accessibilityIdentifier("PlaylistDetailView.editButton")
+        }
+    }
+
     // MARK: - Edit mode
 
     /// The rows as a list to drag and remove from, with Rename above and
@@ -536,9 +531,10 @@ public struct PlaylistDetailView: View {
     private var editList: some View {
         List(selection: editSelection) {
             if let error = viewModel.editErrorMessage {
-                StatusBanner(systemImage: "exclamationmark.triangle", message: error)
+                Banner(error, horizontalPadding: 0)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
 
             Section {
@@ -548,25 +544,25 @@ public struct PlaylistDetailView: View {
                 } label: {
                     HStack {
                         Text(viewModel.playlist.name)
-                            .font(.plex(.body))
-                            .foregroundStyle(.primary)
+                            .font(TetsubiType.rowTitle)
+                            .foregroundStyle(TetsubiColors.textPrimary)
                             .lineLimit(1)
                         Spacer()
                         Text("Rename…")
-                            .font(.plex(.subheadline))
-                            .foregroundStyle(Color.appPink)
+                            .font(TetsubiType.body)
+                            .foregroundStyle(TetsubiColors.blue)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("PlaylistDetailView.renameButton")
-                .listRowBackground(Color.appGroupBackground)
+                .editRow()
             }
 
             Section {
                 ForEach(viewModel.entries) { entry in
                     editRow(entry)
-                        .listRowBackground(Color.appGroupBackground)
+                        .editRow()
                 }
                 .onMove { viewModel.move(fromOffsets: $0, toOffset: $1) }
                 .onDelete { viewModel.remove(atOffsets: $0) }
@@ -577,23 +573,30 @@ public struct PlaylistDetailView: View {
                     isConfirmingDelete = true
                 } label: {
                     Label("Delete Playlist", systemImage: "trash")
-                        .font(.plex(.body))
+                        .font(TetsubiType.rowTitle)
+                        .foregroundStyle(TetsubiColors.red)
                 }
+                .buttonStyle(.plain)
                 .accessibilityIdentifier("PlaylistDetailView.deleteButton")
-                .listRowBackground(Color.appGroupBackground)
+                .editRow()
             }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .disabled(viewModel.isDeleting)
+        // Wide windows keep the edit list to a readable column.
+        .frame(maxWidth: windowClass.isWide ? 720 : .infinity)
+        .frame(maxWidth: .infinity)
         #if os(iOS)
         .environment(\.editMode, .constant(.active))
-        .contentMargins(.bottom, 64, for: .scrollContent)  // space for now-playing bar
+        .contentMargins(.bottom, Spacing.xxl, for: .scrollContent)
         #else
         // The Delete key removes the selected rows.
         .onDeleteCommand {
             viewModel.remove(atOffsets: IndexSet(selection))
             selection = []
         }
-        .padding(.bottom, 64.scaled)  // space for now-playing bar
+        .padding(.bottom, Spacing.xxl)
         #endif
     }
 
@@ -606,29 +609,31 @@ public struct PlaylistDetailView: View {
     }
 
     private func editRow(_ entry: PlaylistEntry) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Spacing.m) {
             #if os(macOS)
             Button {
                 selection = []
                 viewModel.remove(atOffsets: IndexSet(integer: entry.position))
             } label: {
                 Image(systemName: "minus.circle.fill")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(TetsubiColors.red)
             }
             .buttonStyle(.plain)
             .help("Remove from the playlist")
             #endif
 
-            AlbumArtView(request: viewModel.artRequest(for: entry), size: 40.scaled, cornerRadius: 4.scaled)
+            AlbumArtView(request: viewModel.artRequest(for: entry), size: 40.scaled, cornerRadius: Radii.thumb,
+                         placeholderColor: TetsubiColors.art)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(entry.track.displayName)
-                    .font(.plex(.body))
+                    .font(TetsubiType.rowTitle)
+                    .foregroundStyle(TetsubiColors.textPrimary)
                     .lineLimit(1)
                 if !entry.detailLine.isEmpty {
                     Text(entry.detailLine)
-                        .font(.plex(.caption2))
-                        .foregroundStyle(.secondary)
+                        .font(TetsubiType.caption)
+                        .foregroundStyle(TetsubiColors.textSecondary)
                         .lineLimit(1)
                 }
             }
@@ -637,73 +642,77 @@ public struct PlaylistDetailView: View {
         .accessibilityIdentifier("PlaylistEditRow.\(entry.position)")
     }
 
-    // MARK: - Sub-views
+    // MARK: - Info (art, title, actions)
 
-    private var headerSection: some View {
-        HStack(alignment: .bottom, spacing: 16.scaled) {
-            PlaylistArtView(api: viewModel.api, playlist: viewModel.playlist,
-                            size: 200.scaled, cornerRadius: 12.scaled, requestSize: 500,
-                            firstEntry: viewModel.entries.first)
-
-            VStack(alignment: .leading, spacing: 6.scaled) {
-                Text(viewModel.playlist.name)
-                    .font(.plex(.title2).bold())
-                Text(viewModel.summary)
-                    .font(.plex(.headline))
-                    .foregroundStyle(.secondary)
-                Spacer()
+    @ViewBuilder
+    private func infoSection(_ metrics: DetailMetrics) -> some View {
+        PlaylistArtView(api: viewModel.api, playlist: viewModel.playlist,
+                        size: metrics.artSize, cornerRadius: Radii.card, requestSize: 800,
+                        firstEntry: viewModel.entries.first)
+        DetailTitleBlock(metrics: metrics, title: viewModel.playlist.name, meta: viewModel.summary) { EmptyView() }
+        VStack(alignment: metrics.horizontal, spacing: Spacing.m) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Spacing.s) { playButton; shuffleButton; downloadButton }
+                VStack(spacing: Spacing.s) {
+                    HStack(spacing: Spacing.s) { playButton; shuffleButton }
+                    downloadButton
+                }
             }
-        }
-    }
-
-    private var actionsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            actionButtons
+            .frame(maxWidth: .infinity, alignment: metrics.frameAlignment)
             downloadProgressSection
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var actionButtons: some View {
-        HStack(spacing: 12) {
-            playButtons
-                .disabled(viewModel.entries.isEmpty)
-            if viewModel.showsDownload {
-                downloadButton
+    private var playButton: some View {
+        PrimaryButton(viewModel.isThisPlaylistPlaying ? "Now playing" : "Play",
+                      enabled: !viewModel.entries.isEmpty,
+                      color: viewModel.isThisPlaylistPlaying ? TetsubiColors.pink : TetsubiColors.blue) {
+            viewModel.play()
+        }
+        .accessibilityIdentifier("PlaylistDetailView.playButton")
+        .help("Play the whole playlist")
+    }
+
+    /// Maniac Mode plays in order, so there's no Shuffle.
+    @ViewBuilder
+    private var shuffleButton: some View {
+        if viewModel.showsShuffle {
+            PillButton(title: "Shuffle", systemImage: "shuffle", enabled: !viewModel.entries.isEmpty) {
+                viewModel.shuffle()
             }
+            .accessibilityIdentifier("PlaylistDetailView.shuffleButton")
+            .help("Play the playlist in a random order")
         }
     }
 
     /// "Download", "Downloading" (with the progress below), or
     /// "Downloaded", which offers to remove the download.
+    @ViewBuilder
     private var downloadButton: some View {
-        let isDownloaded = viewModel.isDownloaded
-        let isDownloading = viewModel.downloadState != nil
-        return Button {
-            if isDownloaded {
-                isConfirmingRemoveDownload = true
-            } else {
-                viewModel.startDownload()
-            }
-        } label: {
-            HStack {
-                Image(systemName: isDownloaded ? "checkmark.circle.fill"
-                      : isDownloading ? "arrow.down.circle.dotted" : "arrow.down.circle")
-                Text(isDownloaded ? "Downloaded" : isDownloading ? "Downloading" : "Download")
-            }
-            .font(.plex(.subheadline))
-            .foregroundStyle(isDownloaded ? .green : .primary)
-        }
-        .buttonStyle(.bordered)
-        .disabled(!isDownloaded && !viewModel.canDownload)
-        .accessibilityIdentifier("PlaylistDetailView.downloadButton")
-        .help(isDownloaded ? "Remove this download" : isDownloading ? "Downloading…" : "Download this playlist")
-        .confirmationDialog("Remove this download?", isPresented: $isConfirmingRemoveDownload,
-                            titleVisibility: .visible) {
-            Button("Remove", role: .destructive) { viewModel.removeDownload() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("It'll be deleted from this device. You can download it again from the playlist page.")
+        if viewModel.showsDownload {
+            let isDownloaded = viewModel.isDownloaded
+            let isDownloading = viewModel.downloadState != nil
+            PillButton(
+                title: isDownloaded ? "Downloaded" : isDownloading ? "Downloading" : "Download",
+                systemImage: isDownloaded ? "checkmark.circle.fill"
+                    : isDownloading ? "arrow.down.circle.dotted" : "arrow.down.circle",
+                color: isDownloaded ? TetsubiColors.green : TetsubiColors.textPrimary,
+                enabled: isDownloaded || viewModel.canDownload) {
+                    if isDownloaded {
+                        isConfirmingRemoveDownload = true
+                    } else {
+                        viewModel.startDownload()
+                    }
+                }
+                .accessibilityIdentifier("PlaylistDetailView.downloadButton")
+                .help(isDownloaded ? "Remove this download" : isDownloading ? "Downloading…" : "Download this playlist")
+                .confirmationDialog("Remove this download?", isPresented: $isConfirmingRemoveDownload,
+                                    titleVisibility: .visible) {
+                    Button("Remove", role: .destructive) { viewModel.removeDownload() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("It'll be deleted from this device. You can download it again from the playlist page.")
+                }
         }
     }
 
@@ -712,183 +721,89 @@ public struct PlaylistDetailView: View {
     @ViewBuilder
     private var downloadProgressSection: some View {
         if let state = viewModel.downloadState {
-            let paused = state.status == .paused
-            let failed = state.status == .failed
-            PulsingProgressBar(progress: state.progress, isPaused: paused || failed)
-            let waiting = DownloadNetworkRule.isWaitingForWiFi(
-                status: state.status, allowCellular: PlaybackSettings.downloadOverCellular,
-                isExpensive: NetworkMonitor.shared.isExpensive)
-            HStack {
-                Text(DownloadNetworkRule.statusText(failed: failed, paused: paused, waitingForWiFi: waiting))
-                    .font(.plex(.caption))
-                Text("\(state.completedTracks)/\(state.expectedTrackCount) songs")
-                    .font(.plex(.caption2))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button(failed ? "Retry" : paused ? "Resume" : "Pause") {
-                    viewModel.toggleDownload()
-                }
-                .font(.plex(.caption))
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("PlaylistDetailView.pauseDownload")
-            }
-            if let err = state.errorMessage, !err.isEmpty {
-                Text(err)
-                    .font(.plex(.caption2))
-                    .foregroundStyle(.red)
+            DownloadProgressBlock(progress: state.progress, status: state.status,
+                                  completed: state.completedTracks, expected: state.expectedTrackCount,
+                                  unit: "songs", error: state.errorMessage,
+                                  identifier: "PlaylistDetailView.pauseDownload") {
+                viewModel.toggleDownload()
             }
         }
     }
 
-    private var playButtons: some View {
-        Group {
-            Button {
-                viewModel.play()
-            } label: {
-                HStack {
-                    Image(systemName: viewModel.isThisPlaylistPlaying ? "waveform" : "play.fill")
-                        .imageScale(.large)
-                    Text(viewModel.isThisPlaylistPlaying ? "Now playing" : "Play")
-                }
-                .font(.plex(.subheadline))
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(viewModel.isThisPlaylistPlaying ? Color.appPink : nil)
-            .accessibilityIdentifier("PlaylistDetailView.playButton")
-            .help("Play the whole playlist")
+    // MARK: - Status and tracks
 
-            // Maniac Mode plays in order, so there's no Shuffle.
-            if viewModel.showsShuffle {
-                Button {
-                    viewModel.shuffle()
-                } label: {
-                    HStack {
-                        Image(systemName: "shuffle")
-                        Text("Shuffle")
-                    }
-                    .font(.plex(.subheadline))
-                }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("PlaylistDetailView.shuffleButton")
-                .help("Play the playlist in a random order")
-            }
-        }
-    }
-
-    /// Offline, a failed load (with Retry), a failed edit, or a failed
-    /// "Go to Album".
+    /// Offline, a failed load (with Retry), a failed edit, or a failed "Go to Album".
     @ViewBuilder
     private var statusSection: some View {
-        Group {
-            if viewModel.isOffline, !viewModel.hasLoaded {
-                StatusBanner.offline
-            } else if let error = viewModel.errorMessage {
-                StatusBanner(systemImage: "exclamationmark.triangle",
-                             message: "Couldn't load this playlist. \(error)",
-                             actionTitle: "Retry") { viewModel.load() }
-            } else if let error = viewModel.editErrorMessage {
-                StatusBanner(systemImage: "exclamationmark.triangle", message: error)
-            } else if let error = viewModel.albumErrorMessage {
-                StatusBanner(systemImage: "exclamationmark.triangle",
-                             message: "Couldn't open the album. \(error)")
-            }
+        if viewModel.isOffline, !viewModel.hasLoaded {
+            Banner.offline
+        } else if let error = viewModel.errorMessage {
+            Banner("Couldn't load this playlist. \(error)", actionTitle: "Retry") { viewModel.load() }
+        } else if let error = viewModel.editErrorMessage {
+            Banner(error)
+        } else if let error = viewModel.albumErrorMessage {
+            Banner("Couldn't open the album. \(error)")
         }
-        // The banner brings its own side padding; the page already has it.
-        .padding(.horizontal, -16)
     }
 
     @ViewBuilder
     private var tracksSection: some View {
         if viewModel.isLoading {
-            ProgressView()
-                .frame(maxWidth: .infinity)
-                .padding()
+            LoadingSpinner()
         } else if viewModel.hasLoaded, viewModel.entries.isEmpty {
-            Text("This playlist is empty.")
-                .font(.plex(.footnote))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding()
+            EmptyState("This playlist is empty.", systemImage: "music.note.list")
         } else {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(viewModel.entries) { entry in
-                    PlaylistTrackRow(entry: entry,
-                                     artRequest: viewModel.artRequest(for: entry),
-                                     isPlaying: viewModel.isCurrent(entry)) {
-                        viewModel.play(from: entry)
-                    }
-                    // Long-press on iOS, right-click on the Mac.
-                    .contextMenu {
-                        if player != nil {
-                            QueueMenuItems { viewModel.queue(entry: entry, $0) }
-                        }
-                        // Offline, playlists can't be changed.
-                        if !viewModel.isOffline {
-                            Button {
-                                PlaylistEvents.shared.add(trackIds: [entry.track.id])
-                            } label: {
-                                Label("Add to Playlist…", systemImage: "text.badge.plus")
-                            }
-                        }
-                        if entry.albumId != nil {
-                            Button {
-                                viewModel.goToAlbum(of: entry)
-                            } label: {
-                                Label("Go to Album", systemImage: "square.stack")
-                            }
-                        }
-                    }
-                }
+            ForEach(viewModel.entries) { entry in
+                trackRow(entry)
+            }
+        }
+    }
+
+    private func trackRow(_ entry: PlaylistEntry) -> some View {
+        ListRow(title: entry.track.displayName,
+                subtitle: entry.detailLine.isEmpty ? nil : entry.detailLine,
+                trailingMeta: TrackTime.format(entry.track.duration),
+                current: viewModel.isCurrent(entry),
+                onTap: { viewModel.play(from: entry) },
+                art: {
+                    AlbumArtView(request: viewModel.artRequest(for: entry), size: 40.scaled,
+                                 cornerRadius: Radii.thumb, placeholderColor: TetsubiColors.art)
+                },
+                trailing: {
+                    RowMenuButton("More for \(entry.track.displayName)") { trackMenu(entry) }
+                })
+        .accessibilityIdentifier("PlaylistTrackRow.\(entry.position)")
+        // Long-press on iOS, right-click on the Mac.
+        .contextMenu { trackMenu(entry) }
+    }
+
+    @ViewBuilder
+    private func trackMenu(_ entry: PlaylistEntry) -> some View {
+        if player != nil {
+            QueueMenuItems { viewModel.queue(entry: entry, $0) }
+        }
+        // Offline, playlists can't be changed.
+        if !viewModel.isOffline {
+            Button {
+                PlaylistEvents.shared.add(trackIds: [entry.track.id])
+            } label: {
+                Label("Add to Playlist…", systemImage: "text.badge.plus")
+            }
+        }
+        if entry.albumId != nil {
+            Button {
+                viewModel.goToAlbum(of: entry)
+            } label: {
+                Label("Go to Album", systemImage: "square.stack")
             }
         }
     }
 }
 
-// MARK: - PlaylistTrackRow
-
-/// A row of the playlist: small album art, title, "artist · album".
-/// Tapping it plays the playlist from that row.
-struct PlaylistTrackRow: View {
-    let entry: PlaylistEntry
-    let artRequest: URLRequest?
-    let isPlaying: Bool
-    let onTap: () -> Void
-
-    var body: some View {
-        Button {
-            onTap()
-        } label: {
-            HStack(spacing: 10.scaled) {
-                AlbumArtView(request: artRequest, size: 40.scaled, cornerRadius: 4.scaled)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.track.displayName)
-                        .font(.plex(.body))
-                        .fontWeight(isPlaying ? .semibold : .regular)
-                        .foregroundStyle(isPlaying ? .white : .primary)
-                        .lineLimit(1)
-                    if !entry.detailLine.isEmpty {
-                        Text(entry.detailLine)
-                            .font(.plex(.caption2))
-                            .foregroundStyle(isPlaying ? Color.white.opacity(0.85) : .secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer()
-
-                Text(TrackRow.formatDuration(entry.track.duration))
-                    .font(.plex(.caption))
-                    .foregroundStyle(isPlaying ? Color.white.opacity(0.85) : .secondary)
-            }
-            .padding(.vertical, 6.scaled)
-            .padding(.horizontal, 8.scaled)
-            // Playing row: solid pink with white text, legible over the blur.
-            .background(isPlaying ? Color.appPink : Color.gray.opacity(0.05))
-            .cornerRadius(6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("PlaylistTrackRow.\(entry.position)")
+private extension View {
+    /// An edit-mode row: surface fill, hairline separator.
+    func editRow() -> some View {
+        listRowBackground(TetsubiColors.surface)
+            .listRowSeparatorTint(TetsubiColors.hairline)
     }
 }

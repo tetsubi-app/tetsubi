@@ -2,13 +2,47 @@
 
 import SwiftUI
 
+/// The queue's heading: "Queue", the time left in the whole queue, and
+/// "Clear queue" (asks first; the playing track carries on). A row of the
+/// compact list, pinned above the list in the wide panel.
+struct NowPlayingQueueHeader: View {
+    let manager: PlayerManager
+    @State private var isConfirmingClear = false
+
+    var body: some View {
+        let readOnly = QueueEditor.isReadOnly(maniacMode: manager.maniacMode)
+        HStack(alignment: .center, spacing: Spacing.m) {
+            Text(NowPlayingQueue.title)
+                .font(TetsubiType.sectionTitle)
+                .foregroundStyle(TetsubiColors.textPrimary)
+                .accessibilityAddTraits(.isHeader)
+            Text(NowPlayingView.formatAlbumDuration(manager.queueRemaining))
+                .font(TetsubiType.caption.monospacedDigit())
+                .foregroundStyle(TetsubiColors.textSecondary)
+                .accessibilityLabel("\(NowPlayingView.formatAlbumDuration(manager.queueRemaining)) left")
+            Spacer(minLength: Spacing.s)
+            if !readOnly, manager.playQueue.entries.count > 1 {
+                ActionChip(NowPlayingQueue.clearButton) { isConfirmingClear = true }
+                    .accessibilityIdentifier("NowPlayingView.clearQueue")
+                    .confirmationDialog(NowPlayingQueue.clearTitle, isPresented: $isConfirmingClear,
+                                        titleVisibility: .visible) {
+                        Button("Clear", role: .destructive) { manager.clearUpcoming() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text(NowPlayingQueue.clearMessage)
+                    }
+            }
+        }
+        .accessibilityIdentifier("NowPlayingView.upNext")
+    }
+}
+
 /// Now Playing's queue, as rows of the `List` it sits in (the single
-/// column's list, or the wide layout's right column).
+/// column's list, or the wide layout's panel).
 ///
-///  - Header: "Queue", the time left in the whole queue, "Clear queue"
-///    (asks first; the playing track carries on).
-///  - The playing track, pinned at the top (not draggable).
-///  - Unshuffled: a header per album or playlist (small cover, title,
+///  - Header (`showsHeader`): see `NowPlayingQueueHeader`.
+///  - The playing track, pinned at the top (not draggable), in the pink tint.
+///  - Unshuffled: a header per album or playlist (36 pt cover, title,
 ///    artist, its time) with its tracks under it; shuffled: one flat list
 ///    in play order, each row showing its album.
 ///  - Tap a track to play it. Drag a track, or a header to move its whole
@@ -17,12 +51,8 @@ import SwiftUI
 ///  - Maniac Mode: read-only, with a note.
 struct NowPlayingQueue: View {
     let manager: PlayerManager
-    /// Now Playing's scale.
-    let s: CGFloat
-    /// Horizontal inset of the rows.
-    var inset: CGFloat = 20
-
-    @State private var isConfirmingClear = false
+    /// Put the "Queue" heading first (the compact list); the wide panel pins its own.
+    var showsHeader = true
 
     // Wording (shared with Android/Linux).
     static let title = "Queue"
@@ -38,30 +68,29 @@ struct NowPlayingQueue: View {
             let editor = QueueEditor(queue: manager.playQueue)
             let readOnly = QueueEditor.isReadOnly(maniacMode: manager.maniacMode)
 
-            header(readOnly: readOnly)
-                .queueRow(s, inset: inset, top: 12)
+            if showsHeader {
+                NowPlayingQueueHeader(manager: manager)
+                    .queueRow(top: Spacing.m)
+            }
 
             if readOnly {
-                Text(Self.maniacNote)
-                    .font(.plex(.caption, scale: s))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .queueRow(s, inset: inset)
+                note(Self.maniacNote).queueRow()
             }
 
             currentRow(current)
-                .queueRow(s, inset: inset)
+                .queueRow()
                 .moveDisabled(true)
 
             if editor.isEmpty {
                 Text(Self.emptyNote)
-                    .font(.plex(.subheadline, scale: s))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .padding(.vertical, 6 * s)
-                    .queueRow(s, inset: inset)
+                    .font(TetsubiType.body)
+                    .foregroundStyle(TetsubiColors.textSecondary)
+                    .padding(.vertical, 6)
+                    .queueRow()
             } else {
                 ForEach(Array(editor.rows.enumerated()), id: \.element.id) { index, row in
                     rowView(row, index: index, editor: editor, readOnly: readOnly)
-                        .queueRow(s, inset: inset)
+                        .queueRow()
                         .moveDisabled(readOnly)
                 }
                 .onMove(perform: readOnly ? nil : { source, destination in
@@ -70,45 +99,19 @@ struct NowPlayingQueue: View {
                 })
             }
 
-            if let note = repeatNote(editor) {
-                Text(note)
-                    .font(.plex(.caption, scale: s))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .padding(.top, 6 * s)
-                    .queueRow(s, inset: inset)
+            if let text = repeatNote(editor) {
+                note(text)
+                    .padding(.top, 6)
+                    .queueRow()
             }
         }
     }
 
-    // MARK: - Header
-
-    private func header(readOnly: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10 * s) {
-            Text(Self.title)
-                .font(.plex(.headline, scale: s))
-                .accessibilityAddTraits(.isHeader)
-            Text(NowPlayingView.formatAlbumDuration(manager.queueRemaining))
-                .font(.plex(.caption, scale: s).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.5))
-                .accessibilityLabel("\(NowPlayingView.formatAlbumDuration(manager.queueRemaining)) left")
-            Spacer(minLength: 8 * s)
-            if !readOnly, manager.playQueue.entries.count > 1 {
-                Button(Self.clearButton) { isConfirmingClear = true }
-                    .font(.plex(.caption, scale: s))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Color.appBlue)
-                    .accessibilityIdentifier("NowPlayingView.clearQueue")
-                    .confirmationDialog(Self.clearTitle, isPresented: $isConfirmingClear,
-                                        titleVisibility: .visible) {
-                        Button("Clear", role: .destructive) { manager.clearUpcoming() }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text(Self.clearMessage)
-                    }
-            }
-        }
-        .padding(.bottom, 4 * s)
-        .accessibilityIdentifier("NowPlayingView.upNext")
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(TetsubiType.caption)
+            .foregroundStyle(TetsubiColors.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func repeatNote(_ editor: QueueEditor) -> String? {
@@ -121,26 +124,29 @@ struct NowPlayingQueue: View {
 
     // MARK: - Rows
 
-    /// The playing track, pinned at the top.
+    /// The playing track, pinned at the top, on the pink band.
     private func currentRow(_ entry: QueueEntry) -> some View {
         let track = manager.track(forEntry: entry)
-        return HStack(spacing: 10 * s) {
+        return HStack(spacing: Spacing.m) {
             Image(systemName: manager.isPlaying ? "waveform" : "pause.fill")
-                .font(.plex(.caption, scale: s))
-                .foregroundStyle(Color.appPink)
-                .frame(width: 18 * s)
-            VStack(alignment: .leading, spacing: 2 * s) {
+                .font(TetsubiType.caption)
+                .foregroundStyle(TetsubiColors.pink)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 0) {
                 Text(track.title)
-                    .font(.plex(.subheadline, scale: s).weight(.semibold))
+                    .font(TetsubiType.rowTitle)
+                    .foregroundStyle(TetsubiColors.textPrimary)
                     .lineLimit(1)
                 Text(Self.nowPlayingLabel + (track.album.isEmpty ? "" : " · \(track.album)"))
-                    .font(.plex(.caption, scale: s))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .font(TetsubiType.caption)
+                    .foregroundStyle(TetsubiColors.textSecondary)
                     .lineLimit(1)
             }
-            Spacer(minLength: 8 * s)
+            Spacer(minLength: Spacing.s)
         }
-        .padding(.vertical, 8 * s)
+        .padding(.vertical, Spacing.s)
+        .padding(.horizontal, Spacing.s)
+        .background(TetsubiColors.pinkTint, in: RoundedRectangle(cornerRadius: Radii.thumb))
         .accessibilityElement(children: .combine)
     }
 
@@ -157,31 +163,34 @@ struct NowPlayingQueue: View {
     private func groupHeader(_ group: QueueEditor.Group, index: Int, editor: QueueEditor,
                              readOnly: Bool) -> some View {
         let seconds = group.entries.reduce(0) { $0 + manager.track(forEntry: $1).duration }
-        return HStack(spacing: 10 * s) {
-            AlbumArtView(request: artRequest(for: group), size: 36 * s, cornerRadius: 4 * s)
-            VStack(alignment: .leading, spacing: 2 * s) {
+        return HStack(spacing: Spacing.m) {
+            AlbumArtView(request: artRequest(for: group), size: 36, cornerRadius: Radii.thumb,
+                         placeholderColor: TetsubiColors.art)
+            VStack(alignment: .leading, spacing: 0) {
                 Text(group.group.title.isEmpty ? "Album" : group.group.title)
-                    .font(.plex(.subheadline, scale: s).bold())
+                    .font(TetsubiType.cardTitle)
+                    .foregroundStyle(TetsubiColors.textPrimary)
                     .lineLimit(1)
                 if let artist = group.group.artist, !artist.isEmpty {
                     Text(artist)
-                        .font(.plex(.caption, scale: s))
-                        .foregroundStyle(Color.albumArtistText)
+                        .font(TetsubiType.caption)
+                        .foregroundStyle(TetsubiColors.textSecondary)
                         .lineLimit(1)
                 }
             }
-            Spacer(minLength: 8 * s)
+            Spacer(minLength: Spacing.s)
             if seconds > 0 {
                 Text(NowPlayingView.formatAlbumDuration(seconds))
-                    .font(.plex(.caption, scale: s).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.5))
+                    .font(TetsubiType.caption.monospacedDigit())
+                    .foregroundStyle(TetsubiColors.textSecondary)
             }
             macControls(readOnly: readOnly, label: "Remove \(group.group.title)") {
                 manager.removeFromQueue(entryIds: group.entryIds)
             }
         }
-        .padding(.top, 10 * s)
-        .padding(.bottom, 4 * s)
+        .padding(.horizontal, Spacing.s)
+        .padding(.top, Spacing.m)
+        .padding(.bottom, Spacing.xs)
         .contentShape(Rectangle())
         .queueEditing(readOnly: readOnly, editor: editor, index: index, manager: manager,
                       remove: group.entryIds, onTap: nil)
@@ -193,31 +202,33 @@ struct NowPlayingQueue: View {
         let subtitle = editor.isShuffled
             ? [track.artist, track.album].filter { !$0.isEmpty }.joined(separator: " · ")
             : (track.artist != (entry.group.artist ?? "") ? track.artist : "")
-        return HStack(spacing: 12 * s) {
-            VStack(alignment: .leading, spacing: 2 * s) {
+        return HStack(spacing: Spacing.m) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(track.title)
-                    .font(.plex(.subheadline, scale: s))
-                    .foregroundStyle(.white)
+                    .font(TetsubiType.rowTitle)
+                    .foregroundStyle(TetsubiColors.textPrimary)
                     .lineLimit(1)
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.plex(.caption, scale: s))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .font(TetsubiType.caption)
+                        .foregroundStyle(TetsubiColors.textSecondary)
                         .lineLimit(1)
                 }
             }
-            Spacer(minLength: 8 * s)
+            Spacer(minLength: Spacing.s)
             if track.duration > 0 {
                 Text(NowPlayingView.format(track.duration))
-                    .font(.plex(.caption, scale: s).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.5))
+                    .font(TetsubiType.control.monospacedDigit())
+                    .foregroundStyle(TetsubiColors.textSecondary)
             }
             macControls(readOnly: readOnly, label: "Remove \(track.title)") {
                 manager.removeFromQueue(entryIds: [entry.id])
             }
         }
-        .padding(.vertical, 8 * s)
-        .padding(.leading, editor.isShuffled ? 0 : 46 * s)
+        .padding(.vertical, Spacing.s)
+        .padding(.horizontal, Spacing.s)
+        // Under an album header the rows start at its text (36 cover + 12 gap).
+        .padding(.leading, editor.isShuffled ? 0 : 48)
         .contentShape(Rectangle())
         .queueEditing(readOnly: readOnly, editor: editor, index: index, manager: manager,
                       remove: [entry.id], onTap: { manager.skipTo(entryId: entry.id) })
@@ -229,16 +240,18 @@ struct NowPlayingQueue: View {
         #if os(macOS)
         if !readOnly {
             Button(action: remove) {
-                Image(systemName: "xmark.circle")
-                    .font(.plex(.subheadline, scale: s))
-                    .foregroundStyle(.white.opacity(0.6))
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(TetsubiColors.textSecondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .help("Remove from the queue")
             .accessibilityLabel(label)
             Image(systemName: "line.3.horizontal")
-                .font(.plex(.subheadline, scale: s))
-                .foregroundStyle(.white.opacity(0.4))
+                .font(TetsubiType.body)
+                .foregroundStyle(TetsubiColors.textTertiary)
                 .help("Drag to move")
                 .accessibilityHidden(true)
         }
@@ -258,10 +271,11 @@ struct NowPlayingQueue: View {
 // MARK: - Row helpers
 
 private extension View {
-    /// A queue row in Now Playing's list: clear, no separators, Now
-    /// Playing's inset.
-    func queueRow(_ s: CGFloat, inset: CGFloat, top: CGFloat = 0) -> some View {
-        listRowInsets(EdgeInsets(top: top * s, leading: inset * s, bottom: 0, trailing: inset * s))
+    /// A queue row in Now Playing's list: clear, no separators. The 8 pt row
+    /// inset plus the row's own 8 pt padding put its content 16 pt from the
+    /// edge, with the pink band 8 pt wider.
+    func queueRow(top: CGFloat = 0) -> some View {
+        listRowInsets(EdgeInsets(top: top, leading: Spacing.s, bottom: 0, trailing: Spacing.s))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
     }

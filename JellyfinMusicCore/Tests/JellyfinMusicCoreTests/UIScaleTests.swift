@@ -72,24 +72,4 @@ final class UIScaleTests: XCTestCase {
         scale.update(for: UIScale.baseSize)
         XCTAssertEqual(scale.factor, 1.0, accuracy: 0.0001)
     }
-
-    // MARK: - Grid at a bigger scale
-
-    func testGridCellsGrowRatherThanOnlyAddingColumns() {
-        // A 1000pt-wide grid: 7 columns of 120pt at scale 1, but 4 columns
-        // of 192pt (with 19.2pt gaps) at 1.6.
-        let normal = LibraryView.gridLayout(width: 1000)
-        let big = LibraryView.gridLayout(width: 1000, scale: 1.6)
-        XCTAssertEqual(normal.columns, 7)
-        XCTAssertEqual(big.columns, 4)
-        XCTAssertEqual(big.spacing, 19.2, accuracy: 0.01)
-        XCTAssertLessThanOrEqual(CGFloat(big.columns) * 192 + CGFloat(big.columns - 1) * big.spacing, 1000)
-    }
-
-    func testRandomAlbumsCountAllowsForScaledGaps() {
-        let row: CGFloat = 157 * 1.5
-        // 32 + 4 × 235.5 + 3 × 24 + 39 = 1085
-        XCTAssertEqual(RandomAlbumsView.count(forHeight: 1084, rowHeight: row, scale: 1.5), 9)
-        XCTAssertEqual(RandomAlbumsView.count(forHeight: 1085, rowHeight: row, scale: 1.5), 12)
-    }
 }

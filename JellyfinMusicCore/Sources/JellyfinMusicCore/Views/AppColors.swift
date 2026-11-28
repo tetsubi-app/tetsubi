@@ -8,14 +8,6 @@ public extension Color {
     static let appPink = Color(red: 170 / 255, green: 92 / 255, blue: 195 / 255)
     /// Accent blue: #039FD6 (R 3, G 159, B 214).
     static let appBlue = Color(red: 3 / 255, green: 159 / 255, blue: 214 / 255)
-    /// Content boxes over the background picture (Settings, Downloads,
-    /// Equaliser groups, status banners): 50% black.
-    static let appGroupBackground = Color.black.opacity(0.5)
-    /// Artist name under album titles (Home, Library, Album, Now Playing): bright but a step
-    /// below the title. The system's secondary grey was too faint.
-    static let albumArtistText = Color.white.opacity(0.85)
-    /// Release year under the artist: one step dimmer than the artist.
-    static let albumYearText = Color.white.opacity(0.65)
 }
 
 /// The app's background, filling the screen. Shared by every screen.

@@ -3,24 +3,21 @@
 import SwiftUI
 import Observation
 
-/// The main home screen. Holds a `HomeViewModel` and displays the four sections.
+/// The main home screen: a page header (Refresh) over shelves of the app's own
+/// cards, each with a section header and "See all". The cards are the grid's, so
+/// the card size setting changes them too; on a narrow window the next card
+/// peeks in at the edge. Pull down to reload. Tapping a card pushes
+/// `AlbumDetailView`.
 ///
-/// Layout (PlexAmp-inspired): a vertical `LazyVStack` of titled, horizontally
-/// scrolling rows over `AppBackgroundView` (blurred album art while playing). Each row is a `HomeSectionRow`
-/// (or `OnThisDayRow`); tapping a card pushes `AlbumDetailView`. On a wide
-/// layout every row's cards follow the Library's cards-per-row setting
-/// (`LibraryView.homeRowMetrics`) and the −/+ buttons sit in the top bar.
+/// Offline: a banner, the downloaded albums and the downloaded playlists.
 public struct HomeView: View {
 
     @State private var viewModel: HomeViewModel?
     private let api: JellyfinAPI?
     private let player: PlayerManager?
     private let downloadManager: DownloadManager?
-    /// Opens Library ▸ Playlists (the Playlists row's ›).
+    /// Opens Library ▸ Playlists (the Playlists shelf's "See all").
     private let onShowPlaylists: (() -> Void)?
-
-    @Environment(\.isWideLayout) private var isWide
-    @Environment(\.displayScale) private var displayScale
 
     // MARK: Init
 
@@ -35,82 +32,118 @@ public struct HomeView: View {
         }
     }
 
+    @Environment(\.windowWidthClass) private var windowClass
+
+    private var isOffline: Bool { !NetworkMonitor.shared.isConnected }
+
     // MARK: Body
 
     public var body: some View {
-        ZStack {
-            GeometryReader { geo in
-            // Wide layouts: every row's cards follow the Library's
-            // cards-per-row setting; phones keep today's fixed cards (nil).
-            let metrics = LibraryView.homeRowMetrics(width: geo.size.width, scale: UIScale.shared.factor,
-                                                     wide: isWide, chosen: GridZoom.shared.columns,
-                                                     displayScale: displayScale)
-            let cards = isWide ? metrics : nil
+        VStack(spacing: 0) {
+            PageHeader("Home") {
+                if !isOffline {
+                    HeaderIconButton("Refresh", systemImage: "arrow.clockwise") { viewModel?.refresh() }
+                }
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    statusBanner
-
-                    // "On This Day" first — the most distinctive feature. Hidden
-                    // when nothing was released on today's date.
-                    if showsOnThisDay {
-                        sectionHeader("On This Day")
-                        onThisDaySection(cards)
+                    if isOffline {
+                        Banner.offline
+                        offlineShelves
+                    } else {
+                        errorBanner
+                        onlineShelves
                     }
-
-                    sectionHeader("Favourites", more: .favourites)
-                    albumRow("Favourites", viewModel?.favorites, empty: "No favourite albums yet.", cards: cards)
-
-                    sectionHeader("Random Albums", more: .random)
-                    albumRow("Random Albums", viewModel?.randomAlbums, empty: "No random albums available.", cards: cards)
-
-                    // Only when there's at least one playlist.
-                    if !shownPlaylists.isEmpty {
-                        sectionHeader("Playlists", action: onShowPlaylists)
-                        HomePlaylistsRow(api: api, playlists: shownPlaylists, metrics: cards)
-                    }
-
-                    sectionHeader("Recently Played", more: .recentlyPlayed)
-                    albumRow("Recently Played", viewModel?.recentlyPlayed, empty: "No recently played music yet.", cards: cards)
-
-                    sectionHeader("Recently Added")
-                    albumRow("Recently Added", viewModel?.recentlyAdded, empty: "No recently added music.", cards: cards)
                 }
-                .padding(.bottom, 24)
-            }
-            // The first −/+ press starts from Home's count while it shows.
-            .reportsGridColumns(metrics.columns, active: isWide)
-            .navigationDestination(for: HomeMore.self) { more in
-                switch more {
-                case .favourites:
-                    FavouritesTabView(api: api)
-                        .navigationTitle("Favourites")
-                        .appTheme()
-                        // The Library's Favourites choices; no −/+ in List.
-                        .gridZoomToolbar(FavouritesOptions.shared.displayMode == .grid)
-                case .random:
-                    RandomAlbumsView(api: api)
-                        .appTheme()
-                case .recentlyPlayed:
-                    // No −/+: its columns follow the export's size.
-                    RecentlyPlayedView(api: api, initial: viewModel?.recentlyPlayed ?? [])
-                        .appTheme()
-                }
+                .padding(.bottom, Spacing.xl)
             }
             .refreshable { viewModel?.refresh() }
-            .task { viewModel?.refresh() }
-            // Reload once the connection comes back.
-            .onChange(of: NetworkMonitor.shared.isConnected) { _, connected in
-                if connected { viewModel?.refresh() }
-            }
-            // A playlist was made, changed or deleted: its row again.
-            .onChange(of: PlaylistEvents.shared.version) { _, _ in
-                viewModel?.refreshPlaylists()
-            }
+        }
+        .navigationDestination(for: HomeMore.self) { more in
+            switch more {
+            case .favourites:
+                FavouritesPage(api: api).appTheme()
+            case .random:
+                RandomAlbumsView(api: api).appTheme()
+            case .recentlyPlayed:
+                RecentlyPlayedView(api: api, initial: viewModel?.recentlyPlayed ?? []).appTheme()
             }
         }
-        // Mac: − and + at the right of the title bar; iPad: in Home's slim bar.
-        .gridZoomToolbar()
-        .untitledTab()
+        .task { viewModel?.refresh() }
+        // Reload once the connection comes back.
+        .onChange(of: NetworkMonitor.shared.isConnected) { _, connected in
+            if connected { viewModel?.refresh() }
+        }
+        // A playlist was made, changed or deleted: its row again.
+        .onChange(of: PlaylistEvents.shared.version) { _, _ in
+            viewModel?.refreshPlaylists()
+        }
+        .ownsItsHeader()
+    }
+
+    // MARK: - Shelves
+
+    @ViewBuilder
+    private var onlineShelves: some View {
+        // "On this day" first: the most distinctive shelf. Hidden when nothing
+        // was released on today's date.
+        if showsOnThisDay {
+            SectionHeader("On this day")
+            if let entries = viewModel?.onThisDay, !entries.isEmpty {
+                CardShelf(items: entries) { entry, width in
+                    AlbumCardLink(api: api, album: entry.album, width: width, isDownloaded: isDownloaded(entry.album),
+                                  badge: entry.label.isEmpty ? nil : entry.label)
+                }
+            } else {
+                CardShelfPlaceholder()
+            }
+        }
+
+        SectionHeader("Favourites", seeAllValue: HomeMore.favourites)
+        albumShelf(viewModel?.favorites, empty: "No favourite albums yet.")
+
+        SectionHeader("Random albums", seeAllValue: HomeMore.random)
+        albumShelf(viewModel?.randomAlbums, empty: "No random albums available.")
+
+        // Only when there's at least one playlist.
+        playlistsShelf
+
+        SectionHeader("Recently played", seeAllValue: HomeMore.recentlyPlayed)
+        albumShelf(viewModel?.recentlyPlayed, empty: "No recently played music yet.")
+
+        SectionHeader("Recently added")
+        albumShelf(viewModel?.recentlyAdded, empty: "No recently added music.")
+    }
+
+    @ViewBuilder
+    private var offlineShelves: some View {
+        SectionHeader("Downloaded")
+        let downloaded = downloadedRow
+        if downloaded.isEmpty {
+            emptyLine("No downloaded albums yet.")
+        } else {
+            CardShelf(items: downloaded) { album, width in
+                AlbumCardLink(api: api, album: album, width: width, isDownloaded: true)
+            }
+        }
+        playlistsShelf
+    }
+
+    /// The downloaded albums, newest first, as Home's offline row.
+    private var downloadedRow: [JellyfinAlbum] {
+        let ids = downloadManager.map { DownloadPaths.newestFirst($0.completedAlbumIDs) }
+            ?? DownloadPaths.newestFirst(DownloadPaths.downloadedAlbumIDs())
+        return Array(LibraryViewModel.downloadedAlbums(ids: ids).prefix(12))
+    }
+
+    @ViewBuilder
+    private var playlistsShelf: some View {
+        if !shownPlaylists.isEmpty {
+            SectionHeader("Playlists", onSeeAll: onShowPlaylists)
+            CardShelf(items: shownPlaylists) { playlist, width in
+                PlaylistCardLink(api: api, playlist: playlist, width: width)
+            }
+        }
     }
 
     /// The server's playlists; offline, only the downloaded ones.
@@ -121,50 +154,12 @@ public struct HomeView: View {
         return viewModel?.playlists ?? []
     }
 
-    /// Offline, or the server couldn't be reached — otherwise every row
-    /// would just say it's empty.
+    /// The server couldn't be reached — otherwise every shelf would just say it's empty.
     @ViewBuilder
-    private var statusBanner: some View {
-        if !NetworkMonitor.shared.isConnected {
-            StatusBanner.offline
-        } else if let error = viewModel?.errorMessage, !(viewModel?.isLoading ?? false) {
-            StatusBanner(systemImage: "exclamationmark.triangle",
-                         message: "Can't reach your Jellyfin server. \(error)",
-                         actionTitle: "Retry") { viewModel?.refresh() }
+    private var errorBanner: some View {
+        if let error = viewModel?.errorMessage, !(viewModel?.isLoading ?? false) {
+            Banner("Can't reach your Jellyfin server. \(error)", actionTitle: "Retry") { viewModel?.refresh() }
         }
-    }
-
-    // MARK: - Sections
-
-    /// A row title; with `more`, a › on the right opens the full list
-    /// (with `action`, the › runs that instead).
-    private func sectionHeader(_ title: String, more: HomeMore? = nil, action: (() -> Void)? = nil) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(.plex(.title3)).bold()
-                .foregroundStyle(.primary)
-            Spacer()
-            if let more {
-                NavigationLink(value: more) { moreChevron }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("View all \(title)")
-            } else if let action {
-                Button(action: action) { moreChevron }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("View all \(title)")
-            }
-        }
-        .padding(.horizontal)
-        .padding(.top, 20.scaled)
-        .padding(.bottom, 8.scaled)
-    }
-
-    private var moreChevron: some View {
-        Image(systemName: "chevron.right")
-            .font(.plex(.title3).weight(.semibold))
-            .foregroundStyle(Color.appBlue)
-            .frame(minWidth: 44.scaled, minHeight: 32.scaled, alignment: .trailing)
-            .contentShape(Rectangle())
     }
 
     /// While Home loads (placeholder cards), or when something matched.
@@ -174,148 +169,66 @@ public struct HomeView: View {
     }
 
     @ViewBuilder
-    private func onThisDaySection(_ cards: LibraryView.GridMetrics?) -> some View {
-        if let entries = viewModel?.onThisDay, !entries.isEmpty {
-            OnThisDayRow(api: api, entries: entries, downloadManager: downloadManager, metrics: cards)
+    private func albumShelf(_ albums: [JellyfinAlbum]?, empty: String) -> some View {
+        let shown = Self.distinct(albums ?? [])
+        if !shown.isEmpty {
+            CardShelf(items: shown) { album, width in
+                AlbumCardLink(api: api, album: album, width: width, isDownloaded: isDownloaded(album))
+            }
+        } else if viewModel?.isLoading ?? false {
+            CardShelfPlaceholder()
         } else {
-            AlbumRowPlaceholder(metrics: cards)
+            emptyLine(empty)
         }
     }
 
-    private func albumRow(_ title: String, _ albums: [JellyfinAlbum]?, empty: String,
-                          cards: LibraryView.GridMetrics?) -> some View {
-        HomeSectionRow(
-            api: api,
-            title: title,
-            albums: albums ?? [],
-            isLoading: viewModel?.isLoading ?? false,
-            emptyMessage: empty,
-            downloadManager: downloadManager,
-            metrics: cards
-        )
+    private func emptyLine(_ message: String) -> some View {
+        Text(message)
+            .font(TetsubiType.body)
+            .foregroundStyle(TetsubiColors.textSecondary)
+            .padding(.horizontal, windowClass.pageMargin)
+            .padding(.vertical, Spacing.xs)
     }
-}
 
-// MARK: - HomeSectionRow
-
-/// A horizontal scroll row of album cards. Tapping a card pushes
-/// `AlbumDetailView` via `navigationDestination(for: JellyfinAlbum.self)`.
-struct HomeSectionRow: View {
-
-    let api: JellyfinAPI?
-    let title: String
-    let albums: [JellyfinAlbum]
-    let isLoading: Bool
-    let emptyMessage: String
-    let downloadManager: DownloadManager?
-    /// Wide layouts: the cards' size (`LibraryView.homeRowMetrics`); nil
-    /// for today's fixed cards.
-    var metrics: LibraryView.GridMetrics? = nil
-
-    var body: some View {
-        Group {
-            if albums.isEmpty {
-                if isLoading {
-                    AlbumRowPlaceholder(metrics: metrics)
-                } else {
-                    Text(emptyMessage)
-                        .font(.plex(.footnote))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
-                }
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: metrics?.spacing ?? 12.scaled) {
-                        ForEach(albums) { album in
-                            NavigationLink(value: album) {
-                                AlbumCardView(
-                                    album: album,
-                                    artRequest: api?.imageURLRequest(for: album.id, size: metrics?.imageSize ?? 300),
-                                    isDownloaded: album.allDiscs.allSatisfy {
-                                        downloadManager?.isDownloaded($0.id) ?? DownloadPaths.exists(albumID: $0.id)
-                                    },
-                                    width: metrics?.cardWidth,
-                                    textScale: metrics?.textScale ?? 1
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .albumQueueMenu(album)
-                        }
-                    }
-                    .homeRowPadding(wide: metrics != nil)
-                    .padding(.bottom, 8.scaled)
-                }
-            }
-        }
+    private func isDownloaded(_ album: JellyfinAlbum) -> Bool {
+        album.allDiscs.allSatisfy { downloadManager?.isDownloaded($0.id) ?? DownloadPaths.exists(albumID: $0.id) }
     }
-}
 
-// MARK: - OnThisDayRow
-
-/// Horizontal scroll row of "On This Day" entries — each card shows an
-/// "X years ago" badge and the album's display name + artist.
-struct OnThisDayRow: View {
-
-    let api: JellyfinAPI?
-    let entries: [OnThisDayEntry]
-    let downloadManager: DownloadManager?
-    /// As `HomeSectionRow`'s.
-    var metrics: LibraryView.GridMetrics? = nil
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: metrics?.spacing ?? 12.scaled) {
-                ForEach(entries) { entry in
-                    NavigationLink(value: entry.album) {
-                        AlbumCardView(
-                            album: entry.album,
-                            artRequest: api?.imageURLRequest(for: entry.album.id, size: metrics?.imageSize ?? 300),
-                            isDownloaded: entry.album.allDiscs.allSatisfy {
-                                downloadManager?.isDownloaded($0.id) ?? DownloadPaths.exists(albumID: $0.id)
-                            },
-                            badge: entry.label.isEmpty ? nil : entry.label,
-                            width: metrics?.cardWidth,
-                            textScale: metrics?.textScale ?? 1
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .albumQueueMenu(entry.album)
-                }
-            }
-            .homeRowPadding(wide: metrics != nil)
-            .padding(.bottom, 8.scaled)
-        }
-    }
-}
-
-// MARK: - Untitled tab
-
-extension View {
-    /// No title in the bar (Home, Library, Downloads). The bar stays for
-    /// toolbar buttons, in its slim style so no space is kept for a title.
-    @ViewBuilder
-    func untitledTab() -> some View {
-        #if os(iOS)
-        self.navigationBarTitleDisplayMode(.inline)
-        #else
-        self
-        #endif
+    /// Each album once: a repeated ID would confuse the row (IDs must be unique).
+    static func distinct(_ albums: [JellyfinAlbum]) -> [JellyfinAlbum] {
+        var seen = Set<String>()
+        return albums.filter { seen.insert($0.id).inserted }
     }
 }
 
 // MARK: - View all
 
-/// The full lists Home's › buttons open.
+/// The full lists Home's "See all" buttons open.
 enum HomeMore: Hashable {
     case favourites
     case random
     case recentlyPlayed
 }
 
-/// A page of random albums (Home ▸ Random Albums ›): three rows of three
-/// (9), or four (12) when four rows fit the screen above "Shake it". Pull
-/// down or shake the device for a fresh set.
+/// Home ▸ Favourites: Library ▸ Favourites' view with a header (Back and the
+/// same Sort, Filter, Grid / List and card size) and its title in the content.
+struct FavouritesPage: View {
+    let api: JellyfinAPI?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PageHeader(nil, onBack: { dismiss() }) { LibraryView.favouritesControls(FavouritesOptions.shared) }
+            PageTitle("Favourites")
+            FavouritesTabView(api: api)
+        }
+        .ownsItsHeader(isDetail: true)
+    }
+}
+
+/// A page of random albums (Home ▸ Random albums, See all): what the server
+/// dealt, in the app's grid. "Shuffle again" in the header, pull down or
+/// shake the device for a fresh set.
 struct RandomAlbumsView: View {
     let api: JellyfinAPI?
     @State private var albums: [JellyfinAlbum] = []
@@ -323,40 +236,30 @@ struct RandomAlbumsView: View {
     @State private var isVisible = false
     @State private var shakes = 0
 
-    /// Title (one line here) and artist under each cover, with the gaps:
-    /// grows with the text size setting.
-    @ScaledMetric(relativeTo: .caption) private var cardText: CGFloat = 37
+    @Environment(\.dismiss) private var dismiss
 
-    /// Fetched each time; 9 or 12 of them are shown.
+    /// Fetched each time, all of them shown.
     static let fetchCount = 12
 
-    /// 12 when four rows of cards, the grid's padding and the "Shake it"
-    /// line all fit in `height` (the space above the tab bar and Now
-    /// Playing bar), else 9. `scale` is the Mac's `UIScale` factor (the row
-    /// gaps and footer grow with it).
-    static func count(forHeight height: CGFloat, rowHeight: CGFloat, scale: CGFloat = 1) -> Int {
-        let rowGap: CGFloat = 16 * scale, padding: CGFloat = 32, footer: CGFloat = 26 * scale
-        return padding + 4 * rowHeight + 3 * rowGap + footer <= height ? 12 : 9
-    }
-
     var body: some View {
-        GeometryReader { geo in
-            let count = Self.count(forHeight: geo.size.height,
-                                   rowHeight: LibraryView.scaledGridArtSize + cardText.scaled,
-                                   scale: UIScale.shared.factor)
+        VStack(spacing: 0) {
+            PageHeader(nil, onBack: { dismiss() }) {
+                PageControls(density: true, shuffle: { Task { await load() } })
+            }
+            PageTitle("Random albums")
             Group {
                 if !loaded {
-                    ProgressView().padding()
+                    LoadingSpinner().frame(maxHeight: .infinity, alignment: .top)
                 } else if albums.isEmpty {
-                    Text("No albums available.").font(.plex(.footnote)).foregroundStyle(.secondary).padding()
+                    EmptyState("No albums available").frame(maxHeight: .infinity, alignment: .top)
                 } else {
-                    AlbumGridView(api: api, albums: Array(albums.prefix(count)), footer: "Shake it", titleLines: 1)
+                    AlbumCollection(api: api, albums: albums, footer: Self.footer)
                         .refreshable { await load() }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .navigationTitle("Random Albums")
+        .ownsItsHeader(isDetail: true)
         .task { if !loaded { await load() } }
         .onAppear { isVisible = true }
         .onDisappear { isVisible = false }
@@ -366,6 +269,15 @@ struct RandomAlbumsView: View {
             Task { await load() }
         }
         .sensoryFeedback(.impact(weight: .light), trigger: shakes)
+    }
+
+    /// Where the device can be shaken.
+    private static var footer: String? {
+        #if os(iOS)
+        "Shake it"
+        #else
+        nil
+        #endif
     }
 
     private func load() async {

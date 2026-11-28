@@ -32,9 +32,9 @@ public struct CompactTabBar: View {
                 item(tab)
             }
         }
-        .frame(height: 49.scaled)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
+        .frame(height: 56.scaled)
+        .background(Color.appBackground.opacity(0.85))
+        .overlay(alignment: .top) { Hairline() }
     }
 
     private func item(_ tab: AppTab) -> some View {
@@ -46,14 +46,14 @@ public struct CompactTabBar: View {
         } label: {
             VStack(spacing: 2.scaled) {
                 Image(systemName: tab.systemImage)
-                    .font(.system(size: 20.scaled))
-                    .frame(height: 24.scaled)
+                    .font(.system(size: 22.scaled))
+                    .frame(height: 26.scaled)
                 Text(LocalizedStringKey(tab.title))
-                    .font(.system(size: 10.scaled))
+                    .font(TetsubiType.navLabel)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            .foregroundStyle(selected ? TetsubiColors.blue : TetsubiColors.textSecondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }

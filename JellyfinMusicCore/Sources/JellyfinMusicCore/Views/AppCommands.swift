@@ -90,15 +90,11 @@ public struct AppCommands: Commands {
             .keyboardShortcut(Self.playlistsShortcut, modifiers: .command)
             .disabled(tab == nil || libraryTab == nil)
             Divider()
-            // Cards per row in the album and artist grids and Home's rows,
-            // as the title bar's + and − buttons; off when none is showing.
-            let zoom = GridZoom.shared
-            Button("Zoom In") { zoom.zoomIn() }
-                .keyboardShortcut("+", modifiers: .command)
-                .disabled(!zoom.canZoomIn)
-            Button("Zoom Out") { zoom.zoomOut() }
-                .keyboardShortcut("-", modifiers: .command)
-                .disabled(!zoom.canZoomOut)
+            // The one card size for every grid and shelf (S, M, L).
+            Picker("Card Size", selection: Binding(get: { DensityStore.shared.density },
+                                                   set: { DensityStore.shared.density = $0 })) {
+                ForEach(Density.allCases) { Text($0.label).tag($0) }
+            }
             Divider()
         }
 

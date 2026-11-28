@@ -20,8 +20,11 @@ public struct AppRootView: View {
     @State private var paths: [AppTab: NavigationPath] = [:]
     /// Now Playing's artist line: shown once the sheet has closed.
     @State private var artistAfterNowPlaying: JellyfinArtist?
-    /// Mac: the window's width class, live while it is resized.
-    @State private var widthClass: WindowWidthClass = .expanded
+    /// The window's width class, live while it is resized (an iPhone is always compact).
+    @State private var widthClass: WindowWidthClass = AppRootView.isPhone ? .compact : .expanded
+    @State private var windowWidth: CGFloat = 1024
+    /// The first few playlists, for the sidebar's Playlists section.
+    @State private var sidebarPlaylists: PlaylistsViewModel?
 
     /// Shared with CarPlay (and the Mac window); see `AppSession`.
     private var session: AppSession { AppSession.shared }
@@ -32,6 +35,9 @@ public struct AppRootView: View {
     // MARK: Init
 
     public init() {}
+
+    /// How many playlists the sidebar lists before the rest (Library ▸ Playlists).
+    static let sidebarPlaylistCount = 6
 
     // MARK: Body
 
@@ -72,9 +78,7 @@ public struct AppRootView: View {
         .appTheme()
         // Mac: covers, text and spacing grow with the window (`UIScale`).
         .measuresUIScale()
-        // iPad full width: bigger grid cards and the +/− buttons.
-        .measuresWideLayout()
-        .followsWindowWidth($widthClass)
+        .followsWindowWidth($widthClass, width: $windowWidth)
     }
 
     // MARK: - Tabs
@@ -83,23 +87,18 @@ public struct AppRootView: View {
         activeAPI: JellyfinAPI
     ) -> some View {
         Group {
-            if widthClass.usesTabBar && isMac {
+            if isMac && widthClass.usesTabBar {
                 compactTabs(activeAPI: activeAPI)
+            } else if usesSidebarShell, #available(iOS 18.0, macOS 15.0, *) {
+                sidebarTabs(activeAPI: activeAPI)
             } else {
-                TabView(selection: $selectedTab) {
-                    tabContent(.home, activeAPI: activeAPI)
-                        .tabItem { Label("Home", systemImage: AppTab.home.systemImage) }.tag(AppTab.home)
-                    tabContent(.library, activeAPI: activeAPI)
-                        .tabItem { Label("Library", systemImage: AppTab.library.systemImage) }.tag(AppTab.library)
-                    tabContent(.search, activeAPI: activeAPI)
-                        .tabItem { Label("Search", systemImage: AppTab.search.systemImage) }.tag(AppTab.search)
-                    tabContent(.downloads, activeAPI: activeAPI)
-                        .tabItem { Label("Downloads", systemImage: AppTab.downloads.systemImage) }.tag(AppTab.downloads)
-                    tabContent(.settings, activeAPI: activeAPI)
-                        .tabItem { Label("Settings", systemImage: AppTab.settings.systemImage) }.tag(AppTab.settings)
-                }
+                phoneTabs(activeAPI: activeAPI)
             }
         }
+        .tint(TetsubiColors.blue)
+        .task(id: ObjectIdentifier(activeAPI)) { reloadSidebarPlaylists(activeAPI) }
+        .onChange(of: selectedTab) { reloadSidebarPlaylists(activeAPI) }
+        .onChange(of: NetworkMonitor.shared.isConnected) { reloadSidebarPlaylists(activeAPI) }
         .nowPlayingAccessory(player: player)
         .nowPlayingSheet(player: player, onShowArtist: { artist in
             // Close Now Playing, then push the artist on the tab in front.
@@ -118,7 +117,6 @@ public struct AppRootView: View {
         }
         // Play on an album or playlist with more queued: Replace / Play Next / Add to Queue.
         .queuePromptHost()
-        .sidebarTabsOnMac(compact: widthClass.usesTabBar)
         // Mac, narrow window: the phone-style bar below the mini player; the
         // native top tab bar (and its » overflow) is hidden.
         .compactTabBarOnMac(isOn: widthClass.usesTabBar, selection: $selectedTab) { tab in
@@ -153,8 +151,117 @@ public struct AppRootView: View {
         tabContent(selectedTab, activeAPI: activeAPI)
     }
 
+    /// iPhone (and macOS 14 / iOS 17): the native bottom `TabView`.
+    private func phoneTabs(activeAPI: JellyfinAPI) -> some View {
+        TabView(selection: $selectedTab) {
+            tabContent(.home, activeAPI: activeAPI)
+                .tabItem { Label("Home", systemImage: AppTab.home.systemImage) }.tag(AppTab.home)
+            tabContent(.library, activeAPI: activeAPI)
+                .tabItem { Label("Library", systemImage: AppTab.library.systemImage) }.tag(AppTab.library)
+            tabContent(.search, activeAPI: activeAPI)
+                .tabItem { Label("Search", systemImage: AppTab.search.systemImage) }.tag(AppTab.search)
+            tabContent(.downloads, activeAPI: activeAPI)
+                .tabItem { Label("Downloads", systemImage: AppTab.downloads.systemImage) }.tag(AppTab.downloads)
+            tabContent(.settings, activeAPI: activeAPI)
+                .tabItem { Label("Settings", systemImage: AppTab.settings.systemImage) }.tag(AppTab.settings)
+        }
+    }
+
+    /// Mac (medium and expanded) and iPad: the system's sidebar-adaptable
+    /// `TabView`. Its sidebar has a brand row (header), the five destinations,
+    /// a Playlists section (the first few; tapping one opens it on the
+    /// Library's stack) and a connection row (bottom bar). Narrow iPad windows
+    /// get the system's bottom tab bar from the same view.
+    @available(iOS 18.0, macOS 15.0, *)
+    private func sidebarTabs(activeAPI: JellyfinAPI) -> some View {
+        TabView(selection: shellSelection) {
+            ForEach(AppTab.allCases, id: \.self) { tab in
+                Tab(tab.title, systemImage: tab.systemImage, value: ShellItem.tab(tab)) {
+                    tabContent(tab, activeAPI: activeAPI)
+                }
+            }
+            TabSection("Playlists") {
+                ForEach(sidebarPlaylistItems) { playlist in
+                    Tab(playlist.name, systemImage: "music.note.list", value: ShellItem.playlist(playlist.id)) {
+                        // Selecting it opens the playlist on Library and moves on: never shown.
+                        Color.clear
+                    }
+                }
+            }
+            .defaultVisibility(.hidden, for: .tabBar)
+        }
+        .tabViewStyle(.sidebarAdaptable)
+        .tabViewSidebarHeader { SidebarBrandRow() }
+        .tabViewSidebarBottomBar {
+            SidebarConnectionRow(serverName: serverName, online: NetworkMonitor.shared.isConnected)
+        }
+    }
+
+    /// What the sidebar can select: a destination, or a playlist to open.
+    enum ShellItem: Hashable {
+        case tab(AppTab)
+        case playlist(String)
+    }
+
+    /// Selecting a destination selects the tab; selecting a playlist opens it
+    /// on Library's stack, and Library stays selected.
+    private var shellSelection: Binding<ShellItem> {
+        Binding(
+            get: { .tab(selectedTab) },
+            set: { item in
+                switch item {
+                case .tab(let tab):
+                    selectedTab = tab
+                case .playlist(let id):
+                    guard let playlist = sidebarPlaylists?.playlists.first(where: { $0.id == id }) else { return }
+                    paths[.library] = NavigationPath([playlist])
+                    selectedTab = .library
+                }
+            })
+    }
+
+    private var sidebarPlaylistItems: [JellyfinPlaylist] {
+        Array((sidebarPlaylists?.playlists ?? []).prefix(Self.sidebarPlaylistCount))
+    }
+
+    /// The server's address as the sidebar's connection row shows it.
+    private var serverName: String {
+        guard let url = api?.baseURL else { return "" }
+        let host = url.host(percentEncoded: false) ?? url.absoluteString
+        return url.port.map { "\(host):\($0)" } ?? host
+    }
+
+    private func reloadSidebarPlaylists(_ activeAPI: JellyfinAPI) {
+        guard usesSidebarShell else { return }
+        let model = sidebarPlaylists ?? PlaylistsViewModel(api: activeAPI, downloads: downloadManager?.playlists)
+        sidebarPlaylists = model
+        model.load(online: NetworkMonitor.shared.isConnected)
+    }
+
+    /// The Mac and iPad get the sidebar and the docked mini player; the iPhone
+    /// keeps the native bottom tabs and the floating bar / accessory.
+    private var usesSidebarShell: Bool { !Self.isPhone }
+
+    static var isPhone: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
+
+    /// A tab's navigation stack, centred and limited to 1600 pt on the Mac and iPad.
     @ViewBuilder
     private func tabContent(_ tab: AppTab, activeAPI: JellyfinAPI) -> some View {
+        if usesSidebarShell {
+            tabStack(tab, activeAPI: activeAPI).tetsubiMaxContentWidth()
+        } else {
+            tabStack(tab, activeAPI: activeAPI)
+        }
+    }
+
+    @ViewBuilder
+    private func tabStack(_ tab: AppTab, activeAPI: JellyfinAPI) -> some View {
         switch tab {
         case .home:
             NavigationStack(path: path(.home)) {
@@ -242,7 +349,6 @@ public struct AppRootView: View {
                 .navigationDestination(for: JellyfinArtist.self) { artist in
                     ArtistAlbumsView(api: api, artist: artist)
                         .appTheme()
-                        .gridZoomToolbar()
                 }
         }
     }
@@ -251,43 +357,26 @@ public struct AppRootView: View {
 // MARK: - Window width
 
 private extension View {
-    /// Mac: tracks the window's width class and passes it down, with the
-    /// wide-grid flag it implies. Does nothing on iOS (the size class does that).
+    /// Tracks the window's width class and passes it down. The Mac and iPad
+    /// follow the width; an iPhone is always compact. The width itself is passed
+    /// down too (page controls go inline from 720 pt).
     @ViewBuilder
-    func followsWindowWidth(_ widthClass: Binding<WindowWidthClass>) -> some View {
-        #if os(macOS)
+    func followsWindowWidth(_ widthClass: Binding<WindowWidthClass>, width: Binding<CGFloat>) -> some View {
         self
-            .onGeometryChange(for: WindowWidthClass.self) { WindowWidthClass.of(width: $0.size.width) } action: {
+            .onGeometryChange(for: WindowWidthClass.self) {
+                WindowWidthClass.resolve(width: $0.size.width, isPhone: AppRootView.isPhone)
+            } action: {
                 widthClass.wrappedValue = $0
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width.wrappedValue = $0 }
             .environment(\.windowWidthClass, widthClass.wrappedValue)
-            .environment(\.isWideLayout, widthClass.wrappedValue.usesWideGrids)
-        #else
-        self
-        #endif
+            .environment(\.windowWidth, width.wrappedValue)
     }
 }
 
 // MARK: - Now-playing placement
 
 private extension View {
-    /// Mac: show the tabs as a sidebar (macOS 15+); macOS 14 keeps tabs.
-    @ViewBuilder
-    func sidebarTabsOnMac(compact: Bool) -> some View {
-        #if os(macOS)
-        if compact {
-            // A narrow window gets the phone layout: plain tabs, no sidebar.
-            self
-        } else if #available(macOS 15.0, *) {
-            self.tabViewStyle(.sidebarAdaptable)
-        } else {
-            self
-        }
-        #else
-        self
-        #endif
-    }
-
     /// Mac, compact width: hides the native tab bar and docks `CompactTabBar`
     /// under the content (and so under the mini player). The TabView stays, so
     /// each tab keeps its state when the window crosses 600 pt.
@@ -357,7 +446,7 @@ private extension View {
     @ViewBuilder
     func nowPlayingAccessory(player: PlayerManager?) -> some View {
         #if os(iOS)
-        if #available(iOS 26.1, *) {
+        if #available(iOS 26.1, *), AppRootView.isPhone {
             self.tabViewBottomAccessory(isEnabled: player?.currentTrack != nil) {
                 if let player { NowPlayingBarView(manager: player, style: .accessory) }
             }
@@ -369,23 +458,72 @@ private extension View {
         #endif
     }
 
-    /// Everywhere else (iOS < 26, macOS): a floating lozenge inset at the
-    /// bottom of each tab's content, which sits above the tab bar.
+    /// iPhone before iOS 26.1: a floating lozenge inset at the bottom of each
+    /// tab's content, above the tab bar. Mac and iPad: the docked, full-width
+    /// `DockedMiniPlayer` at the bottom of the content area (above the compact
+    /// bar on a narrow Mac window).
     @ViewBuilder
     func nowPlayingInset(player: PlayerManager?) -> some View {
         #if os(iOS)
-        if #available(iOS 26.1, *) {
-            self
+        if AppRootView.isPhone {
+            if #available(iOS 26.1, *) {
+                self
+            } else {
+                self.safeAreaInset(edge: .bottom, spacing: 0) {
+                    if let player { NowPlayingBarView(manager: player) }
+                }
+            }
         } else {
             self.safeAreaInset(edge: .bottom, spacing: 0) {
-                if let player { NowPlayingBarView(manager: player) }
+                if let player { DockedMiniPlayer(manager: player) }
             }
         }
         #else
         self.safeAreaInset(edge: .bottom, spacing: 0) {
-            if let player { NowPlayingBarView(manager: player) }
+            if let player { DockedMiniPlayer(manager: player) }
         }
         #endif
+    }
+}
+
+// MARK: - Sidebar pieces
+
+/// The sidebar's top row: the disc logo and the name.
+struct SidebarBrandRow: View {
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            Image("DiscLogo")
+                .resizable().scaledToFill()
+                .frame(width: 24, height: 24)
+                .clipShape(Circle())
+            Text("Tetsubi").font(TetsubiType.rowTitle.weight(.semibold)).foregroundStyle(TetsubiColors.textPrimary)
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, Spacing.s)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The sidebar's bottom row: a green dot and the server's address, or a red
+/// dot and "Offline".
+struct SidebarConnectionRow: View {
+    let serverName: String
+    let online: Bool
+
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            Circle().fill(online ? TetsubiColors.green : TetsubiColors.red).frame(width: 8, height: 8)
+            Text(online ? serverName : "Offline")
+                .font(TetsubiType.caption).foregroundStyle(TetsubiColors.textSecondary)
+                .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.m)
+        .padding(.vertical, Spacing.s)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(online ? "Connected to \(serverName)" : "Offline")
     }
 }
 
@@ -400,3 +538,4 @@ enum NowPlayingPresentation {
     }
 }
 #endif
+

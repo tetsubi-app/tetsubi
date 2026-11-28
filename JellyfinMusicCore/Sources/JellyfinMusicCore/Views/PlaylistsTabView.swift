@@ -33,7 +33,7 @@ struct PlaylistArtView: View {
     let api: JellyfinAPI?
     let playlist: JellyfinPlaylist
     let size: CGFloat
-    var cornerRadius: CGFloat = 8
+    var cornerRadius: CGFloat = Radii.card
     var requestSize: Int = 300
     var firstEntry: PlaylistEntry? = nil
 
@@ -54,7 +54,8 @@ struct PlaylistArtView: View {
 
     var body: some View {
         let request = request
-        return AlbumArtView(request: request, size: size, cornerRadius: cornerRadius)
+        return AlbumArtView(request: request, size: size, cornerRadius: cornerRadius,
+                            placeholderColor: TetsubiColors.art)
             // Re-made when the picture changes, so the new one loads.
             .id(request?.url)
             // Again when its song count changes: an empty playlist got its first song.
@@ -73,42 +74,6 @@ struct PlaylistArtView: View {
     }
 }
 
-// MARK: - Card
-
-/// Art, name and "12 songs · 1 h 12 min", for grids (`artSize` 120) and
-/// Home's row (140). `artSize` is at scale 1; the card scales it (`UIScale`).
-struct PlaylistCardView: View {
-    let api: JellyfinAPI?
-    let playlist: JellyfinPlaylist
-    var artSize: CGFloat = LibraryView.gridArtSize
-    /// Home's row: the card is as wide as its art.
-    var fixedWidth = false
-    /// Home on a wide layout: the same size as the album cards beside it
-    /// (`LibraryView.homeRowMetrics`), in place of `artSize`.
-    var metrics: LibraryView.GridMetrics? = nil
-
-    var body: some View {
-        let art = metrics?.cardWidth ?? artSize.scaled
-        let t = metrics?.textScale ?? 1
-        return VStack(spacing: 4.scaled * t) {
-            PlaylistArtView(api: api, playlist: playlist, size: art, cornerRadius: 8.scaled * t,
-                            requestSize: metrics?.imageSize ?? 300)
-            Text(playlist.name)
-                .font(.plex(.caption, times: t).bold())
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, alignment: .center)
-            Text(playlist.summary)
-                .font(.plex(.caption2, times: t))
-                .foregroundStyle(Color.albumArtistText)
-                .lineLimit(1)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, alignment: .center)
-        }
-        .frame(width: fixedWidth ? art : nil)
-    }
-}
-
 // MARK: - Tab
 
 /// The server's playlists as a grid or list; tap one for its page.
@@ -123,22 +88,17 @@ struct PlaylistsTabView: View {
         ZStack {
             if let error = model.errorMessage, !model.isLoading {
                 VStack(spacing: 0) {
-                    StatusBanner(systemImage: "exclamationmark.triangle",
-                                 message: "Couldn't load your playlists. \(error)",
-                                 actionTitle: "Retry") { load() }
+                    Banner("Couldn't load your playlists. \(error)", actionTitle: "Retry") { load() }
                     Spacer(minLength: 0)
                 }
             } else if model.playlists.isEmpty {
                 if model.hasLoaded {
-                    Text(model.isOffline
-                         ? "No downloaded playlists yet."
-                         : "No playlists yet. Add songs from an album's track menu.")
-                        .font(.plex(.footnote))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding()
+                    EmptyState(model.isOffline ? "No downloaded playlists yet" : "No playlists yet",
+                               message: model.isOffline ? nil : "Add songs from an album's track menu.",
+                               systemImage: "music.note.list")
+                        .frame(maxHeight: .infinity, alignment: .top)
                 } else if model.isLoading {
-                    ProgressView().padding()
+                    LoadingSpinner().frame(maxHeight: .infinity, alignment: .top)
                 }
             } else {
                 switch model.displayMode {
@@ -158,78 +118,38 @@ struct PlaylistsTabView: View {
         model.load(online: NetworkMonitor.shared.isConnected)
     }
 
-    /// Same layout as Library ▸ Albums (`LibraryView.gridLayout`).
     private var grid: some View {
-        GeometryReader { geo in
-            let edge = LibraryView.gridEdgePadding
-            let layout = LibraryView.gridLayout(width: geo.size.width - 2 * edge,
-                                                scale: UIScale.shared.factor)
-            ScrollView {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: layout.spacing, alignment: .top),
-                                         count: layout.columns),
-                          spacing: 16.scaled) {
-                    ForEach(model.playlists) { playlist in
-                        NavigationLink(value: playlist) {
-                            PlaylistCardView(api: api, playlist: playlist)
-                        }
-                        .buttonStyle(.plain)
-                        .playlistQueueMenu(playlist)
-                    }
-                }
-                .padding(.horizontal, edge)
-                .padding(.vertical)
+        CardGrid { metrics in
+            ForEach(model.playlists) { playlist in
+                PlaylistCardLink(api: api, playlist: playlist, width: metrics.cardWidth)
             }
         }
     }
 
     private var list: some View {
-        List(model.playlists) { playlist in
-            NavigationLink(value: playlist) {
-                HStack(spacing: 12.scaled) {
-                    PlaylistArtView(api: api, playlist: playlist, size: 60.scaled, cornerRadius: 4.scaled, requestSize: 100)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(playlist.name)
-                            .font(.plex(.body))
-                            .lineLimit(1)
-                        Text(playlist.summary)
-                            .font(.plex(.caption))
-                            .foregroundStyle(Color.albumArtistText)
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                }
+        ListGrid {
+            ForEach(model.playlists) { playlist in
+                PlaylistListRow(api: api, playlist: playlist)
             }
-            .playlistQueueMenu(playlist)
-            .listRowBackground(Color.clear)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
     }
 }
 
-// MARK: - Home row
-
-/// Home's horizontal row of playlists. On a wide layout its cards are the
-/// album rows' size (`metrics`); nil keeps today's 140pt cards.
-struct HomePlaylistsRow: View {
+/// A playlist as a list row: its picture, name and "12 songs · 1 h 12 min".
+struct PlaylistListRow: View {
     let api: JellyfinAPI?
-    let playlists: [JellyfinPlaylist]
-    var metrics: LibraryView.GridMetrics? = nil
+    let playlist: JellyfinPlaylist
+    var horizontalPadding: CGFloat?
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: metrics?.spacing ?? 12.scaled) {
-                ForEach(playlists) { playlist in
-                    NavigationLink(value: playlist) {
-                        PlaylistCardView(api: api, playlist: playlist, artSize: LibraryView.homeCardSize,
-                                         fixedWidth: true, metrics: metrics)
-                    }
-                    .buttonStyle(.plain)
-                    .playlistQueueMenu(playlist)
-                }
-            }
-            .homeRowPadding(wide: metrics != nil)
-            .padding(.bottom, 8)
+        NavigationLink(value: playlist) {
+            ListRow(title: playlist.name, subtitle: playlist.summary, horizontalPadding: horizontalPadding, art: {
+                PlaylistArtView(api: api, playlist: playlist, size: 40.scaled, cornerRadius: Radii.thumb,
+                                requestSize: 100)
+            })
         }
+        .buttonStyle(.plain)
+        .playlistQueueMenu(playlist)
+        .accessibilityIdentifier("PlaylistRow.\(playlist.id)")
     }
 }

@@ -3,16 +3,15 @@
 import SwiftUI
 import Observation
 
-/// The Downloads tab.
-///
-/// Sections:
-///   **Downloading** — playlists and albums currently in progress, with
-///                     a progress bar and a cancel button.
-///   **Playlists**   — playlists that have been fully downloaded; a row
-///                     opens the playlist's page.
-///   **Downloaded**  — albums that have been fully downloaded,
-///                     with format, size, and a delete button.
-///   **Storage**     — total disk usage at the bottom.
+/// The Downloads tab: a page header with Edit, then
+///   **Downloading** — playlists and albums in progress, with a progress bar,
+///                     pause / resume / retry and cancel;
+///   **Playlists**   — a shelf of downloaded playlists (a card opens its page);
+///   **Downloaded**  — the downloaded albums as the app's grid, newest first
+///                     (a card plays it);
+///   **Storage**     — disk use and playing time: a card beside the grid on
+///                     expanded windows, below it otherwise.
+/// Edit selects several cards and shows a "Remove N" bar.
 public struct DownloadsView: View {
 
     // MARK: - Inputs
@@ -28,8 +27,10 @@ public struct DownloadsView: View {
     @State private var playlistSelection: Set<String> = []
     /// Shows the "Remove N downloads?" confirmation.
     @State private var confirmingRemoval = false
-    /// Album durations, filled in as rows appear (read from the files).
+    /// Album durations, filled in as cards appear (read from the files).
     @State private var durations: [String: TimeInterval] = [:]
+
+    @Environment(\.windowWidthClass) private var windowClass
 
     // MARK: -
 
@@ -38,40 +39,98 @@ public struct DownloadsView: View {
         self.player         = player
     }
 
+    private func hasDownloads(_ mgr: DownloadManager) -> Bool {
+        !mgr.completedAlbumIDs.isEmpty || !mgr.playlists.downloadedIDs.isEmpty
+    }
+
     // MARK: - Body
 
     public var body: some View {
-        Group {
-            if let mgr = downloadManager {
-                if mgr.activeDownloads.isEmpty && mgr.completedAlbumIDs.isEmpty
-                    && mgr.playlists.manifests.isEmpty {
-                    emptyState
-                } else {
-                    List {
-                        if !mgr.activeDownloads.isEmpty || !mgr.playlists.active.isEmpty {
-                            downloadingSection(mgr)
-                                .listRowBackground(Color.appGroupBackground)
-                        }
-                        if !mgr.playlists.downloadedIDs.isEmpty {
-                            playlistsSection(mgr)
-                                .listRowBackground(Color.appGroupBackground)
-                        }
-                        downloadedSection(mgr)
-                            .listRowBackground(Color.appGroupBackground)
-                        storageSection(mgr)
-                            .listRowBackground(Color.appGroupBackground)
-                    }
-                    .scrollContentBackground(.hidden)
-                    .readableWidthOnMac()
-                }
+        VStack(spacing: 0) {
+            PageHeader("Downloads") {
+                if let mgr = downloadManager, hasDownloads(mgr) { editButton }
+            }
+            if let mgr = downloadManager,
+               !(mgr.activeDownloads.isEmpty && mgr.completedAlbumIDs.isEmpty && mgr.playlists.manifests.isEmpty) {
+                page(mgr)
             } else {
                 emptyState
             }
         }
-        .untitledTab()
+        .ownsItsHeader()
         .onAppear {
             downloadManager?.refreshDownloaded()
             downloadManager?.playlists.refresh()
+        }
+    }
+
+    /// Edit / Done.
+    private var editButton: some View {
+        ActionChip(isEditing ? "Done" : "Edit") {
+            isEditing.toggle()
+            selection = []
+            playlistSelection = []
+        }
+        .accessibilityIdentifier("DownloadsView.edit")
+    }
+
+    private func page(_ mgr: DownloadManager) -> some View {
+        let sideBySide = windowClass == .expanded
+        return HStack(alignment: .top, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !mgr.activeDownloads.isEmpty || !mgr.playlists.active.isEmpty {
+                        downloadingSection(mgr)
+                    }
+                    if !mgr.playlists.downloadedIDs.isEmpty {
+                        playlistsSection(mgr)
+                    }
+                    if !mgr.completedAlbumIDs.isEmpty {
+                        downloadedSection(mgr)
+                    }
+                    if !sideBySide {
+                        storageCard(mgr)
+                            .padding(.horizontal, windowClass.pageMargin)
+                            .padding(.top, Spacing.l)
+                    }
+                }
+                .padding(.bottom, Spacing.xl)
+            }
+            .frame(maxWidth: .infinity)
+            if sideBySide {
+                // Beside the grid, kept in view.
+                ScrollView {
+                    storageCard(mgr)
+                        .padding(.top, Spacing.xxl)
+                        .padding(.trailing, Spacing.xxl)
+                        .padding(.bottom, Spacing.xxl)
+                }
+                .frame(width: 352 + Spacing.xxl)
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isEditing { removeBar(mgr) }
+        }
+        // Nothing left to edit (removed elsewhere): leave edit mode.
+        .onChange(of: hasDownloads(mgr)) { _, has in
+            if !has { isEditing = false; selection = []; playlistSelection = [] }
+        }
+        .confirmationDialog(Self.removalTitle(count: selection.count + playlistSelection.count),
+                            isPresented: $confirmingRemoval, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) {
+                // Playlists first: an album going would otherwise
+                // set them fetching its songs again.
+                for id in playlistSelection { mgr.playlists.remove(id) }
+                for id in selection { mgr.deleteDownloadedAlbum(id) }
+                selection = []
+                playlistSelection = []
+                isEditing = false
+            }
+            .accessibilityIdentifier("DownloadsView.confirmRemove")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(Self.removalMessage(albums: selection.count, playlists: playlistSelection.count))
         }
     }
 
@@ -100,243 +159,6 @@ public struct DownloadsView: View {
         count == 1 ? "Remove this download?" : "Remove \(count) downloads?"
     }
 
-    // MARK: - Sections
-
-    @ViewBuilder
-    private func downloadingSection(_ mgr: DownloadManager) -> some View {
-        Section("Downloading") {
-            ForEach(mgr.playlists.active.values.sorted { $0.name < $1.name }, id: \.playlistID) { state in
-                playlistDownloadRow(state, playlists: mgr.playlists)
-            }
-            ForEach(Array(mgr.activeDownloads.values), id: \.albumID) { state in
-                downloadRow(state, mgr: mgr)
-            }
-        }
-    }
-
-    /// Downloaded playlists, by name. A row opens the playlist's page; in
-    /// edit mode it's ticked for removal.
-    @ViewBuilder
-    private func playlistsSection(_ mgr: DownloadManager) -> some View {
-        Section {
-            ForEach(PlaylistsViewModel.sorted(mgr.playlists.downloadedPlaylists, by: .name)) { playlist in
-                if isEditing {
-                    playlistRow(playlist, mgr: mgr)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if !playlistSelection.insert(playlist.id).inserted {
-                                playlistSelection.remove(playlist.id)
-                            }
-                        }
-                } else {
-                    NavigationLink(value: playlist) {
-                        playlistRow(playlist, mgr: mgr)
-                    }
-                    .playlistQueueMenu(playlist)
-                    .accessibilityIdentifier("DownloadsView.playlist.\(playlist.id)")
-                }
-            }
-        } header: {
-            HStack {
-                Text("Playlists")
-                Spacer()
-                editButton
-            }
-        }
-    }
-
-    private func playlistRow(_ playlist: JellyfinPlaylist, mgr: DownloadManager) -> some View {
-        HStack(spacing: 12.scaled) {
-            if isEditing {
-                let selected = playlistSelection.contains(playlist.id)
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.plex(.title3))
-                    .foregroundStyle(selected ? Color.appBlue : .secondary)
-                    .accessibilityIdentifier("DownloadsView.selectPlaylist.\(playlist.id)")
-            }
-            AlbumArtView(request: playlistArtRequest(playlist.id, playlists: mgr.playlists),
-                         size: 56.scaled, cornerRadius: 6.scaled)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(playlist.name)
-                    .font(.plex(.subheadline).bold())
-                    .lineLimit(1)
-                Text(Self.playlistDetailLine(playlist, size: mgr.playlists.size(playlist.id)))
-                    .font(.plex(.caption))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.vertical, 4.scaled)
-    }
-
-    /// A downloaded playlist's saved picture.
-    private func playlistArtRequest(_ playlistID: String, playlists: PlaylistDownloads) -> URLRequest? {
-        _ = playlists.artVersion
-        return PlaylistDownloadPaths.savedCover(playlistID: playlistID).map { URLRequest(url: $0) }
-    }
-
-    /// Edit / Done, on the first of the two downloaded sections.
-    private var editButton: some View {
-        Button(isEditing ? "Done" : "Edit") {
-            isEditing.toggle()
-            selection = []
-            playlistSelection = []
-        }
-        .textCase(nil)
-        .accessibilityIdentifier("DownloadsView.edit")
-    }
-
-    @ViewBuilder
-    private func downloadedSection(_ mgr: DownloadManager) -> some View {
-        let selectedCount = selection.count + playlistSelection.count
-        Section {
-            // Newest download first.
-            ForEach(DownloadPaths.newestFirst(mgr.completedAlbumIDs), id: \.self) { albumID in
-                let size = DownloadPaths.totalSize(albumID: albumID)
-                let count = DownloadPaths.fileCount(albumID: albumID)
-                HStack(spacing: 12.scaled) {
-                    if isEditing {
-                        Image(systemName: selection.contains(albumID) ? "checkmark.circle.fill" : "circle")
-                            .font(.plex(.title3))
-                            .foregroundStyle(selection.contains(albumID) ? Color.appBlue : .secondary)
-                            .accessibilityIdentifier("DownloadsView.select.\(albumID)")
-                    }
-                    Button {
-                        QueueActions.playDownloaded(id: albumID, title: mgr.albumInfo(for: albumID)?.title ?? "",
-                                                    artist: mgr.albumInfo(for: albumID)?.artist ?? "")
-                    } label: {
-                        AlbumArtView(request: mgr.artRequest(for: albumID), size: 56.scaled, cornerRadius: 6.scaled)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isEditing)
-                    .accessibilityLabel("Play album")
-                    .accessibilityIdentifier("DownloadsView.cover.\(albumID)")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(mgr.albumInfo(for: albumID)?.title ?? "Album \(albumID.prefix(6))")
-                            .font(.plex(.subheadline).bold())
-                            .lineLimit(1)
-                        if let artist = mgr.albumInfo(for: albumID)?.artist, !artist.isEmpty {
-                            Text(artist)
-                                .font(.plex(.caption))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Text(Self.detailLine(count: count, duration: durations[albumID], size: size))
-                            .font(.plex(.caption))
-                            .foregroundStyle(.secondary)
-                    }
-                    .task(id: count) {
-                        if let d = await DownloadPaths.albumDuration(albumID: albumID) {
-                            durations[albumID] = d
-                        }
-                    }
-                    Spacer()
-                    if !isEditing {
-                        Button {
-                            QueueActions.playDownloaded(id: albumID, title: mgr.albumInfo(for: albumID)?.title ?? "",
-                                                    artist: mgr.albumInfo(for: albumID)?.artist ?? "")
-                        } label: {
-                            Image(systemName: "play.fill")
-                                .font(.plex(.title2))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Play locally")
-                        .accessibilityIdentifier("DownloadsView.play.\(albumID)")
-                    }
-                }
-                .padding(.vertical, 4.scaled)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    guard isEditing else { return }
-                    if !selection.insert(albumID).inserted { selection.remove(albumID) }
-                }
-                .contextMenu {
-                    if !isEditing, player != nil {
-                        QueueMenuItems {
-                            QueueActions.queue(downloadedAlbumIDs: [albumID], sourceId: albumID,
-                                               title: mgr.albumInfo(for: albumID)?.title ?? "",
-                                               artist: mgr.albumInfo(for: albumID)?.artist ?? "", $0)
-                        }
-                    }
-                }
-            }
-            if isEditing {
-                Button(role: .destructive) {
-                    confirmingRemoval = true
-                } label: {
-                    Text(selectedCount == 0 ? "Remove selected" : "Remove selected (\(selectedCount))")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .disabled(selectedCount == 0)
-                .accessibilityIdentifier("DownloadsView.removeSelected")
-                .confirmationDialog(Self.removalTitle(count: selectedCount),
-                                    isPresented: $confirmingRemoval,
-                                    titleVisibility: .visible) {
-                    Button("Remove", role: .destructive) {
-                        // Playlists first: an album going would otherwise
-                        // set them fetching its songs again.
-                        for id in playlistSelection { mgr.playlists.remove(id) }
-                        for id in selection { mgr.deleteDownloadedAlbum(id) }
-                        selection = []
-                        playlistSelection = []
-                        isEditing = false
-                    }
-                    .accessibilityIdentifier("DownloadsView.confirmRemove")
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text(Self.removalMessage(albums: selection.count, playlists: playlistSelection.count))
-                }
-            }
-        } header: {
-            HStack {
-                Text("Downloaded")
-                Spacer()
-                // With downloaded playlists, their section (above) has it.
-                if !mgr.completedAlbumIDs.isEmpty, mgr.playlists.downloadedIDs.isEmpty {
-                    editButton
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func storageSection(_ mgr: DownloadManager) -> some View {
-        Section {
-            HStack {
-                Text("Storage used")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(DownloadPaths.formatBytes(mgr.totalDiskUsage))
-                    .font(.plex(.subheadline).monospacedDigit())
-            }
-            if !mgr.completedAlbumIDs.isEmpty || !mgr.playlists.downloadedIDs.isEmpty {
-                HStack {
-                    Text("Total playing time")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if let total = Self.totalDuration(of: mgr.completedAlbumIDs, durations: durations,
-                                                      playlists: mgr.playlists.ownPlayingTime) {
-                        Text(NowPlayingView.formatAlbumDuration(total))
-                            .font(.plex(.subheadline).monospacedDigit())
-                    } else {
-                        ProgressView().controlSize(.small)
-                    }
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("DownloadsView.totalDuration")
-                // Rows only read durations as they scroll into view; read
-                // every album's here so the total covers them all.
-                .task(id: mgr.completedAlbumIDs) {
-                    for albumID in DownloadPaths.newestFirst(mgr.completedAlbumIDs) where durations[albumID] == nil {
-                        durations[albumID] = await DownloadPaths.albumDuration(albumID: albumID) ?? 0
-                    }
-                }
-            }
-        }
-    }
-
     /// Sum of the albums' durations, or nil while any is still unknown.
     /// Albums whose files couldn't be read count as 0. `playlists` is the
     /// time of the songs kept in downloaded playlists' own folders, each
@@ -351,175 +173,308 @@ public struct DownloadsView: View {
         return total
     }
 
-    // MARK: - Row
+    // MARK: - Sections
+
+    private func downloadingSection(_ mgr: DownloadManager) -> some View {
+        let albums = mgr.activeDownloads.values.sorted { ($0.title, $0.albumID) < ($1.title, $1.albumID) }
+        let playlists = mgr.playlists.active.values.sorted { $0.name < $1.name }
+        return VStack(alignment: .leading, spacing: 0) {
+            SectionHeader("Downloading")
+            ListGridContent {
+                ForEach(playlists, id: \.playlistID) { state in
+                    playlistDownloadRow(state, playlists: mgr.playlists)
+                }
+                ForEach(albums, id: \.albumID) { state in
+                    downloadRow(state, mgr: mgr)
+                }
+            }
+        }
+    }
+
+    /// Downloaded playlists, by name, as a shelf. A card opens the playlist's
+    /// page; in edit mode it's ticked for removal.
+    private func playlistsSection(_ mgr: DownloadManager) -> some View {
+        let playlists = PlaylistsViewModel.sorted(mgr.playlists.downloadedPlaylists, by: .name)
+        return VStack(alignment: .leading, spacing: 0) {
+            SectionHeader("Playlists")
+            CardShelf(items: playlists) { playlist, width in
+                playlistCard(playlist, width: width, mgr: mgr)
+            }
+        }
+        .padding(.top, Spacing.s)
+    }
+
+    @ViewBuilder
+    private func playlistCard(_ playlist: JellyfinPlaylist, width: CGFloat, mgr: DownloadManager) -> some View {
+        let card = MediaCard(width: width, title: playlist.name,
+                             subtitle: Self.playlistDetailLine(playlist, size: mgr.playlists.size(playlist.id))) { corner in
+            AlbumArtView(request: playlistArtRequest(playlist.id, playlists: mgr.playlists), size: width,
+                         cornerRadius: corner, placeholderColor: TetsubiColors.art)
+        } overlay: {
+            if isEditing {
+                SelectionMark(selected: playlistSelection.contains(playlist.id))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .accessibilityIdentifier("DownloadsView.selectPlaylist.\(playlist.id)")
+            }
+        }
+        if isEditing {
+            card.onTapGesture {
+                if !playlistSelection.insert(playlist.id).inserted { playlistSelection.remove(playlist.id) }
+            }
+            .accessibilityAddTraits(playlistSelection.contains(playlist.id) ? [.isButton, .isSelected] : .isButton)
+        } else {
+            NavigationLink(value: playlist) { card }
+                .buttonStyle(.plain)
+                .playlistQueueMenu(playlist)
+                .accessibilityIdentifier("DownloadsView.playlist.\(playlist.id)")
+        }
+    }
+
+    /// A downloaded playlist's saved picture.
+    private func playlistArtRequest(_ playlistID: String, playlists: PlaylistDownloads) -> URLRequest? {
+        _ = playlists.artVersion
+        return PlaylistDownloadPaths.savedCover(playlistID: playlistID).map { URLRequest(url: $0) }
+    }
+
+    /// The downloaded albums, newest first, as the app's grid. A card plays the
+    /// album; in edit mode it is ticked for removal.
+    private func downloadedSection(_ mgr: DownloadManager) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionHeader("Downloaded").padding(.top, Spacing.s)
+            CardGridContent { metrics in
+                ForEach(DownloadPaths.newestFirst(mgr.completedAlbumIDs), id: \.self) { albumID in
+                    downloadedCard(albumID, width: metrics.cardWidth, mgr: mgr)
+                }
+            }
+            .padding(.vertical, Spacing.s)
+        }
+    }
+
+    private func downloadedCard(_ albumID: String, width: CGFloat, mgr: DownloadManager) -> some View {
+        let info = mgr.albumInfo(for: albumID)
+        let size = DownloadPaths.totalSize(albumID: albumID)
+        let count = DownloadPaths.fileCount(albumID: albumID)
+        let title = info?.title ?? "Album \(albumID.prefix(6))"
+        return MediaCard(width: width, title: title, subtitle: info?.artist,
+                         detail: Self.detailLine(count: count, duration: durations[albumID], size: size)) { corner in
+            AlbumArtView(request: mgr.artRequest(for: albumID), size: width, cornerRadius: corner,
+                         placeholderColor: TetsubiColors.art)
+        } overlay: {
+            if isEditing {
+                SelectionMark(selected: selection.contains(albumID))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .accessibilityIdentifier("DownloadsView.select.\(albumID)")
+            }
+        }
+        .onTapGesture {
+            if isEditing {
+                if !selection.insert(albumID).inserted { selection.remove(albumID) }
+            } else {
+                QueueActions.playDownloaded(id: albumID, title: info?.title ?? "", artist: info?.artist ?? "")
+            }
+        }
+        .task(id: count) {
+            if let d = await DownloadPaths.albumDuration(albumID: albumID) { durations[albumID] = d }
+        }
+        .contextMenu {
+            if !isEditing, player != nil {
+                QueueMenuItems {
+                    QueueActions.queue(downloadedAlbumIDs: [albumID], sourceId: albumID,
+                                       title: info?.title ?? "", artist: info?.artist ?? "", $0)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(isEditing ? title : "Play \(title)")
+        .accessibilityIdentifier("DownloadsView.cover.\(albumID)")
+    }
+
+    /// The "Remove N" bar shown in edit mode.
+    private func removeBar(_ mgr: DownloadManager) -> some View {
+        let selectedCount = selection.count + playlistSelection.count
+        return PrimaryButton(selectedCount == 0 ? "Remove selected" : "Remove \(selectedCount)",
+                             enabled: selectedCount > 0, color: TetsubiColors.red) {
+            confirmingRemoval = true
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, windowClass.pageMargin)
+        .padding(.vertical, Spacing.m)
+        .background(TetsubiColors.navy.opacity(0.92))
+        .accessibilityIdentifier("DownloadsView.removeSelected")
+    }
+
+    /// Storage used and total playing time: one card.
+    private func storageCard(_ mgr: DownloadManager) -> some View {
+        let showsTotal = hasDownloads(mgr)
+        return VStack(spacing: 0) {
+            SettingsRow("Storage used", divider: showsTotal) {
+                SettingsValue(DownloadPaths.formatBytes(mgr.totalDiskUsage))
+            }
+            if showsTotal {
+                SettingsRow("Total playing time", divider: false) {
+                    if let total = Self.totalDuration(of: mgr.completedAlbumIDs, durations: durations,
+                                                      playlists: mgr.playlists.ownPlayingTime) {
+                        SettingsValue(NowPlayingView.formatAlbumDuration(total))
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("DownloadsView.totalDuration")
+                // Cards only read durations as they scroll into view; read
+                // every album's here so the total covers them all.
+                .task(id: mgr.completedAlbumIDs) {
+                    for albumID in DownloadPaths.newestFirst(mgr.completedAlbumIDs) where durations[albumID] == nil {
+                        durations[albumID] = await DownloadPaths.albumDuration(albumID: albumID) ?? 0
+                    }
+                }
+            }
+        }
+        .background(TetsubiColors.surface, in: RoundedRectangle(cornerRadius: Radii.panel))
+        .clipShape(RoundedRectangle(cornerRadius: Radii.panel))
+    }
+
+    // MARK: - Rows
 
     @ViewBuilder
     private func downloadRow(_ state: DownloadAlbumState, mgr: DownloadManager) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12.scaled) {
-                AlbumArtView(request: mgr.artRequest(for: state.albumID), size: 56.scaled, cornerRadius: 6.scaled)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(state.title)
-                        .font(.plex(.subheadline).bold())
-                        .lineLimit(1)
-                    Text(state.artistName)
-                        .font(.plex(.caption))
-                        .foregroundStyle(.secondary)
-                    Text(state.format.displayName + " · "
-                            + String(format: "%d/%d tracks", state.completedTracks, state.expectedTrackCount))
-                        .font(.plex(.caption2))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-                // Retry (failed) / pause / resume button
-                let paused = state.status == .paused
-                let failed = state.status == .failed
-                Button {
-                    if failed {
-                        mgr.retry(albumID: state.albumID)
-                    } else if paused {
-                        mgr.resume(albumID: state.albumID)
-                    } else {
-                        mgr.pause(albumID: state.albumID)
-                    }
-                } label: {
-                    Image(systemName: failed ? "arrow.clockwise"
-                                     : paused ? "play.fill" : "pause.fill")
-                        .font(.plex(.title2))
-                        .foregroundStyle(Color.appBlue)
-                        .frame(width: 28.scaled)  // icons swap without shifting the row
-                }
-                .buttonStyle(.plain)
-                .disabled(state.status == .pending)  // still fetching tracks
-                .help(failed ? "Retry" : paused ? "Resume" : "Pause")
-                .accessibilityLabel(failed ? "Retry download" : paused ? "Resume download" : "Pause download")
-                .accessibilityIdentifier("DownloadsView.pause.\(state.albumID)")
-                // Cancel button
-                Button(role: .destructive) {
-                    mgr.cancel(albumID: state.albumID)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.plex(.title3))
-                        .foregroundStyle(.red)
-                }
-                .buttonStyle(.plain)
-                .help("Cancel")
-                .accessibilityIdentifier("DownloadsView.cancel.\(state.albumID)")
-            }
-
-            PulsingProgressBar(progress: state.progress,
-                               isPaused: state.status == .paused || state.status == .failed)
-            let waitingForWiFi = DownloadNetworkRule.isWaitingForWiFi(
-                status: state.status, allowCellular: PlaybackSettings.downloadOverCellular,
-                isExpensive: NetworkMonitor.shared.isExpensive)
-            Text(state.status == .failed ? "Failed · \(Int(state.progress * 100))%"
-                 : state.status == .paused ? "Paused · \(Int(state.progress * 100))%"
-                 : waitingForWiFi ? "Waiting for Wi‑Fi · \(Int(state.progress * 100))%"
-                 : "\(Int(state.progress * 100))%")
-                .font(.plex(.caption))
-                .foregroundStyle(.secondary)
-
-            if let err = state.errorMessage, !err.isEmpty {
-                Text(err)
-                    .font(.plex(.caption2))
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
-            }
-        }
-        .padding(.vertical, 4.scaled)
+        let paused = state.status == .paused
+        let failed = state.status == .failed
+        DownloadingCard(
+            art: mgr.artRequest(for: state.albumID), title: state.title, subtitle: state.artistName,
+            detail: state.format.displayName + " · "
+                + String(format: "%d/%d tracks", state.completedTracks, state.expectedTrackCount),
+            status: state.status, progress: state.progress, errorMessage: state.errorMessage,
+            canToggle: state.status != .pending,
+            toggleID: "DownloadsView.pause.\(state.albumID)",
+            cancelID: "DownloadsView.cancel.\(state.albumID)",
+            toggle: {
+                if failed { mgr.retry(albumID: state.albumID) }
+                else if paused { mgr.resume(albumID: state.albumID) }
+                else { mgr.pause(albumID: state.albumID) }
+            },
+            cancel: { mgr.cancel(albumID: state.albumID) })
     }
 
     /// A playlist still downloading (or paused, or failed): as an album's
     /// row, counted in songs. Cancel removes what was downloaded for it.
     @ViewBuilder
     private func playlistDownloadRow(_ state: PlaylistDownloadState, playlists: PlaylistDownloads) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12.scaled) {
-                AlbumArtView(request: playlistArtRequest(state.playlistID, playlists: playlists),
-                             size: 56.scaled, cornerRadius: 6.scaled)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(state.name)
-                        .font(.plex(.subheadline).bold())
-                        .lineLimit(1)
-                    Text("Playlist")
-                        .font(.plex(.caption))
-                        .foregroundStyle(.secondary)
-                    Text(String(format: "%d/%d songs", state.completedTracks, state.expectedTrackCount))
-                        .font(.plex(.caption2))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-                let paused = state.status == .paused
-                let failed = state.status == .failed
-                Button {
-                    if failed {
-                        playlists.retry(state.playlistID)
-                    } else if paused {
-                        playlists.resume(state.playlistID)
-                    } else {
-                        playlists.pause(state.playlistID)
-                    }
-                } label: {
-                    Image(systemName: failed ? "arrow.clockwise"
-                                     : paused ? "play.fill" : "pause.fill")
-                        .font(.plex(.title2))
-                        .foregroundStyle(Color.appBlue)
-                        .frame(width: 28.scaled)  // icons swap without shifting the row
-                }
-                .buttonStyle(.plain)
-                .help(failed ? "Retry" : paused ? "Resume" : "Pause")
-                .accessibilityLabel(failed ? "Retry download" : paused ? "Resume download" : "Pause download")
-                .accessibilityIdentifier("DownloadsView.pausePlaylist.\(state.playlistID)")
-                Button(role: .destructive) {
-                    playlists.remove(state.playlistID)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.plex(.title3))
-                        .foregroundStyle(.red)
-                }
-                .buttonStyle(.plain)
-                .help("Cancel")
-                .accessibilityIdentifier("DownloadsView.cancelPlaylist.\(state.playlistID)")
-            }
-
-            PulsingProgressBar(progress: state.progress,
-                               isPaused: state.status == .paused || state.status == .failed)
-            let waitingForWiFi = DownloadNetworkRule.isWaitingForWiFi(
-                status: state.status, allowCellular: PlaybackSettings.downloadOverCellular,
-                isExpensive: NetworkMonitor.shared.isExpensive)
-            Text(state.status == .failed ? "Failed · \(Int(state.progress * 100))%"
-                 : state.status == .paused ? "Paused · \(Int(state.progress * 100))%"
-                 : waitingForWiFi ? "Waiting for Wi‑Fi · \(Int(state.progress * 100))%"
-                 : "\(Int(state.progress * 100))%")
-                .font(.plex(.caption))
-                .foregroundStyle(.secondary)
-
-            if let err = state.errorMessage, !err.isEmpty {
-                Text(err)
-                    .font(.plex(.caption2))
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
-            }
-        }
-        .padding(.vertical, 4.scaled)
+        let paused = state.status == .paused
+        let failed = state.status == .failed
+        DownloadingCard(
+            art: playlistArtRequest(state.playlistID, playlists: playlists), title: state.name, subtitle: "Playlist",
+            detail: String(format: "%d/%d songs", state.completedTracks, state.expectedTrackCount),
+            status: state.status, progress: state.progress, errorMessage: state.errorMessage,
+            canToggle: true,
+            toggleID: "DownloadsView.pausePlaylist.\(state.playlistID)",
+            cancelID: "DownloadsView.cancelPlaylist.\(state.playlistID)",
+            toggle: {
+                if failed { playlists.retry(state.playlistID) }
+                else if paused { playlists.resume(state.playlistID) }
+                else { playlists.pause(state.playlistID) }
+            },
+            cancel: { playlists.remove(state.playlistID) })
     }
 
     // MARK: - Empty state
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 44.scaled))
-                .foregroundStyle(.secondary)
-            Text("No downloads yet")
-                .font(.plex(.headline))
-                .foregroundStyle(.secondary)
-            Text("Download an album from its detail page to play it offline.")
-                .font(.plex(.caption))
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+        EmptyState("No downloads yet", message: "Download an album from its detail page to play it offline.",
+                   systemImage: "arrow.down.circle")
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+// MARK: - Pieces
+
+/// In edit mode: an empty or ticked circle over the cover's corner.
+private struct SelectionMark: View {
+    let selected: Bool
+    var body: some View {
+        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+            .font(.system(size: 24.scaled))
+            .foregroundStyle(selected ? TetsubiColors.blue : TetsubiColors.textPrimary)
+            .shadow(color: .black.opacity(0.4), radius: 2)
+            .padding(8)
+    }
+}
+
+/// A downloading album or playlist: a surface card with its cover, names,
+/// progress bar, Pause / Resume / Retry and Cancel.
+private struct DownloadingCard: View {
+    let art: URLRequest?
+    let title: String
+    let subtitle: String
+    let detail: String
+    let status: DownloadStatus
+    let progress: Double
+    let errorMessage: String?
+    let canToggle: Bool
+    let toggleID: String
+    let cancelID: String
+    let toggle: () -> Void
+    let cancel: () -> Void
+
+    @Environment(\.windowWidthClass) private var windowClass
+
+    var body: some View {
+        let paused = status == .paused
+        let failed = status == .failed
+        let percent = Int(progress * 100)
+        let waitingForWiFi = DownloadNetworkRule.isWaitingForWiFi(
+            status: status, allowCellular: PlaybackSettings.downloadOverCellular,
+            isExpensive: NetworkMonitor.shared.isExpensive)
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            HStack(spacing: Spacing.m) {
+                AlbumArtView(request: art, size: 40.scaled, cornerRadius: Radii.thumb,
+                             placeholderColor: TetsubiColors.art)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title).font(TetsubiType.rowTitle).foregroundStyle(TetsubiColors.textPrimary).lineLimit(1)
+                    Text(subtitle).font(TetsubiType.caption).foregroundStyle(TetsubiColors.textSecondary).lineLimit(1)
+                    Text(detail).font(TetsubiType.caption).foregroundStyle(TetsubiColors.textTertiary).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // Retry (failed) / resume (paused) / pause
+                Button(action: toggle) {
+                    Image(systemName: failed ? "arrow.clockwise" : paused ? "play.fill" : "pause.fill")
+                        .font(.system(size: 18.scaled))
+                        .foregroundStyle(TetsubiColors.blue)
+                        .frame(width: 40.scaled, height: 40.scaled)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canToggle)  // still fetching tracks
+                .help(failed ? "Retry" : paused ? "Resume" : "Pause")
+                .accessibilityLabel(failed ? "Retry download" : paused ? "Resume download" : "Pause download")
+                .accessibilityIdentifier(toggleID)
+                Button(role: .destructive, action: cancel) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20.scaled))
+                        .foregroundStyle(TetsubiColors.red)
+                        .frame(width: 40.scaled, height: 40.scaled)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Cancel")
+                .accessibilityLabel("Cancel download")
+                .accessibilityIdentifier(cancelID)
+            }
+            PulsingProgressBar(progress: progress, isPaused: paused || failed)
+            Text(failed ? "Failed · \(percent)%"
+                 : paused ? "Paused · \(percent)%"
+                 : waitingForWiFi ? "Waiting for Wi‑Fi · \(percent)%"
+                 : "\(percent)%")
+                .font(TetsubiType.caption)
+                .foregroundStyle(TetsubiColors.textSecondary)
+            if let errorMessage, !errorMessage.isEmpty {
+                Text(errorMessage).font(TetsubiType.caption).foregroundStyle(TetsubiColors.red).lineLimit(2)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding()
+        .padding(Spacing.m)
+        .background(TetsubiColors.surface, in: RoundedRectangle(cornerRadius: Radii.panel))
+        .padding(.horizontal, windowClass.pageMargin)
+        .padding(.vertical, Spacing.xs)
     }
 }

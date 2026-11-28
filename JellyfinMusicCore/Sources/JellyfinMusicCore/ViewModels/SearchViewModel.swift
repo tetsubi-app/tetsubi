@@ -3,6 +3,19 @@
 import Foundation
 import Observation
 
+/// The chips under the search field: which kinds of result are shown.
+public enum SearchFilter: String, CaseIterable, Identifiable, Sendable {
+    case all = "All"
+    case albums = "Albums"
+    case artists = "Artists"
+    case playlists = "Playlists"
+    public var id: String { rawValue }
+
+    public var showsAlbums: Bool { self == .all || self == .albums }
+    public var showsArtists: Bool { self == .all || self == .artists }
+    public var showsPlaylists: Bool { self == .all || self == .playlists }
+}
+
 /// Fetches album results for a query string with a 400 ms debounce.
 /// When the user stops typing for 0.4 s the view model issues a
 /// `searchForAlbums` call and updates `results`.
@@ -13,8 +26,10 @@ public final class SearchViewModel {
     // MARK: Published state
 
     public private(set) var results: [JellyfinAlbum] = []
-    /// Playlists whose name matches, shown above the albums.
+    /// Playlists whose name matches.
     public private(set) var playlistResults: [JellyfinPlaylist] = []
+    /// Album artists whose name matches (the ones the album search also took albums from).
+    public private(set) var artistResults: [JellyfinArtist] = []
     public private(set) var isLoading = false
     public private(set) var hasSearched = false  // true after first non-empty search
     /// Downloaded albums matching the query, used when the server can't be
@@ -42,6 +57,7 @@ public final class SearchViewModel {
     /// Supplies the playlists listed offline, for offline search.
     private let downloadedPlaylists: @MainActor () -> [JellyfinPlaylist]
     private let searchPlaylists: (String) async throws -> [JellyfinPlaylist]
+    private let searchArtists: (String) async -> [JellyfinArtist]
 
     // MARK: Init
 
@@ -55,6 +71,11 @@ public final class SearchViewModel {
                       try await withCheckedThrowingContinuation { cont in
                           api.searchPlaylists(term: term) { cont.resume(with: $0) }
                       }
+                  },
+                  searchArtists: { term in
+                      await withCheckedContinuation { cont in
+                          api.searchArtists(term: term, limit: 3) { cont.resume(returning: (try? $0.get()) ?? []) }
+                      }
                   })
     }
 
@@ -63,12 +84,14 @@ public final class SearchViewModel {
          isOnline: @escaping @MainActor () -> Bool,
          search: @escaping (String) async throws -> [JellyfinAlbum],
          downloadedPlaylists: @escaping @MainActor () -> [JellyfinPlaylist] = { [] },
-         searchPlaylists: @escaping (String) async throws -> [JellyfinPlaylist] = { _ in [] }) {
+         searchPlaylists: @escaping (String) async throws -> [JellyfinPlaylist] = { _ in [] },
+         searchArtists: @escaping (String) async -> [JellyfinArtist] = { _ in [] }) {
         self.downloadedAlbums = downloadedAlbums
         self.isOnline = isOnline
         self.search = search
         self.downloadedPlaylists = downloadedPlaylists
         self.searchPlaylists = searchPlaylists
+        self.searchArtists = searchArtists
     }
 
     /// Back online with only downloads shown: asks the server now.
@@ -98,6 +121,7 @@ public final class SearchViewModel {
         guard !term.isEmpty else {
             results = []
             playlistResults = []
+            artistResults = []
             localResults = []
             localPlaylistResults = []
             isOfflineResults = false
@@ -122,17 +146,20 @@ public final class SearchViewModel {
             return
         }
         isLoading = true
-        Task { [weak self, search, searchPlaylists] in
-            // Both at once. Playlists that can't be searched just don't
-            // show; the albums decide whether the server was reached.
+        Task { [weak self, search, searchPlaylists, searchArtists] in
+            // All at once. Playlists and artists that can't be searched just
+            // don't show; the albums decide whether the server was reached.
             async let playlistsFound = (try? await searchPlaylists(term)) ?? []
+            async let artistsFound = await searchArtists(term)
             let result = await Result { try await search(term) }
             let playlists = await playlistsFound
+            let artists = await artistsFound
             guard let self, self.query.trimmingCharacters(in: .whitespacesAndNewlines) == term else { return }
             switch result {
             case .success(let albums):
                 self.results = albums
                 self.playlistResults = playlists
+                self.artistResults = artists
                 self.localResults = []
                 self.localPlaylistResults = []
                 self.isOfflineResults = false
@@ -149,6 +176,7 @@ public final class SearchViewModel {
     private func searchDownloads(term: String) {
         results = []
         playlistResults = []
+        artistResults = []
         localResults = LocalSearch.matches(term, in: downloadedAlbums())
         localPlaylistResults = LocalSearch.matches(term, in: downloadedPlaylists())
         isOfflineResults = true

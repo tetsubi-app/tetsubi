@@ -35,9 +35,6 @@ public struct NowPlayingBarView: View {
         Group {
             barContent
         }
-        // Mac: no wider than Settings' boxes and centred; across a big window the
-        // controls were a long way apart to reach. No change on iPhone.
-        .readableWidthOnMac()
         .frame(maxWidth: .infinity)
     }
 

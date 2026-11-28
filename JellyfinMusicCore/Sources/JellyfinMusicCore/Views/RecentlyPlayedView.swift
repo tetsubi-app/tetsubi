@@ -8,22 +8,28 @@ import UIKit
 import AppKit
 #endif
 
-/// The albums played most recently, newest first, discs of one album as
-/// one entry, in the Library's album cards, as many across as the export's
-/// size (3, 4 or 5, on every device; no −/+ here).
-/// Under the grid, "Export grid" makes a 1200 px picture of the covers.
-/// Pull down to reload.
+/// The albums played most recently, newest first, discs of one album as one
+/// entry, in the app's album grid (the header's S / M / L sets the card size).
+/// "Export grid" makes a 1200 px picture of the covers: one card, under the
+/// grid on compact and medium windows, a sticky column beside it on expanded
+/// ones. Pull down to reload.
 ///
 /// Offline: the downloaded albums among the last list loaded this run
-/// (or Home's row, when the page never loaded), under Home's offline banner.
+/// (or Home's row, when the page never loaded), under the offline banner.
 struct RecentlyPlayedView: View {
     let api: JellyfinAPI?
 
     @State private var all: [JellyfinAlbum]
     @State private var loaded = false
 
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.windowWidthClass) private var windowClass
+
     /// Albums asked of the server: enough for a 5×5 once discs are merged.
     static let fetchLimit = 60
+
+    /// The export panel's width beside the grid (the margin goes round it).
+    static let exportPanelWidth: CGFloat = 352
 
     /// The last full list this run, for going back offline.
     @MainActor private static var lastLoaded: [JellyfinAlbum] = []
@@ -37,8 +43,6 @@ struct RecentlyPlayedView: View {
 
     private var isOffline: Bool { !NetworkMonitor.shared.isConnected }
 
-    /// The export's size and labels: one source of truth for the grid (which
-    /// shows the albums the export takes) and the Export section.
     private var settings: GridExportSettings { .shared }
 
     /// Offline, only what's downloaded.
@@ -49,32 +53,51 @@ struct RecentlyPlayedView: View {
     var body: some View {
         let albums = shown
         VStack(spacing: 0) {
-            if isOffline { StatusBanner.offline }
+            PageHeader(nil, onBack: { dismiss() }) { PageControls(density: true) }
+            PageTitle("Recently played")
+            if isOffline { Banner.offline }
             if albums.isEmpty, !loaded, !isOffline {
-                ProgressView().padding()
-                Spacer()
+                LoadingSpinner().frame(maxHeight: .infinity, alignment: .top)
             } else if albums.isEmpty {
-                Text("No recently played music yet.")
-                    .font(.plex(.footnote))
-                    .foregroundStyle(.secondary)
-                    .padding()
-                Spacer()
+                EmptyState("No recently played music yet").frame(maxHeight: .infinity, alignment: .top)
             } else {
-                // Reading `settings.size` here redraws the grid when it changes.
-                // As many across as the export's size; under 9 albums (no
-                // export) the Library's usual columns, without its −/+.
-                let columns = GridExport.gridColumns(albums, chosen: settings.size)
-                AlbumGridView(api: api, albums: GridExport.shownAlbums(albums, chosen: settings.size),
-                              footerContent: AnyView(GridExportSection(api: api, albums: albums,
-                                                                       settings: settings)),
-                              fixedColumns: columns, widensWithoutZoom: true)
-                    .refreshable { await load() }
+                let distinct = GridExport.distinct(albums)
+                if windowClass == .expanded {
+                    HStack(alignment: .top, spacing: 0) {
+                        grid(distinct, footer: nil)
+                        // Sticky: the grid scrolls, this stays.
+                        ScrollView {
+                            GridExportSection(api: api, albums: albums, settings: settings)
+                                .padding(.top, Spacing.xxl)
+                                .padding(.trailing, Spacing.xxl)
+                                .padding(.bottom, Spacing.xxl)
+                        }
+                        .frame(width: Self.exportPanelWidth + Spacing.xxl)
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    grid(distinct, footer: AnyView(
+                        GridExportSection(api: api, albums: albums, settings: settings)
+                            .padding(.horizontal, windowClass.pageMargin)
+                    ))
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Recently Played")
+        .ownsItsHeader(isDetail: true)
         // Again when the connection comes back.
         .task(id: NetworkMonitor.shared.isConnected) { await load() }
+    }
+
+    private func grid(_ albums: [JellyfinAlbum], footer: AnyView?) -> some View {
+        CardGrid(footer: footer) { metrics in
+            ForEach(albums) { album in
+                AlbumCardLink(api: api, album: album, width: metrics.cardWidth,
+                              isDownloaded: LibraryOffline.isDownloaded(album))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .refreshable { await load() }
     }
 
     /// Nothing is asked of the server offline.
@@ -97,10 +120,10 @@ struct RecentlyPlayedView: View {
 
 // MARK: - Export grid
 
-/// "Export grid": size (3×3, 4×4, 5×5), "Show album and artist", Copy and
-/// Save. Sizes that need more albums than there are are greyed out; below
-/// 9 albums only a note shows. `albums` is the whole list (for which sizes
-/// can be filled), not just the ones the grid shows.
+/// "Export grid", one card: size (3×3, 4×4, 5×5), "Show album and artist",
+/// Copy and Save. Sizes that need more albums than there are are greyed out;
+/// below 9 albums only a note shows. `albums` is the whole list (for which
+/// sizes can be filled), not just the ones the grid shows.
 struct GridExportSection: View {
     let api: JellyfinAPI?
     let albums: [JellyfinAlbum]
@@ -117,42 +140,44 @@ struct GridExportSection: View {
 
     var body: some View {
         let count = Set(albums.map(\.id)).count
-        VStack(alignment: .leading, spacing: 12.scaled) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             Text("Export grid")
-                .font(.plex(.title3)).bold()
-                .foregroundStyle(.primary)
+                .font(TetsubiType.sectionTitle)
+                .foregroundStyle(TetsubiColors.textPrimary)
+                .padding(.horizontal, Spacing.l)
+                .padding(.vertical, Spacing.s)
+                .accessibilityAddTraits(.isHeader)
             if let size = GridExport.effectiveSize(chosen: settings.size, albumCount: count) {
-                HStack {
-                    Text("Grid size").font(.plex(.body))
-                    Spacer()
+                SettingsRow("Grid size") {
                     GridSizeSegments(selected: size, albumCount: count) { settings.size = $0 }
                 }
-                Toggle("Show album and artist", isOn: Binding(get: { settings.showsLabels },
-                                                            set: { settings.showsLabels = $0 }))
-                    .font(.plex(.body))
-                    .tint(Color.appBlue)
-                    #if os(macOS)
-                    .toggleStyle(.checkbox)
-                    #endif
-                HStack(spacing: 12.scaled) {
-                    button("Copy", systemImage: "doc.on.doc", action: .copy, size: size)
-                    button("Save", systemImage: "square.and.arrow.down", action: .save, size: size)
+                SettingsToggleRow("Show album and artist",
+                                  isOn: Binding(get: { settings.showsLabels }, set: { settings.showsLabels = $0 }),
+                                  divider: false)
+                HStack(spacing: Spacing.m) {
+                    PrimaryButton("Copy", enabled: busy == nil, working: busy == .copy) { run(.copy, size: size) }
+                    PrimaryButton("Save", enabled: busy == nil, working: busy == .save) { run(.save, size: size) }
                     if let message {
                         Text(message)
-                            .font(.plex(.footnote))
-                            .foregroundStyle(.secondary)
+                            .font(TetsubiType.body)
+                            .foregroundStyle(TetsubiColors.textSecondary)
                             .transition(.opacity)
                     }
+                    Spacer(minLength: 0)
                 }
+                .padding(.horizontal, Spacing.l)
+                .padding(.vertical, Spacing.s)
             } else {
                 Text(GridExport.tooFewMessage)
-                    .font(.plex(.footnote))
-                    .foregroundStyle(.secondary)
+                    .font(TetsubiType.body)
+                    .foregroundStyle(TetsubiColors.textSecondary)
+                    .padding(.horizontal, Spacing.l)
+                    .padding(.vertical, Spacing.s)
             }
         }
-        .padding(.top, 8.scaled)
-        .frame(maxWidth: 480.scaled, alignment: .leading)
+        .padding(.vertical, Spacing.s)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(TetsubiColors.surface, in: RoundedRectangle(cornerRadius: Radii.panel))
         .fileExporter(isPresented: $showsExporter, document: document, contentType: .png,
                       defaultFilename: fileName) { result in
             switch result {
@@ -162,27 +187,6 @@ struct GridExportSection: View {
             }
             document = nil
         }
-    }
-
-    private func button(_ title: String, systemImage: String, action: Action, size: Int) -> some View {
-        Button {
-            run(action, size: size)
-        } label: {
-            HStack(spacing: 6.scaled) {
-                if busy == action {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: systemImage)
-                }
-                Text(title)
-            }
-            .font(.plex(.body))
-        }
-        // Filled, as the album page's Play button: the tinted bordered style
-        // was hard to read over light album art.
-        .buttonStyle(.borderedProminent)
-        .tint(Color.appBlue)
-        .disabled(busy != nil)
     }
 
     private func run(_ action: Action, size: Int) {
@@ -272,19 +276,19 @@ private struct GridSizeSegments: View {
     let choose: (Int) -> Void
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             ForEach(GridExport.sizes, id: \.self) { size in
                 let enabled = GridExport.isAvailable(size: size, albumCount: albumCount)
                 let on = size == selected
                 Button { choose(size) } label: {
                     Text("\(size)×\(size)")
-                        .font(.plex(.subheadline).weight(on ? .semibold : .regular))
-                        .foregroundStyle(.white.opacity(enabled ? 1 : 0.35))
-                        .padding(.horizontal, 12.scaled)
-                        .padding(.vertical, 6.scaled)
-                        .background(on ? Color.appBlue.opacity(0.85) : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 7.scaled))
-                        .contentShape(Rectangle())
+                        .font(TetsubiType.control)
+                        .foregroundStyle(on ? TetsubiColors.blue : TetsubiColors.textSecondary)
+                        .opacity(enabled ? 1 : 0.4)
+                        .padding(.horizontal, Spacing.m)
+                        .frame(height: 28.scaled)
+                        .background(on ? TetsubiColors.blueTint : Color.clear, in: Capsule())
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .disabled(!enabled)
@@ -293,7 +297,7 @@ private struct GridSizeSegments: View {
             }
         }
         .padding(2)
-        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 9.scaled))
+        .background(TetsubiColors.surface, in: Capsule())
     }
 }
 

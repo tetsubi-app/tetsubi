@@ -65,10 +65,25 @@ public final class AlbumDetailViewModel {
         self.isOnline = isOnline
         // Build the art request once up-front so the view can render
         // without waiting on the track-list fetch.
-        self.albumArtRequest = api.imageURLRequest(for: album.id, size: 600)
+        self.albumArtRequest = api.imageURLRequest(for: album.id, size: 800)
         if case .artist(let artist) = ArtistLink.resolve(name: album.artistName, id: album.artistId) {
             self.artistLink = artist
         }
+    }
+
+    /// "1991 · 12 tracks · 48m 12s": whatever is known (the counts only once the tracks have loaded).
+    var metaLine: String? {
+        Self.metaLine(year: album.productionYear, trackCount: isLoadingTracks ? 0 : tracks.count,
+                      duration: isLoadingTracks ? 0 : tracks.reduce(0) { $0 + $1.duration })
+    }
+
+    nonisolated static func metaLine(year: Int?, trackCount: Int, duration: TimeInterval) -> String? {
+        let parts = [
+            year.map(String.init),
+            trackCount > 0 ? (trackCount == 1 ? "1 track" : "\(trackCount) tracks") : nil,
+            duration > 0 ? NowPlayingView.formatAlbumDuration(duration) : nil,
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// Whether this page shows more than one disc.
@@ -440,7 +455,7 @@ public struct AlbumDetailView: View {
     // MARK: Inputs
 
     @State public var viewModel: AlbumDetailViewModel
-    @State private var showFullBio = false
+    @Environment(\.dismiss) private var dismiss
 
     // MARK: Init
 
@@ -453,35 +468,25 @@ public struct AlbumDetailView: View {
     // MARK: Body
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16.scaled) {
-                headerSection
-                actionsSection
-                tracksSection
-                moreByArtistSection
-                aboutArtistSection
-            }
-            .padding()
-            .padding(.bottom, 64.scaled)  // space for now-playing bar
-        }
-        .navigationTitle(viewModel.album.displayName)
-        #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
+        VStack(spacing: 0) {
+            PageHeader(nil, onBack: { dismiss() }) {
+                HeaderMenuButton("More", enabled: viewModel.hasPlayer) {
                     QueueMenuItems { viewModel.queue($0) }
                     addToPlaylistButton(viewModel.tracks)
                         .disabled(viewModel.playlistTrackIds(viewModel.tracks).isEmpty)
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
-                .disabled(!viewModel.hasPlayer)
-                .accessibilityLabel("More")
                 .accessibilityIdentifier("AlbumDetailView.moreMenu")
             }
+            DetailPage { metrics in
+                infoSection(metrics)
+            } list: { _ in
+                tracksSection
+                moreByArtistSection
+            } after: {
+                aboutArtistSection
+            }
         }
+        .ownsItsHeader(isDetail: true)
         .task {
             viewModel.load()
         }
@@ -502,339 +507,196 @@ public struct AlbumDetailView: View {
     @ViewBuilder
     private func discMenu(_ tracks: [JellyfinTrack]) -> some View {
         if !viewModel.playlistTrackIds(tracks).isEmpty {
-            Menu {
+            RowMenuButton("More for this disc") {
                 addToPlaylistButton(tracks)
-            } label: {
-                Image(systemName: "ellipsis")
-                    .foregroundStyle(Color.appBlue)
-                    .frame(width: 28.scaled, height: 24.scaled)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityLabel("More for this disc")
-        }
-    }
-
-    // MARK: - Sub-views
-
-    private var headerSection: some View {
-        HStack(alignment: .bottom, spacing: 16.scaled) {
-            // Album art — fetched via AuthenticatedImage with the
-            // Authorization header. Falls back to a music-note
-            // placeholder while loading or on error.
-            albumArtView
-
-            VStack(alignment: .leading, spacing: 6.scaled) {
-                Text(viewModel.album.displayName)
-                    .font(.plex(.title2).bold())
-                if !viewModel.album.artistName.isEmpty {
-                    artistLine
-                }
-                if let year = viewModel.album.productionYear {
-                    Text(String(year))
-                        .font(.plex(.caption))
-                        .foregroundStyle(Color.albumYearText)
-                }
-                Spacer()
             }
         }
     }
 
-    /// The artist under the title; opens the artist's albums when it can
-    /// (`ArtistLink`), looking just the same either way.
+    // MARK: - Info (art, title, actions)
+
     @ViewBuilder
-    private var artistLine: some View {
-        let text = Text(viewModel.album.artistName)
-            .font(.plex(.headline))
-            .foregroundStyle(Color.albumArtistText)
-        if let artist = viewModel.artistLink {
-            NavigationLink(value: artist) { text }
-                .artistLinkStyle(viewModel.album.artistName)
-                .accessibilityIdentifier("AlbumDetailView.artistLink")
-        } else {
-            text
-        }
-    }
-
-    private var albumArtView: some View {
-        AlbumArtView(request: viewModel.albumArtRequest, size: 200.scaled, cornerRadius: 12.scaled)
-    }
-
-    private var actionsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Button {
-                    viewModel.play()
-                } label: {
-                    HStack {
-                        Image(systemName: viewModel.isThisAlbumPlaying ? "waveform" : "play.fill")
-                            .imageScale(.large)
-                        Text(viewModel.isThisAlbumPlaying ? "Now playing" : "Play")
-                    }
-                    .font(.plex(.subheadline))
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(viewModel.isThisAlbumPlaying ? Color.appPink : nil)
-                .accessibilityIdentifier("AlbumDetailView.playButton")
-                .help("Play the whole album")
-
-                Button {
-                    viewModel.toggleFavorite()
-                } label: {
-                    Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
-                        .foregroundStyle(viewModel.isFavorite ? Color.appPink : .white)
-                        .font(.plex(.subheadline))
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel(viewModel.isFavorite ? "Remove from favourites" : "Add to favourites")
-
-                Button {
-                    viewModel.startDownload()
-                } label: {
-                    HStack {
-                        Image(systemName: viewModel.isDownloaded ? "checkmark.circle.fill"
-                              : viewModel.isDownloading ? "arrow.down.circle.dotted" : "arrow.down.circle")
-                        Text(viewModel.isDownloaded ? "Downloaded"
-                             : viewModel.isDownloading ? "Downloading"
-                             : viewModel.isMultiDisc ? "Download all discs" : "Download")
-                    }
-                    .foregroundStyle(viewModel.isDownloaded ? .green : .primary)
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isDownloading || viewModel.isDownloaded)
-                .accessibilityIdentifier("AlbumDetailView.downloadButton")
-                .help(viewModel.isDownloaded
-                    ? "Already downloaded"
-                    : viewModel.isDownloading ? "Downloading…"
-                    : viewModel.isMultiDisc ? "Download every disc" : "Download this album")
+    private func infoSection(_ metrics: DetailMetrics) -> some View {
+        // Fetched with the Authorization header; a music-note placeholder while loading or on error.
+        AlbumArtView(request: viewModel.albumArtRequest, size: metrics.artSize, cornerRadius: Radii.card,
+                     placeholderColor: TetsubiColors.art)
+        DetailTitleBlock(metrics: metrics, title: viewModel.album.displayName, meta: viewModel.metaLine) {
+            // Opens the artist's albums when it can (`ArtistLink`), looking much the same either way.
+            if !viewModel.album.artistName.isEmpty {
+                DetailArtistLine(name: viewModel.album.artistName, metrics: metrics, artist: viewModel.artistLink)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        actionsSection(metrics)
+    }
 
-            // Download progress indicator.
+    private func actionsSection(_ metrics: DetailMetrics) -> some View {
+        VStack(alignment: metrics.horizontal, spacing: Spacing.m) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Spacing.s) { playButton; favouriteButton; downloadButton }
+                VStack(spacing: Spacing.s) {
+                    HStack(spacing: Spacing.s) { playButton; favouriteButton }
+                    downloadButton
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: metrics.frameAlignment)
+
+            // A single-disc album's download under way (a set shows it per disc).
             if let state = viewModel.downloadState {
-                let paused = state.status == .paused
-                let failed = state.status == .failed
-                PulsingProgressBar(progress: state.progress, isPaused: paused || failed)
-                let waiting = DownloadNetworkRule.isWaitingForWiFi(
-                    status: state.status, allowCellular: PlaybackSettings.downloadOverCellular,
-                    isExpensive: NetworkMonitor.shared.isExpensive)
-                HStack {
-                    Text(DownloadNetworkRule.statusText(failed: failed, paused: paused, waitingForWiFi: waiting))
-                        .font(.plex(.caption))
-                    Text("\(state.completedTracks)/\(state.expectedTrackCount) tracks")
-                        .font(.plex(.caption2))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button(failed ? "Retry" : paused ? "Resume" : "Pause") {
-                        viewModel.togglePauseDownload()
-                    }
-                    .font(.plex(.caption))
-                    .buttonStyle(.bordered)
-                    .disabled(state.status == .pending)
-                    .accessibilityIdentifier("AlbumDetailView.pauseDownload")
-                }
-                if let err = state.errorMessage, !err.isEmpty {
-                    Text(err)
-                        .font(.plex(.caption2))
-                        .foregroundStyle(.red)
+                DownloadProgressBlock(progress: state.progress, status: state.status,
+                                      completed: state.completedTracks, expected: state.expectedTrackCount,
+                                      unit: "tracks", error: state.errorMessage,
+                                      identifier: "AlbumDetailView.pauseDownload") {
+                    viewModel.togglePauseDownload()
                 }
             }
         }
     }
+
+    private var playButton: some View {
+        PrimaryButton(viewModel.isThisAlbumPlaying ? "Now playing" : "Play",
+                      enabled: viewModel.hasPlayer,
+                      color: viewModel.isThisAlbumPlaying ? TetsubiColors.pink : TetsubiColors.blue) {
+            viewModel.play()
+        }
+        .accessibilityIdentifier("AlbumDetailView.playButton")
+        .help("Play the whole album")
+    }
+
+    private var favouriteButton: some View {
+        FavouriteStar(favourite: viewModel.isFavorite) { viewModel.toggleFavorite() }
+            .background(TetsubiColors.surface, in: Circle())
+    }
+
+    private var downloadButton: some View {
+        let downloaded = viewModel.isDownloaded
+        let downloading = viewModel.isDownloading
+        return PillButton(
+            title: downloaded ? "Downloaded" : downloading ? "Downloading"
+                : viewModel.isMultiDisc ? "Download all discs" : "Download",
+            systemImage: downloaded ? "checkmark.circle.fill"
+                : downloading ? "arrow.down.circle.dotted" : "arrow.down.circle",
+            // Downloaded stays green; a tap does nothing then (remove it in the Downloads tab).
+            color: downloaded ? TetsubiColors.green : TetsubiColors.textPrimary) {
+                if !downloaded, !downloading { viewModel.startDownload() }
+            }
+            .accessibilityIdentifier("AlbumDetailView.downloadButton")
+            .help(downloaded ? "Already downloaded"
+                  : downloading ? "Downloading…"
+                  : viewModel.isMultiDisc ? "Download every disc" : "Download this album")
+    }
+
+    // MARK: - More by, About
 
     @ViewBuilder
     private var moreByArtistSection: some View {
         if !viewModel.isOffline, !viewModel.moreByArtist.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("More by \(viewModel.album.artistName)")
-                    .font(.plex(.headline))
-                // Bleed to the screen edges; the row applies its own padding.
-                HomeSectionRow(
-                    api: viewModel.api,
-                    title: "More by \(viewModel.album.artistName)",
-                    albums: viewModel.moreByArtist,
-                    isLoading: false,
-                    emptyMessage: "",
-                    downloadManager: viewModel.downloadManager
-                )
-                .padding(.horizontal, -16)
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHeader("More by \(viewModel.album.artistName)")
+                CardShelf(items: viewModel.moreByArtist) { album, width in
+                    AlbumCardLink(api: viewModel.api, album: album, width: width,
+                                  isDownloaded: viewModel.downloadManager?.isDownloaded(album.id)
+                                      ?? LibraryOffline.isDownloaded(album))
+                }
             }
-            .padding(.top, 16)
+            .padding(.top, Spacing.l)
         }
     }
 
-    /// "About <artist>": MusicBrainz facts and genres, then the Wikipedia
-    /// introduction, with links to both. Hidden if nothing was found, and offline.
+    /// "About <artist>": hidden if nothing was found, and offline.
     @ViewBuilder
     private var aboutArtistSection: some View {
         if !viewModel.isOffline, let info = viewModel.artistInfo {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("About \(viewModel.album.artistName)")
-                    .font(.plex(.headline))
-                if let facts = info.facts {
-                    Text(facts)
-                        .font(.plex(.subheadline))
-                        .foregroundStyle(.secondary)
-                }
-                if !info.genres.isEmpty {
-                    Text(info.genres.joined(separator: " · "))
-                        .font(.plex(.caption))
-                        .foregroundStyle(Color.appBlue)
-                }
-                if let summary = info.summary {
-                    Text(summary)
-                        .font(.plex(.callout))
-                        .lineLimit(showFullBio ? nil : 6)
-                    if summary.count > 300 {
-                        Button(showFullBio ? "Less" : "More") { showFullBio.toggle() }
-                            .font(.plex(.caption).bold())
-                            .buttonStyle(.plain)
-                            .foregroundStyle(Color.appBlue)
-                    }
-                }
-                HStack(spacing: 4) {
-                    Link("MusicBrainz", destination: info.musicBrainzURL)
-                    if let wiki = info.wikipediaURL {
-                        Text("·")
-                        Link("Wikipedia", destination: wiki)
-                        Text("(CC BY-SA)")
-                    }
-                }
-                .font(.plex(.caption))
-                .foregroundStyle(.secondary)
-                .tint(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 16)
+            ArtistAboutView(artistName: viewModel.album.artistName, info: info)
         }
     }
 
-    /// Every track's time added up (all discs).
-    private var albumDuration: TimeInterval {
-        viewModel.tracks.reduce(0) { $0 + $1.duration }
-    }
+    // MARK: - Tracks
 
     @ViewBuilder
     private var tracksSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Tracks")
-                    .font(.plex(.headline))
-                Spacer()
-                // The album's playing time, above the tracks' own times.
-                if !viewModel.isLoadingTracks, albumDuration > 0 {
-                    Text(NowPlayingView.formatAlbumDuration(albumDuration))
-                        .font(.plex(.caption).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .padding(.trailing, 8)
-                        .accessibilityLabel("Playing time \(NowPlayingView.formatAlbumDuration(albumDuration))")
-                        .accessibilityIdentifier("AlbumDetailView.duration")
-                }
+        SectionHeader("Tracks")
+        if viewModel.isLoadingTracks {
+            LoadingSpinner()
+        } else if let err = viewModel.errorMessage {
+            DetailMessage(text: err, color: TetsubiColors.red)
+        } else if viewModel.tracks.isEmpty {
+            DetailMessage(text: "No tracks found.")
+        } else if viewModel.isMultiDisc {
+            ForEach(viewModel.tracksByDisc, id: \.disc.id) { group in
+                discHeader(group.disc, tracks: group.tracks)
+                ForEach(group.tracks) { track in trackRow(track) }
             }
-            .padding(.bottom, 4)
-
-            if viewModel.isLoadingTracks {
-                HStack {
-                    ProgressView()
-                    Text("Loading tracks…")
-                        .font(.plex(.caption))
-                        .foregroundStyle(.secondary)
-                }
-            } else if let err = viewModel.errorMessage {
-                Text(err)
-                    .font(.plex(.footnote))
-                    .foregroundStyle(.red)
-            } else if viewModel.tracks.isEmpty {
-                Text("No tracks found.")
-                    .font(.plex(.footnote))
-                    .foregroundStyle(.secondary)
-            } else if viewModel.isMultiDisc {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(viewModel.tracksByDisc, id: \.disc.id) { group in
-                        discHeader(group.disc, tracks: group.tracks)
-                        ForEach(group.tracks) { track in
-                            trackRow(track)
-                        }
-                    }
-                }
-            } else if let groups = viewModel.tracksByDiscNumber {
-                // Discs inside one album: "Disc N" headings. The album
-                // downloads as a whole, so no per-disc download button.
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(groups, id: \.number) { group in
-                        HStack(alignment: .center, spacing: 8) {
-                            Text("Disc \(group.number)")
-                                .font(.plex(.subheadline).bold())
-                                .accessibilityAddTraits(.isHeader)
-                            Spacer(minLength: 8)
-                            discMenu(group.tracks)
-                        }
-                        .padding(.top, 14)
-                        .padding(.bottom, 6)
-                        ForEach(group.tracks) { track in
-                            trackRow(track)
-                        }
-                    }
-                }
-            } else {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(viewModel.tracks) { track in
-                        trackRow(track)
-                    }
-                }
+        } else if let groups = viewModel.tracksByDiscNumber {
+            // Discs inside one album: "Disc N" headings. The album downloads as a
+            // whole, so no per-disc download button.
+            ForEach(groups, id: \.number) { group in
+                discHeading(number: group.number, subtitle: nil, tracks: group.tracks) { EmptyView() }
+                ForEach(group.tracks) { track in trackRow(track) }
             }
+        } else {
+            ForEach(viewModel.tracks) { track in trackRow(track) }
         }
     }
 
     private func trackRow(_ track: JellyfinTrack) -> some View {
-        TrackRow(track: track, showAlbum: !viewModel.allTracksFromThisAlbum,
-                 isPlaying: viewModel.isCurrent(track)) {
-            viewModel.play(track: track)
+        // In Maniac Mode a tap does nothing (no onTap), but the menu still queues.
+        ListRow(title: track.displayName,
+                subtitle: !viewModel.allTracksFromThisAlbum ? track.album : nil,
+                leadingNumber: String(format: "%02d", track.trackNumber > 0 ? track.trackNumber : (viewModel.tracks.firstIndex { $0.id == track.id } ?? 0) + 1),
+                trailingMeta: TrackTime.format(track.duration),
+                current: viewModel.isCurrent(track),
+                onTap: viewModel.canPlayIndividualTracks ? { viewModel.play(track: track) } : nil) {
+            if hasTrackMenu(track) {
+                RowMenuButton("More for \(track.displayName)") { trackMenu(track) }
+            }
         }
-        // Long-press on iOS, right-click on the Mac. (In Maniac Mode a tap
-        // does nothing, but the menu still queues.)
-        .contextMenu {
-            if viewModel.hasPlayer {
-                QueueMenuItems { viewModel.queue(track: track, $0) }
-            }
-            if !viewModel.playlistTrackIds([track]).isEmpty {
-                addToPlaylistButton([track])
-            }
+        .accessibilityIdentifier("TrackRow.\(track.id)")
+        // Long-press on iOS, right-click on the Mac.
+        .contextMenu { trackMenu(track) }
+    }
+
+    private func hasTrackMenu(_ track: JellyfinTrack) -> Bool {
+        viewModel.hasPlayer || !viewModel.playlistTrackIds([track]).isEmpty
+    }
+
+    @ViewBuilder
+    private func trackMenu(_ track: JellyfinTrack) -> some View {
+        if viewModel.hasPlayer {
+            QueueMenuItems { viewModel.queue(track: track, $0) }
+        }
+        if !viewModel.playlistTrackIds([track]).isEmpty {
+            addToPlaylistButton([track])
         }
     }
 
-    /// "Disc 2" heading with its own download control on the right.
+    /// "Disc 2" heading with its subtitle, its own download control and its ⋯.
     private func discHeader(_ disc: JellyfinAlbum, tracks: [JellyfinTrack]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Disc \(viewModel.discNumber(of: disc))")
-                        .font(.plex(.subheadline).bold())
-                    if let subtitle = DiscGrouping.subtitle(of: disc) {
-                        Text(subtitle)
-                            .font(.plex(.caption))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+        discHeading(number: viewModel.discNumber(of: disc), subtitle: DiscGrouping.subtitle(of: disc), tracks: tracks) {
+            discDownloadControl(disc)
+        }
+        .accessibilityIdentifier("AlbumDetailView.disc.\(viewModel.discNumber(of: disc))")
+    }
+
+    private func discHeading<Download: View>(number: Int, subtitle: String?, tracks: [JellyfinTrack],
+                                             @ViewBuilder download: () -> Download) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            HStack(spacing: Spacing.s) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Disc \(number)").font(TetsubiType.rowTitle.weight(.bold)).foregroundStyle(TetsubiColors.textPrimary)
+                    if let subtitle {
+                        Text(subtitle).font(TetsubiType.caption).foregroundStyle(TetsubiColors.textSecondary).lineLimit(1)
                     }
                 }
-                Spacer(minLength: 8)
-                discDownloadControl(disc)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+                download()
                 discMenu(tracks)
             }
-            if let state = viewModel.state(for: disc) {
-                PulsingProgressBar(progress: state.progress,
-                                   isPaused: state.status == .paused || state.status == .failed)
-                if let err = state.errorMessage, !err.isEmpty {
-                    Text(err).font(.plex(.caption2)).foregroundStyle(.red)
-                }
-            }
         }
-        .padding(.top, 14)
-        .padding(.bottom, 6)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("AlbumDetailView.disc.\(viewModel.discNumber(of: disc))")
+        .pageMargins()
+        .padding(.top, Spacing.l)
+        .padding(.bottom, Spacing.xs)
     }
 
     @ViewBuilder
@@ -842,109 +704,47 @@ public struct AlbumDetailView: View {
         if let state = viewModel.state(for: disc) {
             let paused = state.status == .paused
             let failed = state.status == .failed
-            HStack(spacing: 8) {
-                Text(failed ? "Failed" : paused ? "Paused"
-                     : "\(state.completedTracks)/\(state.expectedTrackCount)")
-                    .font(.plex(.caption).monospacedDigit())
-                    .foregroundStyle(failed ? .red : .secondary)
-                Button {
-                    viewModel.togglePauseDownload(albumID: disc.id)
-                } label: {
-                    Image(systemName: failed ? "arrow.clockwise" : paused ? "play.fill" : "pause.fill")
-                        .foregroundStyle(Color.appBlue)
-                        .frame(width: 20.scaled)
+            VStack(alignment: .trailing, spacing: Spacing.xs) {
+                HStack(spacing: Spacing.s) {
+                    Text(failed ? "Failed" : paused ? "Paused" : "\(state.completedTracks)/\(state.expectedTrackCount)")
+                        .font(TetsubiType.caption.monospacedDigit())
+                        .foregroundStyle(failed ? TetsubiColors.red : TetsubiColors.textSecondary)
+                    Button {
+                        viewModel.togglePauseDownload(albumID: disc.id)
+                    } label: {
+                        Image(systemName: failed ? "arrow.clockwise" : paused ? "play.fill" : "pause.fill")
+                            .font(.system(size: 14.scaled))
+                            .foregroundStyle(TetsubiColors.blue)
+                            .frame(width: 32.scaled, height: 32.scaled)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(state.status == .pending)
+                    .accessibilityLabel(failed ? "Retry disc" : paused ? "Resume disc" : "Pause disc")
                 }
-                .buttonStyle(.plain)
-                .disabled(state.status == .pending)
-                .accessibilityLabel(failed ? "Retry disc" : paused ? "Resume disc" : "Pause disc")
+                PulsingProgressBar(progress: state.progress, isPaused: paused || failed)
+                    .frame(width: 140)
+                if let err = state.errorMessage, !err.isEmpty {
+                    Text(err).font(TetsubiType.caption).foregroundStyle(TetsubiColors.red).lineLimit(2)
+                }
             }
         } else if viewModel.isDiscDownloaded(disc) {
             Label("Downloaded", systemImage: "checkmark.circle.fill")
-                .font(.plex(.caption))
-                .foregroundStyle(.green)
+                .font(TetsubiType.caption)
+                .foregroundStyle(TetsubiColors.green)
         } else {
-            Button("Download disc") {
-                viewModel.downloadDisc(disc)
-            }
-            .font(.plex(.caption))
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("AlbumDetailView.downloadDisc.\(viewModel.discNumber(of: disc))")
+            ActionChip("Download disc") { viewModel.downloadDisc(disc) }
+                .accessibilityIdentifier("AlbumDetailView.downloadDisc.\(viewModel.discNumber(of: disc))")
         }
     }
 }
 
-// MARK: - TrackRow
+// MARK: - Track times
 
-/// A single row in the track list. Tapping the row starts playback
-/// from that track, via the parent `AlbumDetailViewModel.play(track:)`.
-struct TrackRow: View {
-    public let track: JellyfinTrack
-    /// Whether to show the album name under the track title.
-    public let showAlbum: Bool
-    /// Called when the user taps the row. Defaults to no-op.
-    public let onTap: () -> Void
-    /// Highlights the row when it is the track currently playing.
-    public let isPlaying: Bool
-
-    public init(track: JellyfinTrack, showAlbum: Bool = true, isPlaying: Bool = false,
-                onTap: @escaping () -> Void = { }) {
-        self.track = track
-        self.showAlbum = showAlbum
-        self.isPlaying = isPlaying
-        self.onTap = onTap
-    }
-
-    public var body: some View {
-        Button {
-            onTap()
-        } label: {
-            HStack {
-                Text(String(format: "%02d", track.trackNumber))
-                    .font(.plex(.caption))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28.scaled, alignment: .trailing)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(track.displayName)
-                        .font(.plex(.body))
-                        .fontWeight(isPlaying ? .semibold : .regular)
-                        .foregroundStyle(isPlaying ? .white : .primary)
-                        .lineLimit(1)
-                    if showAlbum, let album = track.album, !album.isEmpty {
-                        Text(album)
-                            .font(.plex(.caption2))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer()
-
-                Text(Self.formatDuration(track.duration))
-                    .font(.plex(.caption))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 6.scaled)
-            .padding(.horizontal, 8.scaled)
-            // Playing row: solid pink with white text, legible over the blur.
-            .background(isPlaying ? Color.appPink : Color.gray.opacity(0.05))
-            .cornerRadius(6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("TrackRow.\(track.id)")
-    }
-
-    static func formatDuration(_ duration: TimeInterval) -> String {
+/// Track lengths as `m:ss`.
+enum TrackTime {
+    static func format(_ duration: TimeInterval) -> String {
         let totalSeconds = Int(duration)
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, seconds)
+        return String(format: "%d:%02d", totalSeconds / 60, totalSeconds % 60)
     }
-}
-
-// MARK: - Helpers
-
-private extension JellyfinAlbum {
-    var releaseYear: Int? { productionYear }
 }
