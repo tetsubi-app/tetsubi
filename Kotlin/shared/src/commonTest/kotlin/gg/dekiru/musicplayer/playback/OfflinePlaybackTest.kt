@@ -5,6 +5,7 @@ import gg.dekiru.musicplayer.data.api.FakeServer.Companion.json
 import gg.dekiru.musicplayer.data.api.path
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.models.JellyfinPerson
+import gg.dekiru.musicplayer.data.models.JellyfinTrack
 import gg.dekiru.musicplayer.data.settings.InMemoryPreferences
 import gg.dekiru.musicplayer.downloads.DownloadManager
 import gg.dekiru.musicplayer.downloads.DownloadManifest
@@ -13,6 +14,9 @@ import gg.dekiru.musicplayer.downloads.DownloadSettings
 import gg.dekiru.musicplayer.downloads.LocalFiles
 import gg.dekiru.musicplayer.downloads.ManifestStatus
 import gg.dekiru.musicplayer.downloads.ManifestTrack
+import gg.dekiru.musicplayer.downloads.PlaylistManifest
+import gg.dekiru.musicplayer.downloads.PlaylistManifestTrack
+import gg.dekiru.musicplayer.downloads.PlaylistPaths
 import gg.dekiru.musicplayer.downloads.tempDir
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -20,6 +24,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -76,13 +81,13 @@ class OfflinePlaybackTest {
     }
 
     /** Albums are written to disk before the manager is made (it reads them on start). */
-    private fun TestScope.setup(dir: String = tempDir(), maniac: Boolean = false): Setup {
+    private fun TestScope.setup(dir: String = tempDir(), maniac: Boolean = false, streamedId: (String) -> String = { "$it-s1" }): Setup {
         val server = FakeServer { request ->
             when (request.path) {
                 "/Items" -> {
                     val parent = request.url.parameters["ParentId"]!!
                     json(
-                        """{"Items":[{"Id":"$parent-s1","Name":"Streamed","IndexNumber":1,"AlbumId":"$parent","RunTimeTicks":600000000,
+                        """{"Items":[{"Id":"${streamedId(parent)}","Name":"Streamed","IndexNumber":1,"AlbumId":"$parent","RunTimeTicks":600000000,
                            "MediaSources":[{"Container":"flac","Codecs":"flac"}]}]}""",
                     )
                 }
@@ -103,6 +108,24 @@ class OfflinePlaybackTest {
     }
 
     @Test
+    fun aDownloadedDiscOfAnAlbumNotFullyDownloadedPlaysFromItsFile() = runTest {
+        // Disc 1 is on the device (the page shows it Downloaded), disc 2 isn't: the album isn't "downloaded", but disc 1 must not stream.
+        val dir = tempDir()
+        writeDownload(dir, "d1", "Disc 1", tracks = 2)
+        val s = setup(dir, streamedId = { if (it == "d1") "d1-t2" else "$it-s1" })
+        val set = album("set").copy(discAlbums = listOf(album("d1"), album("d2")))
+        s.player.play(set)
+        settle()
+
+        val urls = s.engine.items.map { it.url }
+        assertEquals("file://$dir/d1/02 - Song 2 Live.flac", urls[0], "the downloaded track plays from its file")
+        assertTrue(s.engine.items[0].planNote!!.startsWith("play plan: item=d1-t2 plan=file reasons=downloaded format=flac"), s.engine.items[0].planNote)
+        assertFalse(s.engine.items[0].seeksByRestart)
+        assertTrue(urls[1].contains("/Audio/d2-s1/"), "the other disc streams: ${urls[1]}")
+        assertEquals("FLAC 902 kbps · downloaded", s.player.queue[0].qualityLabel)
+    }
+
+    @Test
     fun aDownloadedAlbumPlaysFromItsFiles() = runTest {
         val dir = tempDir()
         writeDownload(dir, "al", "Album")
@@ -118,7 +141,7 @@ class OfflinePlaybackTest {
         assertEquals(listOf("Song 1 (Live?)", "Song 2 (Live?)", "Song 3 (Live?)"), s.player.queue.map { it.title })
         assertEquals(listOf(1, 2, 3), s.player.queue.map { it.trackNumber })
         val t2 = s.player.queue[1]
-        assertEquals("FLAC 902 kbps", t2.qualityLabel)
+        assertEquals("FLAC 902 kbps · downloaded", t2.qualityLabel)
         assertNull(t2.sampleRateLabel, "read from the file; a test file isn't real audio")
         assertEquals(-4.0, t2.normalizationGain)
         assertEquals("Band", t2.artist)
@@ -270,5 +293,117 @@ class OfflinePlaybackTest {
         settle()
         assertEquals(listOf("al-s1"), s.engine.items.map { it.id })
         assertTrue(s.engine.items.single().url.startsWith("http://"))
+    }
+
+    // The player decides "play from the file" with the same lists the pages use to say Downloaded
+    // (albums, in progress or not; playlists), whichever page started it and however the ids are written.
+
+    /** A complete playlist download on disk: each song as `<id>.<ext>` in the playlist's folder. */
+    private fun writePlaylistDownload(root: String, playlistId: String, ids: List<String>, ext: String = "flac") {
+        val paths = PlaylistPaths(root)
+        LocalFiles.createDirectories(paths.dir(playlistId))
+        val rows = ids.map { id ->
+            LocalFiles.writeText(paths.trackPath(playlistId, "$id.$ext"), "audio")
+            PlaylistManifestTrack(trackId = id, title = "Song $id", file = "$id.$ext", durationSeconds = 60.0, qualityLabel = "FLAC 900 kbps", format = "FLAC")
+        }
+        val manifest = PlaylistManifest(playlistId = playlistId, name = "Mix", downloadedAt = 1, status = ManifestStatus.COMPLETE, tracks = rows)
+        LocalFiles.writeText(paths.manifestPath(playlistId), manifest.encode())
+    }
+
+    private fun assertPlaysFromFile(s: Setup, id: String, path: String) {
+        val item = s.engine.items.first { it.id == id }
+        assertEquals("file://$path", item.url)
+        assertTrue(item.planNote!!.startsWith("play plan: item=$id plan=file reasons=downloaded"), item.planNote)
+    }
+
+    @Test
+    fun aSongOfADownloadedPlaylistPlaysFromItsFileFromAnAlbumPage() = runTest {
+        val dir = tempDir()
+        writePlaylistDownload(dir, "pl", listOf("p-t1"))
+        val s = setup(dir, streamedId = { "p-t1" })
+        s.player.play(album("elsewhere"))
+        settle()
+        assertPlaysFromFile(s, "p-t1", "$dir/playlists/pl/p-t1.flac")
+    }
+
+    @Test
+    fun aTrackOfAnAlbumWhoseDownloadIsInProgressPlaysFromItsFileOnTheDevice() = runTest {
+        val dir = tempDir()
+        writeDownload(dir, "al", "Album", tracks = 3)
+        // The album is being downloaded again (paused here): the manager lists it as active, not downloaded.
+        val manifestPath = DownloadPaths(dir).manifestPath("al")
+        val manifest = DownloadManifest.decode(LocalFiles.readText(manifestPath)!!)!!
+        LocalFiles.writeText(manifestPath, manifest.copy(status = ManifestStatus.PAUSED).encode())
+        LocalFiles.deleteRecursively("$dir/al/03 - Song 3 Live.flac")
+        val s = setup(dir, streamedId = { "al-t2" })
+        assertFalse(s.manager().isDownloaded("al"))
+        assertNotNull(s.manager().state("al"))
+        s.player.play(album("al"))
+        settle()
+        assertPlaysFromFile(s, "al-t2", "$dir/al/02 - Song 2 Live.flac")
+    }
+
+    @Test
+    fun aTrackWhoseFileIsMissingStillStreamsWhileItsAlbumIsInProgress() = runTest {
+        val dir = tempDir()
+        writeDownload(dir, "al", "Album", tracks = 3)
+        val manifestPath = DownloadPaths(dir).manifestPath("al")
+        val manifest = DownloadManifest.decode(LocalFiles.readText(manifestPath)!!)!!
+        LocalFiles.writeText(manifestPath, manifest.copy(status = ManifestStatus.PAUSED).encode())
+        LocalFiles.deleteRecursively("$dir/al/03 - Song 3 Live.flac")
+        val s = setup(dir, streamedId = { "al-t3" })
+        s.player.play(album("al"))
+        settle()
+        assertTrue(s.engine.items.single().url.startsWith("http://"), s.engine.items.single().url)
+    }
+
+    @Test
+    fun aTrackIdWrittenWithDashesOrCapitalsFindsItsFile() = runTest {
+        val dir = tempDir()
+        writePlaylistDownload(dir, "pl", listOf("ced88229fe9a871138eee464d3761d07"))
+        val s = setup(dir, streamedId = { "CED88229-FE9A-8711-38EE-E464D3761D07" })
+        s.player.play(album("elsewhere"))
+        settle()
+        val item = s.engine.items.single()
+        assertEquals("file://$dir/playlists/pl/ced88229fe9a871138eee464d3761d07.flac", item.url)
+        assertTrue(item.planNote!!.contains("plan=file"), item.planNote)
+    }
+
+    @Test
+    fun aDownloadKeptWithAnotherExtensionIsFoundByItsName() = runTest {
+        // ALAC saved as FLAC, a manifest still naming the .m4a: the file on disk is the .flac.
+        val dir = tempDir()
+        writeDownload(dir, "al", "Album", tracks = 3)
+        val manifestPath = DownloadPaths(dir).manifestPath("al")
+        val manifest = DownloadManifest.decode(LocalFiles.readText(manifestPath)!!)!!
+        LocalFiles.writeText(manifestPath, manifest.copy(status = ManifestStatus.PAUSED, tracks = manifest.tracks.map { it.copy(file = it.file.replace(".flac", ".m4a")) }).encode())
+        val s = setup(dir, streamedId = { "al-t1" })
+        s.player.play(album("al"))
+        settle()
+        assertPlaysFromFile(s, "al-t1", "$dir/al/01 - Song 1 Live.flac")
+    }
+
+    @Test
+    fun songsAddedFromASearchPlayFromTheDeviceToo() = runTest {
+        val dir = tempDir()
+        writePlaylistDownload(dir, "pl", listOf("p-t1"))
+        val s = setup(dir)
+        val track = JellyfinTrack(id = "p-t1", name = "Song", albumId = "x", album = "X", runTimeTicks = 600_000_000)
+        s.player.addToQueue(album("x"), listOf(track))
+        settle()
+        assertPlaysFromFile(s, "p-t1", "$dir/playlists/pl/p-t1.flac")
+    }
+
+    @Test
+    fun aRestoredQueueEntryPlaysFromTheDevice() = runTest {
+        val first = setup(streamedId = { "p-t1" })
+        first.player.play(album("elsewhere"))
+        settle()
+        val snapshot = first.player.playQueue.snapshot(5.0, "http://jellyfin-box:8096", "u1")
+        val dir = tempDir()
+        writePlaylistDownload(dir, "pl", listOf("p-t1"))
+        val r = setup(dir)
+        r.player.restore(snapshot)
+        assertPlaysFromFile(r, "p-t1", "$dir/playlists/pl/p-t1.flac")
     }
 }

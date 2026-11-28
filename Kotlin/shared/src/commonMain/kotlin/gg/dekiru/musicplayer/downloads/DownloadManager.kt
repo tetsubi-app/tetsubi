@@ -263,6 +263,19 @@ class DownloadManager(
 
     fun state(albumId: String): DownloadAlbumState? = _active.value[albumId]
 
+    /**
+     * Albums with a download under way, paused or failed, as far as their manifest and files go: the
+     * tracks already on disk can be played (the pages don't call these albums Downloaded, the files are
+     * still the device's). Sizes are not counted.
+     */
+    internal fun inProgressAlbums(): List<DownloadedAlbum> = _active.value.keys.filterNot(PlaylistDownloads::isKey).mapNotNull { id ->
+        val manifest = LocalFiles.readText(paths.manifestPath(id))?.let(DownloadManifest::decode) ?: return@mapNotNull null
+        DownloadedAlbum(
+            albumId = id, title = manifest.title, artist = manifest.artist, year = manifest.year, format = manifest.format,
+            downloadedAt = manifest.downloadedAt ?: 0, sizeBytes = 0, durationSeconds = 0.0, tracks = manifest.tracks, directory = paths.albumDir(id),
+        )
+    }
+
     fun downloadedAlbum(albumId: String): DownloadedAlbum? =
         _downloaded.value.firstOrNull { it.albumId == albumId }?.takeIf { albumId !in _active.value }
 

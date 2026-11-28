@@ -24,8 +24,12 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** A player that records what it's told. `cast`: as if Google Cast were there. */
-class FakeEngine(override val isSupported: Boolean = true, override val cast: CastRoute? = null) : PlayerEngine {
-    override val directPlayFormats = setOf(AudioFormat.FLAC, AudioFormat.MP3, AudioFormat.AAC)
+class FakeEngine(
+    override val isSupported: Boolean = true,
+    override val cast: CastRoute? = null,
+    directPlay: Set<AudioFormat> = setOf(AudioFormat.FLAC, AudioFormat.MP3, AudioFormat.AAC),
+) : PlayerEngine {
+    override val directPlayFormats = directPlay
     override var listener: EngineListener? = null
     var items: List<EngineItem> = emptyList()
     var index = 0

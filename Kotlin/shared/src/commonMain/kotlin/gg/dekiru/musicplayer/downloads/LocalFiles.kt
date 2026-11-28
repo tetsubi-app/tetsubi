@@ -13,6 +13,21 @@ internal object LocalFiles {
 
     fun exists(path: String): Boolean = fs.exists(Path(path))
 
+    /**
+     * `path` if it exists, else a finished file in the same folder with the same name apart from the
+     * extension (a track saved as FLAC that a manifest still calls m4a); null if neither.
+     */
+    fun existingFile(path: String): String? {
+        if (exists(path)) return path
+        val dir = path.substringBeforeLast('/', "")
+        val stem = path.substringAfterLast('/').substringBeforeLast('.')
+        if (dir.isEmpty() || stem.isEmpty()) return null
+        val found = runCatching { list(dir) }.getOrDefault(emptyList()).firstOrNull {
+            it.substringBeforeLast('.') == stem && it != stem && !it.endsWith(".part") && !it.endsWith(".tmp") && !it.endsWith(".jpg") && !it.endsWith(".json")
+        }
+        return found?.let { "$dir/$it" }
+    }
+
     fun isDirectory(path: String): Boolean = fs.metadataOrNull(Path(path))?.isDirectory == true
 
     /** Size in bytes, 0 if missing. */

@@ -43,6 +43,9 @@ class DownloadPaths(root: String) {
         fun trackFileName(number: Int, title: String, format: AudioFormat): String =
             "${number.toString().padStart(2, '0')} - ${sanitize(title)}.${format.fileExtension}"
 
+        /** A track ID as compared: the server writes the same ID with or without dashes, in either case. */
+        fun idKey(id: String): String = id.replace("-", "").lowercase()
+
         /** A file name without its extension. */
         fun stem(fileName: String): String = fileName.substringBeforeLast('.')
 

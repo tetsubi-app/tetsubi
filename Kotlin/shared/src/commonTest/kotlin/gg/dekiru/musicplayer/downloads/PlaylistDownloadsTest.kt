@@ -228,7 +228,7 @@ class PlaylistDownloadsTest {
         assertEquals(2, engine.index)
         assertEquals(2, player.currentPlace)
         assertEquals("${s.folder}/covers/A.jpg", player.queue[2].localArtPath)
-        assertEquals("FLAC 900 kbps", player.queue[2].qualityLabel)
+        assertEquals("FLAC 900 kbps \u00b7 downloaded", player.queue[2].qualityLabel)
         assertNull(player.queue[2].sampleRateLabel)
         assertTrue(s.server.requests.none { it.path.startsWith("/Playlists/") && it.path != "/Playlists/pl/Items" })
     }

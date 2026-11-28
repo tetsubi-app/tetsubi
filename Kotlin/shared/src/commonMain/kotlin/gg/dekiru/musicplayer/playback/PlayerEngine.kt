@@ -28,6 +28,14 @@ data class EngineItem(
      * since positions shift when the queue is edited.
      */
     val entryId: String = id,
+    /**
+     * Where a direct stream goes if the device can't decode it after all: the
+     * same track converted by the server (see [DirectPlayFallback]). Null for
+     * streams that have no such way out (already converted, files, other formats).
+     */
+    val directFallbackUrl: String? = null,
+    /** The `play plan:` log line for this item (how its stream was chosen), logged by the engine when the track starts; null = none. */
+    val planNote: String? = null,
 ) {
     /** Converted on the fly by the server: seeking restarts the stream at the new point. */
     val seeksByRestart: Boolean get() = StreamUrls.isConverted(url)
@@ -79,6 +87,17 @@ interface PlayerEngine {
 
     /** Formats it plays as they are; others are transcoded by the server. */
     val directPlayFormats: Set<AudioFormat>
+
+    /**
+     * Formats a downloaded file may stay in to be played here. Normally the
+     * same as [directPlayFormats]; Android keeps its fixed list (ALAC is
+     * downloaded as FLAC whatever this device decodes: downloads are not
+     * touched by the device-dependent ALAC direct play).
+     */
+    val downloadPlayFormats: Set<AudioFormat> get() = directPlayFormats
+
+    /** Device facts for the `play plan:` line, e.g. `alacDecoder=true alacFailed=false`; empty where there are none. */
+    val planNote: String get() = ""
 
     var listener: EngineListener?
 

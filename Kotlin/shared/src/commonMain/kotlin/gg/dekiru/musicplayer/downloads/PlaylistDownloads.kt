@@ -275,24 +275,40 @@ class PlaylistDownloads internal constructor(private val manager: DownloadManage
     fun delete(playlistId: String) = delete(listOf(playlistId))
 
     /**
-     * Finds a playlist's songs on this device: the playlist's own folder
-     * first, then a downloaded album that has the song; null means stream.
-     * Songs in downloaded albums are found for any playlist, downloaded or not.
+     * Finds a song on this device: the playlist's own folder first, then a downloaded album that has
+     * it; null means stream. Songs in downloaded albums are found for any playlist, downloaded or not.
+     *
+     * With `anywhere` (what the player asks for every queue it builds, from any page) the search is the
+     * same set of downloads the pages show as Downloaded, plus what is on disk of those under way: an
+     * album being downloaded (or downloaded again) has its finished files used, and every other
+     * playlist's own files count too. A track ID is compared without dashes or capitals, and a file
+     * is found by its name without the extension (ALAC saved as FLAC).
      */
-    fun resolver(playlistId: String): (trackId: String) -> LocalPlaylistTrack? {
+    fun resolver(playlistId: String, anywhere: Boolean = false): (trackId: String) -> LocalPlaylistTrack? {
         val saved = saved(playlistId)
-        val own = saved?.manifest?.uniqueTracks.orEmpty().associateBy { it.trackId }
+        val own = saved?.manifest?.uniqueTracks.orEmpty().associateBy { DownloadPaths.idKey(it.trackId) }
         val albums = albumTracks()
+        val partial = if (anywhere) manager.inProgressAlbums().let(::tracksOf) else emptyMap()
+        val others = if (anywhere) _all.value.filter { it.playlistId != playlistId } else emptyList()
         return resolve@{ trackId ->
-            val row = own[trackId]
-            val file = row?.file?.let { "${saved!!.directory}/$it" }?.takeIf(LocalFiles::exists)
+            val key = DownloadPaths.idKey(trackId)
+            val row = own[key]
+            val file = row?.file?.let { LocalFiles.existingFile("${saved!!.directory}/$it") }
             if (row != null && file != null) {
                 return@resolve LocalPlaylistTrack(file, saved!!.artPath(row), row.qualityLabel, row.normalizationGain)
             }
-            val (album, track) = albums[trackId] ?: return@resolve null
-            val path = album.trackPath(track).takeIf(LocalFiles::exists) ?: return@resolve null
-            val art = row?.let { saved!!.artPath(it) } ?: listOf(album.artPath(track), album.coverPath).firstOrNull(LocalFiles::exists)
-            LocalPlaylistTrack(path, art, track.qualityLabel, track.normalizationGain)
+            for (source in listOf(albums, partial)) {
+                val (album, track) = source[key] ?: continue
+                val path = LocalFiles.existingFile(album.trackPath(track)) ?: continue
+                val art = row?.let { saved!!.artPath(it) } ?: listOf(album.artPath(track), album.coverPath).firstOrNull(LocalFiles::exists)
+                return@resolve LocalPlaylistTrack(path, art, track.qualityLabel, track.normalizationGain)
+            }
+            for (playlist in others) {
+                val other = playlist.manifest.tracks.firstOrNull { DownloadPaths.idKey(it.trackId) == key && it.file != null } ?: continue
+                val path = LocalFiles.existingFile("${playlist.directory}/${other.file}") ?: continue
+                return@resolve LocalPlaylistTrack(path, playlist.artPath(other), other.qualityLabel, other.normalizationGain)
+            }
+            null
         }
     }
 
@@ -444,7 +460,7 @@ class PlaylistDownloads internal constructor(private val manager: DownloadManage
             val format = manager.storedFormat(AudioFormat.downloadFormat(track, old.preferredFormat))
             val name = PlaylistPaths.trackFileName(track.id, format)
             val onDisk = existing.firstOrNull { DownloadPaths.stem(it) == DownloadPaths.stem(name) }
-            val inAlbum = albums[track.id]?.let { (album, t) -> LocalFiles.exists(album.trackPath(t)) } == true
+            val inAlbum = albums[DownloadPaths.idKey(track.id)]?.let { (album, t) -> LocalFiles.exists(album.trackPath(t)) } == true
             val file = onDisk ?: if (inAlbum) null else name
             val kept = before[track.id]?.takeIf { onDisk != null && it.file == onDisk }
             val label = when {
@@ -472,7 +488,7 @@ class PlaylistDownloads internal constructor(private val manager: DownloadManage
         val albums = albumTracks()
         return manifest.uniqueTracks.filter { row ->
             val own = row.file != null && LocalFiles.exists("$dir/${row.file}")
-            !own && albums[row.trackId]?.let { (album, t) -> LocalFiles.exists(album.trackPath(t)) } != true
+            !own && albums[DownloadPaths.idKey(row.trackId)]?.let { (album, t) -> LocalFiles.exists(album.trackPath(t)) } != true
         }
     }
 
@@ -543,10 +559,12 @@ class PlaylistDownloads internal constructor(private val manager: DownloadManage
     // Bookkeeping
 
     /** Track ID → the downloaded album that has it. */
-    private fun albumTracks(): Map<String, Pair<DownloadedAlbum, ManifestTrack>> = buildMap {
-        for (album in manager.downloaded.value) {
-            if (manager.state(album.albumId) != null) continue
-            for (track in album.tracks) if (track.trackId !in this) put(track.trackId, album to track)
+    private fun albumTracks(): Map<String, Pair<DownloadedAlbum, ManifestTrack>> =
+        tracksOf(manager.downloaded.value.filter { manager.state(it.albumId) == null })
+
+    private fun tracksOf(albums: List<DownloadedAlbum>): Map<String, Pair<DownloadedAlbum, ManifestTrack>> = buildMap {
+        for (album in albums) {
+            for (track in album.tracks) putIfAbsent(DownloadPaths.idKey(track.trackId), album to track)
         }
     }
 

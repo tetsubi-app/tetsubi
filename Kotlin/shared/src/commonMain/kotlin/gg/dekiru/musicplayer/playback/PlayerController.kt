@@ -484,7 +484,7 @@ class PlayerController(
 
     private fun enqueue(album: JellyfinAlbum, tracks: List<JellyfinTrack>, next: Boolean) {
         if (!engine.isSupported || refusesPlayNext(next)) return
-        val local = downloads()?.playlists?.resolver("") ?: { null }
+        val local = downloads()?.playlists?.resolver("", anywhere = true) ?: { null }
         val online = isOnline()
         val cap = cap()
         val media = tracks.mapIndexedNotNull { i, track ->
@@ -667,18 +667,25 @@ class PlayerController(
 
     private fun idsOf(album: JellyfinAlbum) = AlbumIds((album.allDiscs.map { it.id } + album.id).toSet(), album.allDiscs.map { it.id })
 
-    /** Streams: the server's file, or AAC at the cap on mobile data. */
+    /**
+     * The album's tracks: each from its file on this device when it's there (a
+     * downloaded disc of a set whose other discs aren't, a song in a downloaded
+     * album played from elsewhere), else the stream: the server's file, or AAC
+     * at the cap on mobile data.
+     */
     private fun streamMedia(tracks: List<JellyfinTrack>, album: JellyfinAlbum): List<Media> {
         val cap = cap()
+        val local = downloads()?.playlists?.resolver("", anywhere = true) ?: { null }
         return tracks.mapIndexed { i, track ->
-            val (pt, item) = streamEntry(track, PlaybackTrack.from(track, album, i), cap)
+            val described = PlaybackTrack.from(track, album, i)
+            val (pt, item) = local(track.id)?.let { localEntry(described, it, track) } ?: streamEntry(track, described, cap)
             Media(pt, item, QueueTrack.from(track, album, i), i)
         }
     }
 
     /** A playlist's songs: from this device when they're here, else streamed; offline, only those here. */
     private fun playlistMedia(playlist: JellyfinPlaylist, entries: List<PlaylistEntry>, byPosition: Boolean = false): List<Media> {
-        val local = downloads()?.playlists?.resolver(playlist.id) ?: { null }
+        val local = downloads()?.playlists?.resolver(playlist.id, anywhere = true) ?: { null }
         val online = isOnline()
         val cap = cap()
         return entries.withIndex().mapNotNull { (index, entry) ->
@@ -705,7 +712,7 @@ class PlayerController(
      */
     private fun mediaFor(entry: QueueEntry, resolvers: MutableMap<String, (String) -> LocalPlaylistTrack?>): Media {
         val key = entry.group.id.takeIf { entry.group.kind == QueueGroupKind.PLAYLIST }.orEmpty()
-        val local = resolvers.getOrPut(key) { downloads()?.playlists?.resolver(key) ?: { null } }
+        val local = resolvers.getOrPut(key) { downloads()?.playlists?.resolver(key, anywhere = true) ?: { null } }
         val described = entry.track.toPlaybackTrack()
         val track = entry.track.toJellyfinTrack()
         val (pt, item) = local(entry.track.id)?.let { localEntry(described, it, track) } ?: streamEntry(track, described, cap())
@@ -786,13 +793,14 @@ class PlayerController(
             albumId = album.id,
             durationSeconds = track.durationSeconds,
             normalizationGain = track.normalizationGain,
-            qualityLabel = track.qualityLabel,
+            qualityLabel = PlaybackTrack.downloadedLabel(track.qualityLabel),
             artItemId = if (track.hasOwnArt) track.trackId else album.id,
             localArtPath = art,
         ).withFileInfo(disc.trackPath(track))
         val item = EngineItem(
             id = pt.id,
             url = fileUri(disc.trackPath(track)),
+            planNote = StreamUrls.fileLine(pt.id, disc.trackPath(track)),
             title = pt.title,
             artist = pt.artist,
             album = pt.album,
@@ -811,13 +819,14 @@ class PlayerController(
     /** A song played from a file on this device (a playlist's own download or a downloaded album's). */
     private fun localEntry(described: PlaybackTrack, file: LocalPlaylistTrack, track: JellyfinTrack): Pair<PlaybackTrack, EngineItem> {
         val pt = described.copy(
-            qualityLabel = file.qualityLabel ?: described.qualityLabel,
+            qualityLabel = PlaybackTrack.downloadedLabel(file.qualityLabel ?: described.qualityLabel),
             normalizationGain = file.normalizationGain ?: described.normalizationGain,
             localArtPath = file.artPath,
         ).withFileInfo(file.path)
         val item = EngineItem(
             id = pt.id,
             url = fileUri(file.path),
+            planNote = StreamUrls.fileLine(pt.id, file.path),
             title = pt.title,
             artist = pt.artist,
             album = pt.album,
@@ -841,9 +850,17 @@ class PlayerController(
         return pt to item
     }
 
+    /** The converted stream an ALAC file played as it is falls back to if the device can't decode it (see [DirectPlayFallback]). */
+    private fun directFallback(track: JellyfinTrack, cap: Int?): String? {
+        if (cap != null || AudioFormat.ALAC !in engine.directPlayFormats || AudioFormat.source(track) != AudioFormat.ALAC) return null
+        return StreamUrls.url(api, track, engine.directPlayFormats - AudioFormat.ALAC).takeIf { StreamUrls.isConverted(it) }
+    }
+
     private fun engineItem(track: JellyfinTrack, pt: PlaybackTrack, cap: Int?) = EngineItem(
         id = track.id,
         url = StreamUrls.url(api, track, engine.directPlayFormats, maxBitrate = cap),
+        directFallbackUrl = directFallback(track, cap),
+        planNote = StreamUrls.planLine(track.id, track, StreamUrls.plan(track, engine.directPlayFormats, cap), engine.planNote),
         title = pt.title,
         artist = pt.artist,
         album = pt.album,

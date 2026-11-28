@@ -26,12 +26,16 @@ import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.mediacodec.MediaCodecDecoderException
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import com.google.android.gms.cast.MediaStatus
 import gg.dekiru.musicplayer.AppInfo
+import gg.dekiru.musicplayer.AppVersion
+import gg.dekiru.musicplayer.data.settings.AndroidPreferences
 import gg.dekiru.musicplayer.data.network.NetworkState
+import gg.dekiru.musicplayer.logLine
 import gg.dekiru.musicplayer.playback.effects.AudioEffects
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -141,8 +145,25 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
     override val isSupported = true
 
-    /** ALAC isn't decoded on every device, so the server sends it as FLAC. */
-    override val directPlayFormats = setOf(AudioFormat.FLAC, AudioFormat.MP3, AudioFormat.AAC, AudioFormat.OPUS, AudioFormat.WAV)
+    /**
+     * ALAC isn't decoded on every device: it plays as the original file only
+     * where MediaCodec has an ALAC decoder ([AlacDecoderProbe], asked once) and
+     * none has failed to decode yet ([alacFailed]); elsewhere the server sends
+     * it as FLAC.
+     */
+    override val directPlayFormats: Set<AudioFormat>
+        get() = DirectPlayCapabilities.forDevice(AlacDecoderProbe.available && !alacFailed, alacFailure)
+
+    /** Downloads are not touched: ALAC is downloaded as FLAC whatever this device decodes. */
+    override val downloadPlayFormats: Set<AudioFormat> = DirectPlayCapabilities.baseline
+
+    /** Saved between launches: after one failed direct ALAC decode this build never tries again on this device. */
+    private val alacFailure = AlacDirectFailure(AndroidPreferences(context), AppVersion.BUILD)
+
+    /** An ALAC file played as it is failed to decode on this device (now, or earlier on this build): ALAC goes converted. */
+    private var alacFailed = alacFailure.failed
+
+    override val planNote: String get() = "alacDecoder=${AlacDecoderProbe.available} alacFailed=$alacFailed"
 
     override var listener: EngineListener? = null
 
@@ -174,6 +195,13 @@ class Media3Engine(private val context: Context) : PlayerEngine {
      * seeked: a reconnect then is a dropped stream, not a start.
      */
     private var hadPlayed = false
+
+    // Stall watchdog for converted streams (see StreamStall)
+
+    private val stallGrowth = BufferGrowth()
+    private val stallRestarts = StallRestarts()
+    private var stallPolling = false
+    private val stallTask = Runnable { checkStall() }
 
     // Reconnecting a converted stream (see StreamReconnect)
 
@@ -441,6 +469,10 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
         override fun onPlayerError(error: PlaybackException) {
             if (!isActive) return
+            if (source === player && fallBackToConverted(error)) {
+                updateStarting()
+                return
+            }
             if (source === player && reconnectAfter(error)) {
                 updateStarting()
                 return
@@ -464,6 +496,120 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long =
             if (StreamUrls.isConverted(loadErrorInfo.loadEventInfo.dataSpec.uri.toString())) C.TIME_UNSET
             else super.getRetryDelayMsFor(loadErrorInfo)
+    }
+
+    /**
+     * A direct stream that can't be decoded here (an ALAC file on a device
+     * whose decoder won't start, or a container the extractor can't read) is
+     * played again as the converted stream the controller gave it
+     * ([DirectPlayFallback]), from the point reached. Once per item: the item
+     * then has no fallback left, so nothing loops. Returns false to treat the
+     * error as any other.
+     */
+    private fun fallBackToConverted(error: PlaybackException): Boolean {
+        val current = player.currentMediaItemIndex
+        val index = failedIndex(error) ?: current
+        val item = queueItems.getOrNull(index)
+        if (!DirectPlayFallback.shouldFallBack(error.errorCode, item, casting) || item == null) return false
+        val fallback = DirectPlayFallback.converted(item)
+        val position = if (index == current) StreamReconnect.resumePosition(0, player.currentPosition, item.durationMillis) else 0L
+        val causes = generateSequence<Throwable>(error) { it.cause }.toList()
+        val codec = causes.filterIsInstance<MediaCodecDecoderException>().firstNotNullOfOrNull { it.codecInfo?.name }
+        val why = DirectPlayFallback.describeFailure(causes.map { it.message }, causes.map { it::class.java.name }, codec)
+        logLine("Tetsubi", "direct stream failed to decode: item=${item.id} error=${error.errorCodeName} $why position=$position fallback=converted")
+        alacFailed = true
+        runCatching { alacFailure.record() }
+        queueItems[index] = fallback
+        restarting = true
+        try {
+            if (position == 0L) startOffsets.remove(item.entryId) else startOffsets[item.entryId] = position
+            player.replaceMediaItem(index, mediaItem(fallback, StreamUrls.startingAt(fallback.url, position), onCast = false))
+            // Only the item queued behind the playing one may have failed: then the playing one stays where it is.
+            if (index == current) player.seekTo(index, 0)
+        } finally {
+            restarting = false
+        }
+        if (player.playbackState == Player.STATE_IDLE) {
+            player.prepare()
+            beginStart(StreamStartLog.Reason.RECONNECT)
+        }
+        return true
+    }
+
+    // The stall watchdog (StreamStall)
+
+    /** Whether the watchdog should be looking: a converted stream that has played and is meant to be playing. */
+    private fun wantsStallWatch(): Boolean {
+        if (casting || cued || !hadPlayed || !player.playWhenReady) return false
+        if (player.playbackState != Player.STATE_READY && player.playbackState != Player.STATE_BUFFERING) return false
+        return queueItems.getOrNull(player.currentMediaItemIndex)?.seeksByRestart(casting = false) == true
+    }
+
+    /** Starts or stops the poll as [wantsStallWatch] changes. Called from [updateStarting], which every state change reaches. */
+    private fun syncStallWatch() {
+        if (wantsStallWatch()) {
+            if (!stallPolling) {
+                stallPolling = true
+                mainHandler.postDelayed(stallTask, StreamStall.POLL_MILLIS)
+            }
+        } else if (stallPolling) {
+            stallPolling = false
+            mainHandler.removeCallbacks(stallTask)
+            stallGrowth.reset()
+        }
+    }
+
+    private fun checkStall() {
+        stallPolling = false
+        if (!wantsStallWatch()) {
+            stallGrowth.reset()
+            return
+        }
+        val index = player.currentMediaItemIndex
+        val item = queueItems.getOrNull(index)
+        if (item != null) {
+            val now = SystemClock.elapsedRealtime()
+            val offset = offsetOf(item)
+            val buffered = player.bufferedPosition
+            val ahead = (buffered - player.currentPosition).coerceAtLeast(0)
+            val quiet = stallGrowth.sinceGrowth("${item.entryId}@$offset", buffered, now)
+            val decision = StreamStall.decide(
+                playing = true,
+                loading = player.isLoading,
+                converted = true,
+                bufferedAheadMillis = ahead,
+                sinceGrowthMillis = quiet,
+                reachedEnd = StreamStall.reachedEnd(offset + buffered, item.durationMillis),
+                reconnectBusy = reconnect.active,
+                recentRestarts = stallRestarts.recent(item.entryId, now),
+            )
+            if (decision == StreamStall.Decision.RESTART) {
+                logLine("Tetsubi", "stream stalled: item=${item.id} kind=converted ahead=${ahead / 1000}s quiet=${quiet / 1000}s restart=at-position")
+                stallRestarts.record(item.entryId, now)
+                stallGrowth.reset()
+                restartStalled(index)
+            }
+        }
+        syncStallWatch()
+    }
+
+    /**
+     * Starts the stalled converted stream again at the playing point, before the
+     * buffer runs dry: the same as the reconnect after an error, a try that
+     * is already made (the run's policy ends it as the player is ready again,
+     * or carries on through [reconnectAfter] if the new stream fails).
+     * ExoPlayer can't splice the new stream onto the buffered audio, so the
+     * buffer is dropped and the new stream's start is heard as a gap.
+     */
+    private fun restartStalled(index: Int) {
+        if (reconnect.failed() == null) {
+            endReconnect()
+            return
+        }
+        reconnectWakeLock?.runCatching { acquire(StreamReconnect.GIVE_UP_AFTER_MILLIS + 30_000) }
+        holdPosition(index, force = true)
+        beginStart(StreamStartLog.Reason.RECONNECT)
+        updateStarting()
     }
 
     /**
@@ -503,11 +649,11 @@ class Media3Engine(private val context: Context) : PlayerEngine {
      * there; position and length still read as the whole track's
      * ([Seekable]). A direct stream needs nothing: ExoPlayer keeps its point.
      */
-    private fun holdPosition(index: Int) {
+    private fun holdPosition(index: Int, force: Boolean = false) {
         val item = queueItems.getOrNull(index)?.takeIf { it.seeksByRestart(casting = false) } ?: return
         val offset = offsetOf(item)
         val position = StreamReconnect.resumePosition(offset, player.currentPosition, item.durationMillis)
-        if (position == offset) return // A try that failed before playing: it already starts there.
+        if (position == offset && !force) return // A try that failed before playing: it already starts there.
         restarting = true
         try {
             if (position == 0L) startOffsets.remove(item.entryId) else startOffsets[item.entryId] = position
@@ -542,6 +688,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
      * stream waiting for its next try).
      */
     private fun updateStarting() {
+        syncStallWatch()
         val p = active
         val starting = p.playWhenReady && !p.isPlaying && when (p.playbackState) {
             Player.STATE_BUFFERING -> true
@@ -656,6 +803,11 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     }
 
     init {
+        logLine(
+            "Tetsubi",
+            "directPlay formats=${directPlayFormats.map { it.name }.sorted()} alacDecoder=${AlacDecoderProbe.available} " +
+                "decoders=${AlacDecoderProbe.decoders} selected=${AlacDecoderProbe.selectedDecoders}",
+        )
         player.addListener(Events(player))
         player.addAnalyticsListener(StartEvents())
         if (castConnection != null) {
@@ -895,6 +1047,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
 
     override fun stop() {
         cued = false
+        stallRestarts.clear()
         endReconnect()
         endStart()
         player.stop()
@@ -920,6 +1073,8 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     private fun beginStart(reason: StreamStartLog.Reason, alreadyPlaying: Boolean = false) {
         val item = queueItems.getOrNull(player.currentMediaItemIndex) ?: return
         val uri = player.currentMediaItem?.localConfiguration?.uri?.toString() ?: return
+        // One `play plan:` line per track start (not for a seek or a reconnect of the same track).
+        if (reason != StreamStartLog.Reason.SEEK && reason != StreamStartLog.Reason.RECONNECT) item.planNote?.let { logLine("Tetsubi", it) }
         startLog.begin(item.id, StreamStartLog.kindOf(uri), reason, uri, alreadyPlaying)
         scheduleStartCheck()
     }

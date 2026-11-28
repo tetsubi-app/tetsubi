@@ -34,12 +34,53 @@ object StreamUrls {
                     listOf("MaxStreamingBitrate" to "$maxBitrate", "AudioBitRate" to "$maxBitrate") + token,
             )
         }
-        val source = AudioFormat.source(track)
-        val container = track.mediaSource?.container?.lowercase()
-        if (source != null && source in directPlay && !container.isNullOrEmpty()) {
-            return api.url("Audio/${track.id}/stream.$container", listOf("static" to "true") + token)
+        if (plan(track, directPlay, null).kind == Plan.Kind.DIRECT) {
+            val container = track.mediaSource?.container?.lowercase().orEmpty()
+            return api.url("Audio/${track.id}/stream.${fileExtension(container)}", listOf("static" to "true") + token)
         }
         return api.url("Audio/${track.id}/universal", universal(api, userId, fallback) + token)
+    }
+
+    /** What [url] chose for a track, and the one thing that decided it (for the `play plan:` log line and tests). */
+    data class Plan(val kind: Kind, val reasons: List<String>) {
+        enum class Kind(val label: String) { DIRECT("direct"), CONVERTED("converted"), CAPPED("capped"), FILE("file") }
+    }
+
+    /**
+     * The decision behind [url], pure. Reasons: `cap` (mobile-data cap),
+     * `original` (played as the file), `noSourceInfo` (the track has no
+     * codec/container the app recognises, so the server converts it),
+     * `noContainer` (format known, container missing), `notDirect:<FORMAT>`
+     * (the player doesn't play that format as it is: ALAC without a decoder).
+     */
+    fun plan(track: JellyfinTrack, directPlay: Set<AudioFormat>, maxBitrate: Int?): Plan {
+        if (maxBitrate != null) return Plan(Plan.Kind.CAPPED, listOf("cap"))
+        val source = AudioFormat.source(track) ?: return Plan(Plan.Kind.CONVERTED, listOf("noSourceInfo"))
+        if (track.mediaSource?.container.isNullOrEmpty()) return Plan(Plan.Kind.CONVERTED, listOf("noContainer"))
+        if (source !in directPlay) return Plan(Plan.Kind.CONVERTED, listOf("notDirect:${source.name}"))
+        return Plan(Plan.Kind.DIRECT, listOf("original"))
+    }
+
+    /** The `play plan:` line for a track played from its file on this device. */
+    fun fileLine(itemId: String, path: String): String =
+        "play plan: item=$itemId plan=file reasons=downloaded format=${path.substringAfterLast('.', "?").lowercase()}"
+
+    /** The `play plan:` log line: identifiers and formats only, no address or token. */
+    fun planLine(itemId: String, track: JellyfinTrack, plan: Plan, engineNote: String): String =
+        "play plan: item=$itemId codec=${track.mediaSource?.codecs?.lowercase() ?: "?"} container=${track.mediaSource?.container?.lowercase() ?: "?"} " +
+            "plan=${plan.kind.label} reasons=${plan.reasons.joinToString(",")}" + if (engineNote.isEmpty()) "" else " $engineNote"
+
+    /**
+     * The extension of the original file's URL for a container name. ffprobe
+     * names an MP4-family file "mov,mp4,m4a,3gp,3g2,mj2" (what Jellyfin may
+     * report), which isn't a file name: ALAC and AAC in it are `m4a`, as
+     * Swift's `StreamURLBuilder` treats "ALAC in the MP4 family". A single
+     * name (`flac`, `mp3`, `m4a`) is used as it is.
+     */
+    internal fun fileExtension(container: String): String {
+        if (',' !in container) return container
+        val names = container.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        return if (names.any { it == "m4a" || it == "mp4" || it == "mov" || it == "m4b" }) "m4a" else names.first()
     }
 
     /**

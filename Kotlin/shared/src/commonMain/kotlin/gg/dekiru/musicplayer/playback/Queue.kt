@@ -88,6 +88,9 @@ data class PlaybackTrack(
         fun convertedLabel(source: AudioFormat?, sourceBitrate: Int?): String =
             "${AudioFormat.FLAC.displayName} (from ${qualityLabel(source, sourceBitrate) ?: "original"})"
 
+        /** A track played from its downloaded file: "FLAC · downloaded" (a converted stream says "from", so the two differ). */
+        fun downloadedLabel(label: String?): String? = label?.let { "$it · downloaded" } ?: "Downloaded"
+
         /** "ALAC 905 kbps", "FLAC" (bitrate unknown), or null (format unknown). */
         fun qualityLabel(format: AudioFormat?, bitrate: Int?): String? {
             format ?: return null

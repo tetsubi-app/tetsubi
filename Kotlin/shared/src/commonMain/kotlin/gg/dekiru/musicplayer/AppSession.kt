@@ -98,7 +98,7 @@ class AppSession(val authenticator: Authenticator, val environment: AppEnvironme
         _downloads.value?.close()
         _downloads.value = DownloadManager(
             api, environment.downloadsDir, downloadSettings, scope, environment.isExpensiveNetwork, environment.downloadRunner,
-            playable = environment.playerEngine.directPlayFormats, isOnline = environment.isOnline,
+            playable = environment.playerEngine.downloadPlayFormats, isOnline = environment.isOnline,
         )
         _api.value = api
         // After the downloads, so downloaded entries play from their files.
