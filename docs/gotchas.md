@@ -618,6 +618,8 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 
 **Shared Kotlin tests run twice.** `commonTest` runs on the desktop JVM and again as Android host tests, so test counts double; `./gradlew :shared:allTests` runs both.
 
+**`FakeServer` records requests in the order they were sent.** Its `MockEngine` handles each request in the caller's coroutine (`dispatcher = Dispatchers.Unconfined`) instead of on an IO thread. Before, two requests sent one straight after the other (a "stopped" report and the next "started") were recorded by whichever thread got the lock first, so tests that assert the order of `/Sessions/Playing` reports (`PlaylistPlaybackTest`, `QueuePlaybackTest`, `PlaybackTest`) failed on a busy machine: 8 of 10 runs with every CPU saturated before the change, 0 of 10 after (and 0 of 3 full `:shared:allTests` runs under the same load). To check for flakes after touching the fake server or the reporting code, run the playback tests repeatedly while `yes > /dev/null` runs on every core.
+
 **Pull pure logic out of actors and requests so it can be tested.** Examples are `planQueue`, `upNextIndices`, `distinctPlayedAlbums` and `LibraryView.gridLayout(width:)`; several of the bugs above were found by such tests rather than on a device.
 
 **Keep the two codebases in step.** Settings keys, wording and behaviour are meant to match between the Swift and Kotlin apps (for example `library.sort` and `downloads.defaultFormat`), and porting one side has exposed a bug in the other (the sub-path server address).

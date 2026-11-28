@@ -10,6 +10,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -22,12 +23,19 @@ class FakeServer(
     // Requests can arrive on several threads at once (downloads run two tracks together).
     private val lock = Mutex()
 
-    val client = HttpClient(
-        MockEngine { request ->
-            lock.withLock { requests += request }
-            handler(request)
-        },
-    ) { tetsubiDefaults() }
+    val client = HttpClient(MockEngine) {
+        engine {
+            // Handle each request in the caller's own coroutine instead of a separate IO thread: two requests sent
+            // one after the other (a "stopped" report and the next "started") are then recorded in the order they were
+            // sent. On a busy machine the IO threads used to swap them, which made the order assertions flaky.
+            dispatcher = Dispatchers.Unconfined
+            addHandler { request ->
+                lock.withLock { requests += request }
+                handler(request)
+            }
+        }
+        tetsubiDefaults()
+    }
 
     val identity = ClientIdentity(deviceName = "Test Pad", deviceId = "device-1", version = "0.1.0")
 
