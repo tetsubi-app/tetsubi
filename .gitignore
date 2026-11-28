@@ -12,3 +12,10 @@ DerivedData/
 
 # Qwen agent / session tooling
 .qwen/
+
+# Never commit sign-in details (test runs write or copy these)
+login.properties
+*.login
+.env
+.env.*
+xdg*/

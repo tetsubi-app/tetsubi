@@ -5,7 +5,7 @@ Tetsubi is a Jellyfin music player by DEKIRU Ltd. Two codebases, one product:
 - **iOS + Mac (Swift/SwiftUI):** `JellyfinMusicCore/` (shared package: models, API, player, downloads, views) + `Tetsubi-iOS/`, `Tetsubi-macOS/`, `Tetsubi-Widget/`. `Tetsubi.xcodeproj` is generated from `project.yml` (`xcodegen generate`) and is not committed.
 - **Android + Linux (Kotlin Multiplatform, Compose):** `Kotlin/` — `:shared` (commonMain = almost everything; androidMain, desktopMain, jvmSharedMain), `:androidApp`, `:desktopApp`.
 
-Read `docs/gotchas.md` before changing signing, playback, downloads, widgets or the build. `docs/icons.md` covers the icon sizes.
+Read `docs/gotchas.md` before changing signing, playback, downloads, widgets or the build. `docs/icons.md` covers the icon sizes. `docs/redesign.md` is the UI contract (window classes, the one grid and density, page/section/row patterns, tokens); both apps follow it, so change it first when the layout changes.
 
 ## Names that must not change
 

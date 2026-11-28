@@ -166,6 +166,20 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 ### SwiftUI layout and navigation
 
+**Tab/TabSection selection must stay in the `ShellItem` binding.** The sidebar `TabView` selects a `ShellItem` (`.tab` or `.playlist`), and `shellSelection` turns a playlist pick into "open it on Library's stack and keep Library selected". Giving a `Tab` or `TabSection` item a different selection type, or a second `@State` for the selected tab, made the sidebar and the content disagree (a playlist row stayed highlighted, or the tab did not change). Keep every `Tab(value:)` a `ShellItem` and all navigation in `AppRootView`'s `selectedTab` and `paths`.
+
+**A page with its own `PageHeader` hides the native bar, and a hidden bar takes the swipe-back gesture with it.** `ownsItsHeader()` hides the iOS navigation bar (`.toolbar(.hidden, for: .navigationBar)`), and for pushed pages (`isDetail`) adds `PopGestureEnabler`, which gives `interactivePopGestureRecognizer` back its delegate. On the Mac a pushed page uses `.navigationBarBackButtonHidden(true)`: hiding `.windowToolbar` instead removed the traffic lights and the sidebar button too. Every page now draws its own header (Album, Playlist, Artist, Settings and the Equaliser included), so none keeps the native bar.
+
+**One `LazyVGrid` cannot span columns, so a page that mixes cards and rows uses sections.** Search puts `CardGridContent` (cards) and `ListGridContent` (rows, two columns from 700 pt) in one `ScrollView` with `SectionHeader`s between them. `CardGrid` and `ListGrid` scroll on their own and take `header` / `footer` for what sits above and below.
+
+**Page controls go inline from 720 pt of window width, not pane width.** `windowWidth` is set at the root beside `windowWidthClass`; narrower windows get one "Sort & view" button and sheet. A Mac window of 800 pt with the sidebar therefore still shows the inline controls.
+
+**Detail pages and Settings share one two-pane rule.** `DetailLayout.isTwoPane(windowClass:paneWidth:)`: expanded windows always, medium ones once the pane beside the sidebar is 900 pt wide, compact never (Kotlin's `DetailPage` rule). Album, Playlist and Artist use `DetailPage` (info pane 320 on the left, list right; stacked art up to 260, 320 on medium); Settings uses the same rule for its split view (categories 240 left, `SettingsCategory`, the chosen one remembered under `settings.category`; Equaliser a section of Playback on wide, a pushed page on compact). Updates is Android and Linux only, so Swift Settings has six categories. A tap target and a ⋯ menu in one `ListRow` must be siblings (`ListRow` puts only the content in the `Button`), or the Menu inside a Button label swallows or double-fires taps.
+
+**A temporary launch hook must not discover or sign in anywhere but the demo server.** A "show the sign-in screen" hook also ran `ServerDiscovery` and, with one server found, picked it and started a Quick Connect request on it. Skip discovery for such checks, and sign in only with the demo account.
+
+**Xcode 27 has no Simulator app, so `xcrun simctl` cannot tap.** For checks on simulators a temporary launch hook (environment variables passed with `SIMCTL_CHILD_`) signs in and picks the tab; remove it before committing. Screenshots with `xcrun simctl io <udid> screenshot`. A shell call keeps no environment from the last one, so export the variables in the same command that launches.
+
 **Never wrap the root view in a `NavigationStack`.** An extra stack around `AppRootView` made every tab's own stack lose its bar, including titles, toolbars and the search field.
 
 **Declare the album `navigationDestination` on every tab's stack.** A stack without `AlbumDestination` broke album links elsewhere after that tab had been visited.
@@ -180,7 +194,7 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **Do not put the A to Z strip beside a `LazyVGrid` in an `HStack`.** It squeezed the grid to one column. Overlay the strip and reserve `AlphaIndexBar.width` of trailing padding.
 
-**Present Now Playing from one sheet at the app root.** `PlayerManager.isNowPlayingPresented` drives a single `.sheet` in `AppRootView`. There is one mini-player bar per tab on iOS before 26.1, so a sheet on the bar would mean several sheets competing. On iPad it is a full-screen cover instead (`NowPlayingPresentation`): an iPad sheet is a form about 580 pt wide, under the 640 pt the two columns need, so they never showed there. It is closed with its chevron button (no swipe down). iPhone, even a Max on its side (regular width), and the Mac keep the sheet.
+**Present Now Playing from one sheet at the app root.** `PlayerManager.isNowPlayingPresented` drives a single `.sheet` in `AppRootView`. There is one mini-player bar per tab on iOS before 26.1, so a sheet on the bar would mean several sheets competing. On iPad it is a full-screen cover instead (`NowPlayingPresentation`): an iPad sheet is a form about 580 pt wide, under the 600 pt the two columns need, so they never showed there. It is closed with its chevron button (no swipe down). iPhone, even a Max on its side (regular width), and the Mac keep the sheet.
 
 **`tabViewBottomAccessory(isEnabled:)` needs iOS 26.1.** Guard it with `#available(iOS 26.1, *)`; older systems and macOS use a `safeAreaInset` capsule on each tab.
 
@@ -214,23 +228,23 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 **Use a single `Window`, not a `WindowGroup`.** A second window would mean a second player. The app quits when its window closes, because playback belongs to the window.
 
-**Mac `List`s ignore `contentMargins`.** `readableWidthOnMac()` narrows the list itself to a centred column. `SettingsView` and `EqualizerView` use `.formStyle(.grouped)` because the Mac's default form style is loose columns against the window edge.
+**The ad-hoc-signed Mac dev build asks for the login keychain password.** Saving the login to the login keychain from an ad-hoc-signed build (the `codesign -s -` dev build) raises a system password prompt. Click Deny; never type the user's password. Without the saved login the app still signs in for the session, and the simulators (no keychain prompt) are the place for real-data checks.
+
+**Mac `List`s ignore `contentMargins`.** The grid and list pages fill the pane under `CardGrid` / `ListGrid`; Settings and the Equaliser are no longer a `Form` but `SettingsGroup` rows in a `ScrollView`, so the Mac Form quirks (loose columns, `.formStyle(.grouped)`) are gone. `ReadableWidth` was deleted. A `Toggle` in a custom row needs `.toggleStyle(.switch)` on the Mac (the default there is a checkbox).
 
 **The Mac route picker needs the player.** `AVRoutePickerView` on macOS must be given `PlayerManager.outputPlayer` to route this app's audio.
 
 **The first network lookup from a new Mac binary can fail.** The macOS local network privacy check can make the very first address lookup fail.
 
-**A sheet on the Mac keeps a narrow default width unless it is told to fit its content.** The Now Playing sheet stayed about 470 pt wide whatever `.frame(idealWidth:)` said. Adding `.presentationSizing(.fitted)` (macOS 15 and later) makes the sheet take the ideal size; `NowPlayingView.nowPlayingSheetFrame()` does this, opening wide only when the main window has room (`macSheetIdealWidth`, `macSheetIdealHeight`, fed by `UIScale.windowWidth` and `windowHeight`).
+**A sheet on the Mac keeps a narrow default width unless it is told to fit its content.** The Now Playing sheet stayed about 470 pt wide whatever `.frame(idealWidth:)` said. Adding `.presentationSizing(.fitted)` (macOS 15 and later) makes the sheet take the ideal size; `NowPlayingView.nowPlayingSheetFrame()` does this, opening wide only when the main window has room (`NowPlayingLayout.macSheetIdealWidth` / `macSheetIdealHeight`, fed by `UIScale.windowWidth` and `windowHeight`; wide only when the window leaves at least 700 pt).
 
-**Now Playing has two columns when it is wide.** From 640 pt wide and 520 pt tall (before the Mac's window scaling) the cover, title, progress and buttons go on the left and "Up next" on the right (`NowPlayingView.isWide`). The cover is sized from the height that is left (`wideArtSize`), so the buttons are not cropped. The height rule keeps an iPhone on its side on one column. An unfolded iPhone Duo is about 670 pt wide by my estimate and is meant to get two columns; the simulated Duo started folded and could not be unfolded, so only the iPad was checked on screen (before the iPad's Now Playing became a full-screen cover; the cover has not been checked on screen yet).
+**Now Playing picks its columns from the width it is shown at, with no scaling.** `NowPlayingLayout.usesTwoColumns(width:isPhone:)` is `WindowWidthClass.resolve(...).isWide`: two columns from 600 pt, never on an iPhone (a Max on its side stays one column). The old 640 x 520 rule and `NowPlayingView`'s own scale (`s`, 1.0 to 1.6) are gone; sizes are plain points (cover up to 300 on one column, 420 on two, left column 46% of the width between 360 and 560). The width is measured from the Now Playing view itself (the sheet or cover), not the window, so a Mac sheet that opens narrow (460) is one column. One column puts close and ⋯ on top, then a `List` (player row, then the queue) so rows can be dragged and swiped; two columns put the player (with the top bar) on the left and the queue in a surface panel on the right with its heading pinned. The playing track stays pinned first in the queue, on the pink band.
 
 **Space plays and pauses on the Mac through a key monitor, not a menu shortcut.** A bare Space menu shortcut would also take the spaces typed in Search and the playlist name field. `SpaceKeyMonitor` watches `keyDown` and acts only when no text field or focused button has the keyboard (`SpaceKeyRule`, which is tested). ⌘P in the Playback menu still works.
 
 **Interactive glass makes a Mac button bar appear to move.** `.glassEffect(.regular.interactive())` squashes the whole capsule under the pointer on every click. The Mac's playback bar uses plain `.regular`. Its progress line also keeps its space when the track length is unknown, so the bar never changes height while skipping.
 
-**The Mac playback bar is limited to Settings' content width** (`readableWidthOnMac`, 720 pt, growing with the window) and has a 16 pt gap under it; the window has no safe area to provide one.
-
-**The Mac window goes down to 360 × 480 and the layout follows its width, not the platform.** `WindowWidthClass` (compact under 600 pt, medium 600 to 1023, expanded 1024 and up) is tracked live from the window by `followsWindowWidth` in `AppRootView`; it sets `isWideLayout` (phone-sized cards and no zoom buttons when compact) and chooses between the sidebar and the compact bar. The Kotlin apps use the same 600 rule (`isWide(windowWidth)`).
+**The Mac window goes down to 360 × 480 and the layout follows its width, not the platform.** `WindowWidthClass` (compact under 600 pt, medium 600 to 1023, expanded 1024 and up) is tracked live from the window by `followsWindowWidth` in `AppRootView`; it sets the `windowWidthClass` and `windowWidth` environment values (margins, gutters, card density) and chooses between the sidebar and the compact bar. The Kotlin apps use the same 600 rule (`isWide(windowWidth)`).
 
 **Compact Mac windows use a bottom `CompactTabBar`, because the native tab bar cannot be moved or hidden.** `ToolbarPlacement.tabBar` is not available on macOS, and a narrow `TabView` puts its tabs on top and, at about 360 pt, inside a `>>` overflow menu. In compact `AppRootView` does not build the `TabView` at all: it shows only the selected tab's content and docks the bar with `safeAreaInset(.bottom)`, below the mini player. Selection and navigation paths live in `AppRootView`, so they survive crossing 600 pt; per-view state such as scroll position resets when switching tabs in compact. Keeping visited tabs alive in a hidden `ZStack` was tried and leaked Search's toolbar into other tabs. In the sidebar layout the mini player has been seen to vanish once an Album page is pushed (not checked against older builds).
 
@@ -468,7 +482,13 @@ Checked against Jellyfin 12.4.0. Verify any new endpoint against a live server r
 
 **Hide the tab bar and mini player while the keyboard is up.** In landscape they left only a thin strip for search results.
 
-**An adaptive grid can leave ragged last rows.** The Random Albums page uses a fixed column count in a centred block instead.
+**One window class and one grid rule drive every layout** (`docs/redesign.md`). `WindowClass.fromWidth` (600 / 1024, from `LocalWindowClass`) picks bottom bar / rail / sidebar; `gridColumns` = max(2, floor((w + gutter) / (minCard + gutter))) with the global `Density` S/M/L (`ui.density`) gives every grid its columns, and cards fill the column. Do not add per-screen card sizes, zoom buttons or max-width islands; the old `GridZoom`, `AlbumRow` sizes and 720 dp columns are gone. Inside a `CardGrid` pass `horizontalPadding = 0.dp` to `SectionHeader`/`Banner`/`ListRow` (the grid already has the margin) and use `headerItem` to tighten the gap under a full-width header.
+
+**The page controls need 720 dp.** Sort, Filter, Grid/List and S/M/L sit inline in the page header only from a 720 dp window (`showsInlineControls`); narrower windows get one "Sort & view" button opening the same options in a sheet. Detail pages (Album, Playlist, Artist) go two-pane on Expanded, and on Medium from 900 dp; Settings uses the same split rule.
+
+**To see playback screens on a Mac without libmpv, use a temporary fake player engine in `desktopApp`'s `Main.kt` and revert it.** Compose desktop ignores System Events (AX) clicks; use real mouse events (CGEvent) for UI checks, and an isolated `XDG_*` set so the user's settings are untouched.
+
+**An adaptive grid can leave ragged last rows.** The shared grid accepts that (the last row is left aligned) rather than stretching cards.
 
 **Japanese text falls back to the system font.** DEKIRU Sans has no CJK glyphs; the fallback looks fine, and bundling a CJK face was rejected because of its size (about 5 MB a weight).
 
