@@ -8,8 +8,8 @@ import kotlin.math.sqrt
 /**
  * Picks an accent colour from album art for Now Playing's progress line: a
  * vivid colour that stands out against the art's main colour (the yellow
- * highlight on mostly-red art). A line-for-line port of iOS `ArtPalette`, so
- * both apps pick the same colour.
+ * highlight on mostly-red art). A port of iOS `ArtPalette` with one
+ * difference: [MINIMUM_BRIGHTNESS] is 0.15 here (0.3 on iOS), so dark covers still get an accent.
  */
 object ArtPalette {
 
@@ -59,9 +59,12 @@ object ArtPalette {
     const val SAMPLE_SIZE = 40
     /** Smallest share of the image a colour needs to be picked (ignores specks). */
     const val MINIMUM_SHARE = 0.02
-    /** Colours greyer or darker than this aren't picked: they'd vanish on the dark background. */
+    /**
+     * Colours greyer or darker than this aren't picked. Brightness is low (iOS has 0.3) because the pick is
+     * lifted to [DISPLAY_BRIGHTNESS] anyway: a moody red/black cover has no red above 0.3 and got no accent.
+     */
     const val MINIMUM_SATURATION = 0.3
-    const val MINIMUM_BRIGHTNESS = 0.3
+    const val MINIMUM_BRIGHTNESS = 0.15
     /** The picked colour is lifted to at least this brightness so it shows up. */
     const val DISPLAY_BRIGHTNESS = 0.8
     /** Number of hue families vivid colours are grouped into (30° each). */

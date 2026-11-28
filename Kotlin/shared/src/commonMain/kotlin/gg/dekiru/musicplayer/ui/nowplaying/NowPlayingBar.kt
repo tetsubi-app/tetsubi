@@ -73,7 +73,7 @@ fun NowPlayingBar(
     val windowClass = LocalWindowClass.current
     val wide = windowClass.isWide
     // The art's accent (brand blue until it's worked out), fading as the art changes.
-    val line = rememberAnimatedAccent(rememberArtAccent(api, track.artItemId, track.localArtPath))
+    val line = rememberHeldAccent(rememberArtAccentResult(api, track.artItemId, track.localArtPath))
     val progress = if (player.duration > 0) (player.position / player.duration).toFloat().coerceIn(0f, 1f) else 0f
     Column(
         modifier.fillMaxWidth().background(TetsubiColors.background.copy(alpha = 0.55f)).background(TetsubiColors.surface)

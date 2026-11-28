@@ -136,8 +136,9 @@ fun NowPlayingScreen(
     onOpenArtist: ((JellyfinArtist) -> Unit)? = null,
 ) {
     BackHandler { player.isNowPlayingOpen = false }
-    val artAccent = rememberArtAccent(api, player.currentTrack?.artItemId, player.currentTrack?.localArtPath)
-    val accent = rememberAnimatedAccent(artAccent)
+    val artResult = rememberArtAccentResult(api, player.currentTrack?.artItemId, player.currentTrack?.localArtPath)
+    val artAccent = artResult.color
+    val accent = rememberHeldAccent(artResult)
     val visualiser = remember(effects, effectsSettings) {
         if (effects != null && effectsSettings != null) VisualiserToggle(effectsSettings) else null
     }

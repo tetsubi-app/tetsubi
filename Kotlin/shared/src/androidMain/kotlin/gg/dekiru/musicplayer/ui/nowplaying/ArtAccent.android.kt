@@ -1,5 +1,6 @@
 package gg.dekiru.musicplayer.ui.nowplaying
 
+import android.graphics.Bitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import coil3.PlatformContext
@@ -18,5 +19,8 @@ internal actual suspend fun loadReadableArt(context: PlatformContext, url: Strin
         .httpHeaders(NetworkHeaders.Builder().set("Authorization", authorization).build())
         .build()
     val result = SingletonImageLoader.get(context).execute(request) as? SuccessResult ?: return null
-    return result.image.toBitmap().asImageBitmap()
+    val bitmap = result.image.toBitmap()
+    // A cached hardware bitmap can't be read; a software copy can.
+    val readable = if (bitmap.config == Bitmap.Config.HARDWARE) bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return null else bitmap
+    return readable.asImageBitmap()
 }
