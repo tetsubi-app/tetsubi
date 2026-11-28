@@ -155,7 +155,7 @@ struct ArtistCardLink: View {
         NavigationLink(value: artist) {
             MediaCard(width: width, title: artist.name, circle: true) { corner in
                 AlbumArtView(request: api?.imageURLRequest(for: artist.id, size: size), size: width,
-                             cornerRadius: corner, placeholderColor: TetsubiColors.art)
+                             cornerRadius: corner, placeholderColor: TetsubiColors.surface)
             }
         }
         .buttonStyle(.plain)

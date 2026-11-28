@@ -7,9 +7,13 @@ import UIKit
 
 /// Login screen for a Jellyfin server.
 ///
-/// **Primary flow — Quick Connect.** On appear the view starts a Quick Connect
-/// session and shows a 6-digit code the user approves on another device (or the
-/// server). On success it calls `onConnected` straight to the main screen.
+/// **Primary flow — Quick Connect.** The "Use Quick Connect" button starts a
+/// Quick Connect session and shows a 6-digit code the user approves on another
+/// device (or the server). On success it calls `onConnected` straight to the
+/// main screen. Nothing else starts it: each session leaves a pending approval
+/// request on the server, so appearing, discovery, picking a server and Return
+/// in the address field only fill in the address. The code is dropped when the
+/// address changes, on the password form and when the screen goes away.
 ///
 /// **Fallback — username & password.** A "Sign in with username & password"
 /// link, and auto-reveal on any Quick Connect failure (server has it disabled,
@@ -17,7 +21,21 @@ import UIKit
 /// "Use Quick Connect instead" swaps back and asks for a fresh code.
 /// The server URL field is shared by both. Below it, servers found on the
 /// local network (`ServerDiscovery`) can be tapped instead of typing; if
-/// exactly one is found and nothing's typed yet, it's picked automatically.
+/// exactly one is found and nothing's typed yet, its address is filled in.
+/// The sign-in screen's small rules, pure so they can be tested.
+public enum SignInRules {
+    /// The line under the Quick Connect panel before a code is asked for.
+    public static func idleHint(hasAddress: Bool) -> String {
+        hasAddress ? "Tap Use Quick Connect to get a code." : "Choose your server above, or type its address."
+    }
+
+    /// The address changed: a Quick Connect started for another address (or still resolving
+    /// the typed one) is dropped; the same address it was started for, or none, leaves it be.
+    public static func shouldStopQuickConnect(address: String, startedFor: String?) -> Bool {
+        address != startedFor
+    }
+}
+
 public struct ServerConfigView: View {
 
     // MARK: Callbacks
@@ -45,6 +63,8 @@ public struct ServerConfigView: View {
     /// Working out the full address (scheme, port) before Quick Connect.
     @State private var isFindingServer = false
     @State private var findTask: Task<Void, Never>?
+    /// The address the running Quick Connect was started for (the resolved one).
+    @State private var quickConnectAddress: String?
 
     /// Example address, shown in the empty field and in errors.
     private static let exampleURL = "http://192.168.1.20:8096"
@@ -78,10 +98,6 @@ public struct ServerConfigView: View {
                             .textInputAutocapitalization(.never)
                             .textContentType(.URL)
                             #endif
-                            .onSubmit {
-                                // New server: ask it for a fresh code.
-                                if mode == .quickConnect { startQuickConnect() }
-                            }
                     }
                     discoveryList
                 }
@@ -106,14 +122,20 @@ public struct ServerConfigView: View {
         .scrollDismissesKeyboard(.interactively)
         .animation(.easeInOut(duration: 0.2), value: mode)
         .onAppear {
-            // Auto-start Quick Connect the first time the screen appears.
+            // The first time the screen appears: look for servers (no server is contacted but by the search).
             if !started {
                 started = true
                 quickConnect.onConnected = { onConnected($0) }
-                if mode == .quickConnect && hasServerURL { startQuickConnect() }
                 searchNetwork()
             }
         }
+        // A code is for one address: editing or picking another drops it.
+        .onChange(of: trimmedServerURL) { _, address in
+            if SignInRules.shouldStopQuickConnect(address: address, startedFor: quickConnectAddress) {
+                stopQuickConnect()
+            }
+        }
+        .onDisappear { stopQuickConnect() }
         .onChange(of: quickConnect.state) { _, newState in
             // On any Quick Connect failure, reveal the manual form and
             // surface the message so the user can sign in without extra taps.
@@ -180,16 +202,20 @@ public struct ServerConfigView: View {
                 case .failed(let message):
                     errorText(message)
                 case .idle:
-                    Text(hasServerURL ? "Press return to get a code." : "Choose your server above, or type its address.")
+                    Text(SignInRules.idleHint(hasAddress: hasServerURL))
                         .font(TetsubiType.body)
                         .foregroundStyle(TetsubiColors.textTertiary)
                         .multilineTextAlignment(.center)
+                    PrimaryButton("Use Quick Connect", enabled: hasServerURL, fullWidth: true) {
+                        startQuickConnect()
+                    }
+                    .accessibilityIdentifier("ServerConfigView.useQuickConnect")
                 }
             }
 
             // Let the user bypass Quick Connect and sign in with credentials.
             ActionChip("Sign in with username & password", color: TetsubiColors.blue) {
-                quickConnect.cancel()
+                stopQuickConnect()
                 mode = .manual
             }
             .padding(.top, Spacing.xs)
@@ -317,9 +343,9 @@ public struct ServerConfigView: View {
 
     private func pick(_ server: DiscoveredServer) {
         guard server.address != trimmedServerURL else { return }
+        // Only fills in the address; changing it drops any code (`onChange`).
         serverURL = server.address
         errorMessage = nil
-        if mode == .quickConnect { startQuickConnect() }
     }
 
     private var trimmedServerURL: String {
@@ -369,7 +395,7 @@ public struct ServerConfigView: View {
     /// port 8096…), shows it in the field, then asks it for a code.
     private func startQuickConnect() {
         findTask?.cancel()
-        quickConnect.cancel()
+        quickConnect.reset()
         guard hasServerURL else { isFindingServer = false; return }
         let typed = trimmedServerURL
         isFindingServer = true
@@ -380,6 +406,7 @@ public struct ServerConfigView: View {
             isFindingServer = false
             switch result {
             case .success(let url):
+                quickConnectAddress = url.absoluteString
                 serverURL = url.absoluteString
                 quickConnect.start(serverURL: url)
             case .failure(let error):
@@ -387,6 +414,14 @@ public struct ServerConfigView: View {
                 errorMessage = error.errorDescription
             }
         }
+    }
+
+    /// Drops the code and any lookup under way: back to the "Use Quick Connect" button.
+    private func stopQuickConnect() {
+        findTask?.cancel()
+        isFindingServer = false
+        quickConnectAddress = nil
+        quickConnect.reset()
     }
 
     // MARK: - Manual connect

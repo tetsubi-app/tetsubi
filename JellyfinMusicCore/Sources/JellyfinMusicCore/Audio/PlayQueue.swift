@@ -508,14 +508,14 @@ public struct PlayQueue: Equatable, Sendable {
         return max(0, current.track.durationSeconds - position) + rest
     }
 
-    /// Maniac Mode: the queue still plays on and adding is allowed
-    /// (replace, Play Next, Add to Queue); move, remove, clear, skip,
-    /// shuffle and repeat are not. Without it everything is allowed.
+    /// Maniac Mode: the queue still plays on and replacing or adding at
+    /// the end is allowed (replace, Add to Queue); Play Next, move, remove,
+    /// clear, skip, shuffle and repeat are not. Without it everything is allowed.
     public static func canEdit(_ edit: QueueEdit, maniacMode: Bool) -> Bool {
         guard maniacMode else { return true }
         switch edit {
-        case .replace, .playNext, .addToQueue: return true
-        case .move, .remove, .clearUpcoming, .skipTo, .shuffle, .repeatMode: return false
+        case .replace, .addToQueue: return true
+        case .playNext, .move, .remove, .clearUpcoming, .skipTo, .shuffle, .repeatMode: return false
         }
     }
 

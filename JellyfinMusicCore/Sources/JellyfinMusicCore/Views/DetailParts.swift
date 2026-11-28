@@ -203,28 +203,29 @@ struct PillButton: View {
     }
 }
 
-/// A round icon button: surface fill, or a blue tint with a blue icon when `on`.
+/// A round icon button: surface fill, or a tint of `accent` (blue by default) with an `accent` icon when `on`.
 /// 44 for Now Playing's toggles, 40 beside the Play button.
 struct RoundIconButton<Icon: View>: View {
     let label: String
     var size: CGFloat = 44
     var on = false
     var enabled = true
+    var accent: Color = TetsubiColors.blue
     let action: () -> Void
     let icon: (Color) -> Icon
 
-    init(_ label: String, size: CGFloat = 44, on: Bool = false, enabled: Bool = true,
+    init(_ label: String, size: CGFloat = 44, on: Bool = false, enabled: Bool = true, accent: Color = TetsubiColors.blue,
          action: @escaping () -> Void, @ViewBuilder icon: @escaping (Color) -> Icon) {
-        self.label = label; self.size = size; self.on = on; self.enabled = enabled
+        self.label = label; self.size = size; self.on = on; self.enabled = enabled; self.accent = accent
         self.action = action; self.icon = icon
     }
 
     var body: some View {
-        let tint = on ? TetsubiColors.blue : TetsubiColors.textPrimary
+        let tint = on ? accent : TetsubiColors.textPrimary
         Button(action: action) {
             icon(enabled ? tint : tint.opacity(0.4))
                 .frame(width: size, height: size)
-                .background(on ? TetsubiColors.blueTint : TetsubiColors.surface, in: Circle())
+                .background(on ? accent.opacity(0.2) : TetsubiColors.surface, in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -236,9 +237,9 @@ struct RoundIconButton<Icon: View>: View {
 
 extension RoundIconButton where Icon == Image {
     /// A round button with an SF Symbol.
-    init(_ label: String, systemImage: String, size: CGFloat = 44, on: Bool = false, enabled: Bool = true,
+    init(_ label: String, systemImage: String, size: CGFloat = 44, on: Bool = false, enabled: Bool = true, accent: Color = TetsubiColors.blue,
          action: @escaping () -> Void) {
-        self.init(label, size: size, on: on, enabled: enabled, action: action) { _ in Image(systemName: systemImage) }
+        self.init(label, size: size, on: on, enabled: enabled, accent: accent, action: action) { _ in Image(systemName: systemImage) }
     }
 }
 

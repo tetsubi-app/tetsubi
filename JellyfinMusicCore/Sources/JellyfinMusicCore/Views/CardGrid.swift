@@ -11,10 +11,18 @@ public enum CardGridLayout {
         max(2, Int(((contentWidth + gutter) / (density.minCard + gutter)).rounded(.down)))
     }
 
-    /// The width the columns share: the pane less the start margin and the end
-    /// margin, which is `endInset` (the A to Z strip) where that is wider.
+    /// Clear space kept between the grid and the A to Z strip.
+    public static let stripGap: CGFloat = 8
+
+    /// The grid's end margin: the page margin, or `endInset` (the A to Z strip)
+    /// plus `stripGap` where that is wider. No strip (inset 0) is just the margin.
+    public static func endMargin(margin: CGFloat, endInset: CGFloat = 0) -> CGFloat {
+        endInset > 0 ? max(margin, endInset + stripGap) : margin
+    }
+
+    /// The width the columns share: the pane less the start margin and `endMargin`.
     public static func contentWidth(paneWidth: CGFloat, margin: CGFloat, endInset: CGFloat = 0) -> CGFloat {
-        paneWidth - margin - max(margin, endInset)
+        paneWidth - margin - endMargin(margin: margin, endInset: endInset)
     }
 
     /// Width of one card: the columns and their gutters fill the content width exactly.
@@ -66,7 +74,7 @@ public struct CardMetrics: Equatable, Sendable {
         contentWidth = max(1, CardGridLayout.contentWidth(paneWidth: pane, margin: margin, endInset: endInset))
         columns = CardGridLayout.columns(contentWidth: contentWidth, density: density, gutter: gutter)
         cardWidth = max(1, CardGridLayout.cardWidth(contentWidth: contentWidth, columns: columns, gutter: gutter))
-        listColumns = CardGridLayout.listColumns(paneWidth: pane - endInset)
+        listColumns = CardGridLayout.listColumns(paneWidth: pane - (endInset > 0 ? endInset + CardGridLayout.stripGap : 0))
     }
 
     /// Row gap: gutter + 8.
@@ -117,7 +125,7 @@ public struct CardGrid<Content: View>: View {
                 content(metrics)
             }
             .padding(.leading, metrics.margin)
-            .padding(.trailing, max(metrics.margin, endInset))
+            .padding(.trailing, CardGridLayout.endMargin(margin: metrics.margin, endInset: endInset))
             .padding(.vertical, metrics.margin)
             if let footer {
                 footer
@@ -150,7 +158,7 @@ public struct CardGridContent<Content: View>: View {
             content(metrics)
         }
         .padding(.leading, metrics.margin)
-        .padding(.trailing, max(metrics.margin, endInset))
+        .padding(.trailing, CardGridLayout.endMargin(margin: metrics.margin, endInset: endInset))
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
     }
 }
@@ -233,13 +241,13 @@ public struct ListGridContent<Content: View>: View {
     }
 
     public var body: some View {
-        let columns = CardGridLayout.listColumns(paneWidth: paneWidth - endInset)
+        let columns = CardGridLayout.listColumns(paneWidth: paneWidth - (endInset > 0 ? endInset + CardGridLayout.stripGap : 0))
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: 0, alignment: .top),
                                  count: columns), spacing: 0) {
             content()
         }
         // The rows already end a page margin from the edge; the strip needs only what is left over.
-        .padding(.trailing, max(0, endInset - windowClass.pageMargin))
+        .padding(.trailing, max(0, CardGridLayout.endMargin(margin: windowClass.pageMargin, endInset: endInset) - windowClass.pageMargin))
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
     }
 }

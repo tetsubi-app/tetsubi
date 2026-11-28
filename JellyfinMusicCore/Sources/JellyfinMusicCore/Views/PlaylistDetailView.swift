@@ -651,13 +651,7 @@ public struct PlaylistDetailView: View {
                         firstEntry: viewModel.entries.first)
         DetailTitleBlock(metrics: metrics, title: viewModel.playlist.name, meta: viewModel.summary) { EmptyView() }
         VStack(alignment: metrics.horizontal, spacing: Spacing.m) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: Spacing.s) { playButton; shuffleButton; downloadButton }
-                VStack(spacing: Spacing.s) {
-                    HStack(spacing: Spacing.s) { playButton; shuffleButton }
-                    downloadButton
-                }
-            }
+            FlowRow(centered: !metrics.twoPane) { playButton; shuffleButton; downloadButton }
             .frame(maxWidth: .infinity, alignment: metrics.frameAlignment)
             downloadProgressSection
         }
@@ -665,6 +659,7 @@ public struct PlaylistDetailView: View {
 
     private var playButton: some View {
         PrimaryButton(viewModel.isThisPlaylistPlaying ? "Now playing" : "Play",
+                      systemImage: viewModel.isThisPlaylistPlaying ? nil : "play.fill",
                       enabled: !viewModel.entries.isEmpty,
                       color: viewModel.isThisPlaylistPlaying ? TetsubiColors.pink : TetsubiColors.blue) {
             viewModel.play()

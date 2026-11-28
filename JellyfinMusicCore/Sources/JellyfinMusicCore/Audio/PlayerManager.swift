@@ -837,12 +837,18 @@ public final class PlayerManager {
 
     // MARK: - Play Next / Add to Queue
 
+    /// Maniac Mode refuses Play Next, silently, as it does the other queue
+    /// edits (`PlayQueue.canEdit`); Add to Queue and Play stay allowed.
+    /// The menus hide it, and the queue controller refuses it too.
+    public var refusesPlayNext: Bool { !PlayQueue.canEdit(.playNext, maniacMode: maniacMode) }
+
     /// Queues an album (every disc, or `discs`) right after the current
     /// album or playlist. Downloaded albums are queued from disk; offline
     /// only those are. `completion` says whether anything was queued (the
     /// caller shows the confirmation). Into an empty queue it plays.
     public func playNext(album: JellyfinAlbum, discs: [JellyfinAlbum]? = nil, format: AudioFormat = .alac,
                          completion: ((Bool) -> Void)? = nil) {
+        guard !refusesPlayNext else { return }
         queueAlbum(album, discs: discs ?? album.allDiscs, format: format, how: .playNext, completion: completion)
     }
 
@@ -857,7 +863,8 @@ public final class PlayerManager {
     @discardableResult
     public func playNext(playlist: JellyfinPlaylist, tracks: [PlaylistEntry], format: AudioFormat = .alac,
                          online: Bool? = nil) -> PlaylistPlayRefusal? {
-        queuePlaylist(playlist, tracks: tracks, format: format, online: online, how: .playNext)
+        guard !refusesPlayNext else { return nil }
+        return queuePlaylist(playlist, tracks: tracks, format: format, online: online, how: .playNext)
     }
 
     /// Queues a playlist's rows at the end of the queue.
@@ -871,7 +878,8 @@ public final class PlayerManager {
     /// Offline only tracks on this device. Returns whether any were queued.
     @discardableResult
     public func playNext(tracks: [JellyfinTrack], in album: JellyfinAlbum, format: AudioFormat = .alac) -> Bool {
-        queueTracks(tracks, in: album, format: format, how: .playNext)
+        guard !refusesPlayNext else { return false }
+        return queueTracks(tracks, in: album, format: format, how: .playNext)
     }
 
     /// Queues single tracks of `album` at the end of the queue.
@@ -964,7 +972,8 @@ public final class PlayerManager {
     @discardableResult
     public func playNext(downloadedAlbumIDs albumIDs: [String], sourceId: String,
                          albumTitle: String = "", artistName: String = "") -> Bool {
-        queueDownloaded(albumIDs, sourceId: sourceId, albumTitle: albumTitle, artistName: artistName, how: .playNext)
+        guard !refusesPlayNext else { return false }
+        return queueDownloaded(albumIDs, sourceId: sourceId, albumTitle: albumTitle, artistName: artistName, how: .playNext)
     }
 
     /// Queues downloaded albums from disk at the end of the queue.
@@ -982,6 +991,112 @@ public final class PlayerManager {
         guard !items.isEmpty else { return false }
         addOrder.finish(addOrder.reserve()) { [self] in place(items, group: group, how: how) }
         return true
+    }
+
+    // MARK: - Artist
+
+    /// Plays an artist's `albums` (as their page shows them): oldest release
+    /// first, each in disc and track order, up to `ArtistTracks.cap` tracks,
+    /// replacing the queue. `shuffled` turns shuffle on first (the Shuffle
+    /// button; Maniac Mode never shuffles and plays in order); otherwise
+    /// shuffle stays as it is, as for an album. Downloaded albums play from
+    /// their files; offline, only those do. `completion` says how it ended.
+    public func play(artist: JellyfinArtist, albums: [JellyfinAlbum], shuffled: Bool = false,
+                     completion: ((ArtistTracks.Outcome) -> Void)? = nil) {
+        isLoading = true
+        lastError = nil
+        let turn = addOrder.replace()
+        artistItems(albums) { [weak self] result in
+            guard let self else { return }
+            let finish: (ArtistTracks.Outcome) -> Void = { outcome in
+                // Not when another Play came first.
+                if self.addOrder.finish(turn, nil) {
+                    self.isLoading = false
+                    completion?(outcome)
+                }
+            }
+            guard let (items, capped) = result else { return finish(.notLoaded) }
+            guard !items.isEmpty else { return finish(ArtistTracks.emptyOutcome(online: NetworkMonitor.shared.isConnected)) }
+            self.addOrder.finish(turn) {
+                if shuffled, !self.maniacMode { self.setShuffle(true) }
+                self.place(items, group: ArtistTracks.group(id: artist.id, name: artist.name), how: .replace(startIndex: nil))
+                completion?(.done(capped: capped))
+            }
+        }
+    }
+
+    /// Queues an artist's tracks (as `play(artist:)`) after the current album or playlist.
+    public func playNext(artist: JellyfinArtist, albums: [JellyfinAlbum],
+                         completion: ((ArtistTracks.Outcome) -> Void)? = nil) {
+        guard !refusesPlayNext else { return }
+        queueArtist(artist, albums: albums, how: .playNext, completion: completion)
+    }
+
+    /// Queues an artist's tracks at the end of the queue.
+    public func addToQueue(artist: JellyfinArtist, albums: [JellyfinAlbum],
+                           completion: ((ArtistTracks.Outcome) -> Void)? = nil) {
+        queueArtist(artist, albums: albums, how: .addToQueue, completion: completion)
+    }
+
+    private func queueArtist(_ artist: JellyfinArtist, albums: [JellyfinAlbum], how: Placement,
+                             completion: ((ArtistTracks.Outcome) -> Void)?) {
+        let turn = addOrder.reserve()
+        artistItems(albums) { [weak self] result in
+            guard let self else { return }
+            guard let (items, capped) = result else {
+                if self.addOrder.finish(turn, nil) { completion?(.notLoaded) }
+                return
+            }
+            guard !items.isEmpty else {
+                if self.addOrder.finish(turn, nil) {
+                    completion?(ArtistTracks.emptyOutcome(online: NetworkMonitor.shared.isConnected))
+                }
+                return
+            }
+            self.addOrder.finish(turn) {
+                self.place(items, group: ArtistTracks.group(id: artist.id, name: artist.name), how: how)
+                completion?(.done(capped: capped))
+            }
+        }
+    }
+
+    /// An artist's albums as queue items, in `ArtistTracks.albumOrder`: from the
+    /// files for a downloaded album (offline, only those), else streamed; at most
+    /// `ArtistTracks.cap` of them (the flag says some were left out). Albums are
+    /// fetched one at a time and no more once the cap is passed. Nil when a
+    /// fetch failed.
+    private func artistItems(_ albums: [JellyfinAlbum],
+                             completion: @escaping (([QueueItem], capped: Bool)?) -> Void) {
+        let online = NetworkMonitor.shared.isConnected
+        func next(_ rest: ArraySlice<JellyfinAlbum>, _ items: [QueueItem]) {
+            guard let album = rest.first, ArtistTracks.needsMore(trackCount: items.count) else {
+                let (kept, capped) = ArtistTracks.limit(items)
+                // Each entry's place is its position in this queue (Maniac Mode's order).
+                completion((kept.enumerated().map { i, item in
+                    var item = item
+                    item.sourcePosition = i
+                    return item
+                }, capped))
+                return
+            }
+            let more = rest.dropFirst()
+            let discs = album.allDiscs
+            if Self.allDownloaded(discs) {
+                next(more, items + localItems(albumIDs: discs.map(\.id), albumTitle: album.displayName,
+                                              artistName: album.artistName))
+            } else if !online {
+                let have = discs.filter { DownloadPaths.exists(albumID: $0.id) && DownloadPaths.fileCount(albumID: $0.id) > 0 }
+                next(more, have.isEmpty ? items : items + localItems(albumIDs: have.map(\.id), albumTitle: album.displayName,
+                                                                     artistName: album.artistName))
+            } else {
+                fetchTracks(discs: discs) { [weak self] tracks in
+                    guard let self, let tracks else { return completion(nil) }
+                    let sources = tracks.map { QueueSource(track: $0, album: album) }
+                    next(more, items + self.items(sources: sources, order: Array(sources.indices)))
+                }
+            }
+        }
+        next(ArraySlice(ArtistTracks.albumOrder(albums)), [])
     }
 
     // MARK: - Image requests
@@ -1131,7 +1246,7 @@ public final class PlayerManager {
             transition = controller.replace(group: group, tracks: tracks, startIndex: startIndex,
                                             play: true, register: register)
         case .playNext:
-            guard !items.isEmpty else { return false }
+            guard !items.isEmpty, !refusesPlayNext else { return false }
             transition = controller.playNext(group: group, tracks: tracks, register: register)
         case .addToQueue:
             guard !items.isEmpty else { return false }

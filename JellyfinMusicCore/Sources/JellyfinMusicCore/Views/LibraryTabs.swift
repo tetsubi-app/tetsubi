@@ -290,8 +290,8 @@ struct ArtistsTabView: View {
 /// One artist's albums, newest first, each with its year; offline, their
 /// downloaded albums only. A detail page (`DetailPage`): back control, then the
 /// round picture and name with "About" (bio, genres, attribution) in the info
-/// pane, the album grid on the right (stacked on compact). There is no Play
-/// all / Shuffle: nothing plays "an artist".
+/// pane, the album grid on the right (stacked on compact). Play all and
+/// Shuffle (hidden in Maniac Mode) queue the albums shown, up to 500 tracks.
 struct ArtistAlbumsView: View {
     let api: JellyfinAPI?
     let artist: JellyfinArtist
@@ -321,6 +321,15 @@ struct ArtistAlbumsView: View {
                              cornerRadius: artSize / 2, placeholderColor: TetsubiColors.surface)
                 DetailTitleBlock(metrics: metrics, title: artist.name,
                                  meta: loaded || isOffline ? Self.albumCount(albums.count) : nil) { EmptyView() }
+                FlowRow(centered: !metrics.twoPane) {
+                    PrimaryButton("Play all", systemImage: "play.fill", enabled: canPlay) { play(albums, shuffled: false) }
+                        .accessibilityIdentifier("ArtistAlbumsView.playAll")
+                    if player?.maniacMode != true {
+                        PillButton(title: "Shuffle", systemImage: "shuffle", enabled: canPlay) { play(albums, shuffled: true) }
+                            .accessibilityIdentifier("ArtistAlbumsView.shuffle")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: metrics.frameAlignment)
             } list: { _ in
                 if !loaded, !isOffline {
                     LoadingSpinner()
@@ -353,6 +362,25 @@ struct ArtistAlbumsView: View {
             }
         }
         .task(id: NetworkMonitor.shared.isConnected) { await loadAbout() }
+    }
+
+    private var player: PlayerManager? { AppSession.shared.player }
+
+    /// Play all and Shuffle need the albums to be listed (offline they already are the downloaded ones).
+    private var canPlay: Bool { player != nil && !albums.isEmpty }
+
+    /// Plays the albums shown; with more than the current album queued, asks Replace queue /
+    /// Play Next / Add to Queue first. Shuffle turns shuffle on; Play all leaves it as it is.
+    private func play(_ albums: [JellyfinAlbum], shuffled: Bool) {
+        guard let player else { return }
+        QueuePrompt.shared.play(artist.name, replace: { [artist] in
+            player.play(artist: artist, albums: albums, shuffled: shuffled) { outcome in
+                if let notice = outcome.notice { PlaylistEvents.shared.show(notice, isError: outcome.isFailure) }
+                if !outcome.isFailure { player.isNowPlayingPresented = true }
+            }
+        }, place: { [artist] how in
+            QueueActions.queue(artist: artist, albums: albums, how)
+        })
     }
 
     /// MusicBrainz and Wikipedia, using the server's MusicBrainz ID when it has one.

@@ -42,6 +42,31 @@ public enum SettingsCategory: String, CaseIterable, Identifiable, Sendable {
     public static let detailMaxWidth: CGFloat = 720
 }
 
+/// Settings wording that depends on the platform. Mobile data exists on iPhone and iPad only
+/// (not on the Mac), as on Android and not on Linux in Kotlin's `SettingsText`.
+public enum SettingsText {
+    /// "Download over mobile data", "Streaming over mobile data" and their footer sentences.
+    public static func showsMobileData(isMac: Bool) -> Bool { !isMac }
+
+    /// Where this build runs: false on the Mac.
+    public static var showsMobileData: Bool {
+        #if os(macOS)
+        showsMobileData(isMac: true)
+        #else
+        showsMobileData(isMac: false)
+        #endif
+    }
+
+    public static let downloadsFooter = "When off, downloads wait for Wi\u{2011}Fi."
+    static let playbackMobileSentence = "On mobile data, tracks stream at the chosen quality (from the next track); Original (as served) streams the files as they are. "
+    static let playbackRest = "Normalise volume evens out loud and quiet tracks using Jellyfin's loudness data; it can only turn tracks down, and downloaded tracks play at full volume. Gapless playback is on unless the equaliser or visualiser is in use."
+
+    /// The Playback footer: the mobile-data sentence only where there is mobile data.
+    public static func playbackFooter(showsMobileData: Bool) -> String {
+        showsMobileData ? playbackMobileSentence + playbackRest : playbackRest
+    }
+}
+
 public struct SettingsView: View {
 
     /// Called when the user taps "Sign Out".
@@ -221,17 +246,19 @@ public struct SettingsView: View {
     @ViewBuilder
     private var downloadsGroup: some View {
         if let mgr = downloadManager {
-            SettingsGroup(title: "Downloads", footer: "When off, downloads wait for Wi\u{2011}Fi.") {
+            SettingsGroup(title: "Downloads", footer: SettingsText.showsMobileData ? SettingsText.downloadsFooter : nil) {
                 SettingsMenuRow("Default format",
                                 selection: Binding<AudioFormat?>(get: { mgr.defaultFormat }, set: { mgr.defaultFormat = $0 }),
                                 options: [(AudioFormat?.none, "Original (as served)")]
                                     + AudioFormat.allCases.filter(\.playsOnApple).map { (AudioFormat?.some($0), $0.displayName) })
-                SettingsToggleRow("Download over mobile data", isOn: $downloadOverCellular)
-                    .onChange(of: downloadOverCellular) { _, on in
-                        PlaybackSettings.downloadOverCellular = on
-                        // Running and waiting songs follow the new choice now.
-                        mgr.mobileDataSettingChanged()
-                    }
+                if SettingsText.showsMobileData {
+                    SettingsToggleRow("Download over mobile data", isOn: $downloadOverCellular)
+                        .onChange(of: downloadOverCellular) { _, on in
+                            PlaybackSettings.downloadOverCellular = on
+                            // Running and waiting songs follow the new choice now.
+                            mgr.mobileDataSettingChanged()
+                        }
+                }
                 SettingsRow("Disk usage", divider: false) {
                     SettingsValue(DownloadPaths.formatBytes(mgr.totalDiskUsage)).monospacedDigit()
                 }
@@ -242,11 +269,13 @@ public struct SettingsView: View {
     private func playbackGroup(showsEqualizerRow: Bool) -> some View {
         SettingsGroup(
             title: "Playback",
-            footer: "On mobile data, tracks stream at the chosen quality (from the next track); Original (as served) streams the files as they are. Normalise volume evens out loud and quiet tracks using Jellyfin's loudness data; it can only turn tracks down, and downloaded tracks play at full volume. Gapless playback is on unless the equaliser or visualiser is in use."
+            footer: SettingsText.playbackFooter(showsMobileData: SettingsText.showsMobileData)
         ) {
-            SettingsMenuRow("Streaming over mobile data", selection: $cellularQuality,
-                            options: StreamingQuality.allCases.map { ($0, $0.displayName) })
-                .onChange(of: cellularQuality) { _, q in PlaybackSettings.cellularQuality = q }
+            if SettingsText.showsMobileData {
+                SettingsMenuRow("Streaming over mobile data", selection: $cellularQuality,
+                                options: StreamingQuality.allCases.map { ($0, $0.displayName) })
+                    .onChange(of: cellularQuality) { _, q in PlaybackSettings.cellularQuality = q }
+            }
             if showsEqualizerRow {
                 NavigationLink {
                     EqualizerView().appTheme()

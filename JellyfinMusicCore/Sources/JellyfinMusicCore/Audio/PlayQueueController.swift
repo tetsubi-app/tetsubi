@@ -106,11 +106,12 @@ public final class PlayQueueController {
     }
 
     /// Queues `tracks` after the current album or playlist. Into an empty
-    /// queue it starts playing them.
+    /// queue it starts playing them. Refused in Maniac Mode.
     @discardableResult
     public func playNext(group: QueueGroup, tracks: [QueueTrack],
                          register: ([QueueEntry]) -> Void = { _ in }) -> QueueTransition {
-        add(tracks, { queue.playNext(group: group, tracks: tracks, using: &rng) }, register: register)
+        guard PlayQueue.canEdit(.playNext, maniacMode: maniacMode) else { return .none }
+        return add(tracks, { queue.playNext(group: group, tracks: tracks, using: &rng) }, register: register)
     }
 
     /// Queues `tracks` at the end. Into an empty queue it starts playing them.

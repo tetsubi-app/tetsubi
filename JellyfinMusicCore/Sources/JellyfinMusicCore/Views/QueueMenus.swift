@@ -7,8 +7,8 @@ import Observation
 
 /// Play Next and Add to Queue for albums, playlists and songs, with the
 /// short notice ("Playing next" / "Added to queue", or why nothing was
-/// added). Used by every ⋯ menu and long-press / right-click menu. Allowed
-/// in Maniac Mode. The Kotlin side's `QueueActions` uses the same words.
+/// added). Used by every ⋯ menu and long-press / right-click menu. Add to
+/// Queue is allowed in Maniac Mode; Play Next is hidden and refused. The Kotlin side's `QueueActions` uses the same words.
 @MainActor
 public enum QueueActions {
 
@@ -25,6 +25,16 @@ public enum QueueActions {
 
     private static var player: PlayerManager? { AppSession.shared.player }
 
+    /// Maniac Mode refuses Play Next (silently; the menus don't offer it). Add to Queue is always allowed.
+    private static func refuses(_ how: Placement, _ player: PlayerManager) -> Bool {
+        how == .playNext && player.refusesPlayNext
+    }
+
+    /// The entries a queue menu offers: no Play Next in Maniac Mode, both otherwise.
+    nonisolated static func placements(maniacMode: Bool) -> [Placement] {
+        PlayQueue.canEdit(.playNext, maniacMode: maniacMode) ? [.playNext, .addToQueue] : [.addToQueue]
+    }
+
     nonisolated static func confirmation(_ how: Placement) -> String {
         switch how {
         case .playNext: playingNext
@@ -38,7 +48,7 @@ public enum QueueActions {
 
     /// An album (every disc). Downloaded albums are queued from disk.
     public static func queue(album: JellyfinAlbum, _ how: Placement) {
-        guard let player else { return }
+        guard let player, !refuses(how, player) else { return }
         let done: (Bool) -> Void = { notify($0, how, failure: albumNotQueued) }
         switch how {
         case .playNext: player.playNext(album: album, discs: album.allDiscs, completion: done)
@@ -46,10 +56,27 @@ public enum QueueActions {
         }
     }
 
+    /// An artist's albums (Play Next / Add to Queue on the artist page): one group, oldest first,
+    /// at most `ArtistTracks.cap` tracks. The notice says how it went.
+    public static func queue(artist: JellyfinArtist, albums: [JellyfinAlbum], _ how: Placement) {
+        guard let player, !refuses(how, player) else { return }
+        let done: (ArtistTracks.Outcome) -> Void = { outcome in
+            if let notice = outcome.notice {
+                PlaylistEvents.shared.show(notice, isError: outcome.isFailure)
+            } else {
+                PlaylistEvents.shared.show(confirmation(how), isError: false)
+            }
+        }
+        switch how {
+        case .playNext: player.playNext(artist: artist, albums: albums, completion: done)
+        case .addToQueue: player.addToQueue(artist: artist, albums: albums, completion: done)
+        }
+    }
+
     /// A downloaded album (Downloads, offline search), from disk.
     public static func queue(downloadedAlbumIDs ids: [String], sourceId: String, title: String, artist: String,
                              _ how: Placement) {
-        guard let player else { return }
+        guard let player, !refuses(how, player) else { return }
         let added = switch how {
         case .playNext: player.playNext(downloadedAlbumIDs: ids, sourceId: sourceId, albumTitle: title,
                                         artistName: artist)
@@ -61,7 +88,7 @@ public enum QueueActions {
 
     /// Songs from `album` (a track row's menu). Offline only downloaded ones.
     public static func queue(tracks: [JellyfinTrack], in album: JellyfinAlbum, _ how: Placement) {
-        guard let player else { return }
+        guard let player, !refuses(how, player) else { return }
         let added = switch how {
         case .playNext: player.playNext(tracks: tracks, in: album)
         case .addToQueue: player.addToQueue(tracks: tracks, in: album)
@@ -73,7 +100,7 @@ public enum QueueActions {
     /// Not loaded yet: fetched from the server, or offline from its
     /// download. Offline only the songs on this device are queued.
     public static func queue(playlist: JellyfinPlaylist, entries: [PlaylistEntry]? = nil, _ how: Placement) {
-        guard let player else { return }
+        guard let player, !refuses(how, player) else { return }
         if let entries {
             queueLoaded(playlist, entries, how, player: player)
             return
@@ -140,10 +167,14 @@ struct QueueMenuItems: View {
     let action: (QueueActions.Placement) -> Void
 
     var body: some View {
-        Button {
-            action(.playNext)
-        } label: {
-            Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+        // Read here, so the menu follows Maniac Mode live. Play Next is hidden, not disabled.
+        let maniac = AppSession.shared.player?.maniacMode ?? PlaybackSettings.maniacMode
+        if QueueActions.placements(maniacMode: maniac).contains(.playNext) {
+            Button {
+                action(.playNext)
+            } label: {
+                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
         }
         Button {
             action(.addToQueue)
@@ -234,7 +265,10 @@ private struct QueuePromptHost: ViewModifier {
             presenting: request
         ) { request in
             Button(QueuePrompt.replaceButton) { request.replace() }
-            Button("Play Next") { request.place(.playNext) }
+            if QueueActions.placements(maniacMode: AppSession.shared.player?.maniacMode ?? PlaybackSettings.maniacMode)
+                .contains(.playNext) {
+                Button("Play Next") { request.place(.playNext) }
+            }
             Button("Add to Queue") { request.place(.addToQueue) }
             Button("Cancel", role: .cancel) {}
         } message: { _ in

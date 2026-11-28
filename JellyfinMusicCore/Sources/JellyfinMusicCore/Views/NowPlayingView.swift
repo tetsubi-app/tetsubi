@@ -278,13 +278,13 @@ public struct NowPlayingView: View {
     }
 
     /// The artist under the title; when it can (`ArtistLink`), blue, and a tap
-    /// closes Now Playing and shows the artist's albums.
+    /// closes Now Playing and shows the artist's albums. In the art's accent.
     @ViewBuilder
     private func artistLine(_ track: PlaybackTrack) -> some View {
         let link = onShowArtist != nil ? artistLink(for: track) : nil
         let text = Text(track.artist)
             .font(TetsubiType.nowPlayingArtist)
-            .foregroundStyle(link != nil ? TetsubiColors.blue : TetsubiColors.textSecondary)
+            .foregroundStyle(link != nil ? accent : TetsubiColors.textSecondary)
             .lineLimit(1)
         if let onShowArtist, let artist = link {
             Button { onShowArtist(artist) } label: { text }
@@ -339,7 +339,7 @@ public struct NowPlayingView: View {
             } label: {
                 Text(shown)
             }
-            .buttonStyle(QualityToggleStyle(tint: seekTint ?? TetsubiColors.blue))
+            .buttonStyle(QualityToggleStyle(tint: accent))
             .accessibilityLabel(Text(shown))
             .accessibilityHint(showQualityDetail ? "Shows the sample rate and bit depth"
                                                  : "Shows the format and bitrate")
@@ -357,6 +357,9 @@ public struct NowPlayingView: View {
 
     /// Progress line colour: picked from the album art (nil = the usual accent).
     private var seekTint: Color? { artAccent }
+
+    /// The accent for progress, active toggle icons and the artist link: the art's colour, or brand blue.
+    private var accent: Color { NowPlayingAccent.resolve(artAccent) }
 
     /// Works out `artAccent` from the current album's art (already cached
     /// by the artwork view, so normally no extra download).
@@ -382,7 +385,7 @@ public struct NowPlayingView: View {
                 // No scrubbing: a plain progress bar.
                 ProgressView(value: min(manager.position / max(manager.duration, 1), 1.0))
                     .progressViewStyle(.linear)
-                    .tint(seekTint ?? TetsubiColors.blue)
+                    .tint(accent)
                     .padding(.vertical, 10)
             } else {
                 Slider(
@@ -397,7 +400,7 @@ public struct NowPlayingView: View {
                     ),
                     in: 0...1
                 )
-                .tint(seekTint ?? TetsubiColors.blue)
+                .tint(accent)
             }
             HStack {
                 Text(Self.format(manager.position))
@@ -468,27 +471,27 @@ public struct NowPlayingView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Round 44 pt buttons: a blue tint and a blue icon when on. Shuffle and
+    /// Round 44 pt buttons: a tint and an icon in the art's accent when on. Shuffle and
     /// Repeat are hidden in Maniac Mode; the Visualiser and the output picker stay.
     private var togglesSection: some View {
         HStack(spacing: Spacing.l) {
             if !manager.maniacMode {
                 RoundIconButton("Shuffle: \(manager.shuffle ? "On" : "Off")", systemImage: "shuffle",
-                                on: manager.shuffle) { manager.toggleShuffle() }
+                                on: manager.shuffle, accent: accent) { manager.toggleShuffle() }
                     .accessibilityIdentifier("NowPlayingView.shuffle")
 
                 RoundIconButton("Repeat: \(Self.repeatLabel(manager.repeatMode))", systemImage: Self.repeatIcon(manager.repeatMode),
-                                on: manager.repeatMode != .off) { manager.cycleRepeatMode() }
+                                on: manager.repeatMode != .off, accent: accent) { manager.cycleRepeatMode() }
                     .accessibilityIdentifier("NowPlayingView.repeat")
             }
 
             RoundIconButton(showVisualiser ? "Visualiser, on" : "Visualiser, off", systemImage: "waveform",
-                            on: showVisualiser) { showVisualiser.toggle() }
+                            on: showVisualiser, accent: accent) { showVisualiser.toggle() }
                 .accessibilityIdentifier("NowPlayingView.visualiser")
 
             // The system output picker (AirPlay, speakers, headphones). Its icon turns blue
             // while audio goes somewhere other than this device.
-            AirPlayButton(player: manager.outputPlayer, tint: TetsubiColors.textPrimary, activeTint: TetsubiColors.blue)
+            AirPlayButton(player: manager.outputPlayer, tint: TetsubiColors.textPrimary, activeTint: accent)
                 .frame(width: 44, height: 44)
                 .background(TetsubiColors.surface, in: Circle())
                 .clipShape(Circle())
@@ -598,3 +601,11 @@ extension View {
     }
 }
 #endif
+
+
+/// Now Playing's accent (progress, active toggle icons, artist link; also the mini player's line):
+/// the art's colour (`ArtPalette` already lifts it to a legible brightness), or brand blue until it
+/// is worked out or when the art has none.
+enum NowPlayingAccent {
+    static func resolve(_ art: Color?) -> Color { art ?? TetsubiColors.blue }
+}

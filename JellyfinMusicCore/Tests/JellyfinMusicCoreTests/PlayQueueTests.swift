@@ -526,7 +526,7 @@ final class PlayQueueTests: XCTestCase {
             XCTAssertTrue(PlayQueue.canEdit(edit, maniacMode: false))
         }
         let allowed = QueueEdit.allCases.filter { PlayQueue.canEdit($0, maniacMode: true) }
-        XCTAssertEqual(allowed, [.replace, .playNext, .addToQueue])
+        XCTAssertEqual(allowed, [.replace, .addToQueue])
     }
 
     // MARK: Track snapshot

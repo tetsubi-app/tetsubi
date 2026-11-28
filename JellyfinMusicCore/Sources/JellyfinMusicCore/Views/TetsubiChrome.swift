@@ -66,10 +66,13 @@ public struct PrimaryButton: View {
     var color: Color = TetsubiColors.blue
     /// Fills the width it is given (a form's Sign in).
     var fullWidth = false
+    /// An SF Symbol before the label (16, 8 gap, the label's colour): "play.fill" on every Play.
+    var systemImage: String?
     let action: () -> Void
 
-    public init(_ title: String, enabled: Bool = true, working: Bool = false,
+    public init(_ title: String, systemImage: String? = nil, enabled: Bool = true, working: Bool = false,
                 color: Color = TetsubiColors.blue, fullWidth: Bool = false, action: @escaping () -> Void) {
+        self.systemImage = systemImage
         self.title = title
         self.enabled = enabled
         self.working = working
@@ -80,10 +83,11 @@ public struct PrimaryButton: View {
 
     public var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(TetsubiType.rowTitle.weight(.semibold))
+            HStack(spacing: Spacing.s) {
+                if let systemImage { Image(systemName: systemImage).font(.system(size: 16.scaled)) }
+                Text(title).font(TetsubiType.rowTitle.weight(.semibold)).lineLimit(1)
+            }
                 .foregroundStyle(.white.opacity(working ? 0 : 1))
-                .lineLimit(1)
                 .padding(.horizontal, Spacing.xl)
                 .frame(maxWidth: fullWidth ? .infinity : nil)
                 .frame(height: 40.scaled)
@@ -93,6 +97,49 @@ public struct PrimaryButton: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled || working)
+    }
+}
+
+/// Items in a row that wraps: a button drops to the next line instead of being clipped
+/// (the detail info pane's actions). `spacing` apart both ways; `centered` centres each line.
+struct FlowRow: Layout {
+    var spacing: CGFloat = Spacing.s
+    var centered = false
+
+    private func lines(_ subviews: Subviews, width: CGFloat) -> [[(index: Int, size: CGSize)]] {
+        var result: [[(index: Int, size: CGSize)]] = [[]]
+        var x: CGFloat = 0
+        for (i, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width + 0.5 { result.append([]); x = 0 }
+            result[result.count - 1].append((i, size))
+            x += size.width + spacing
+        }
+        return result
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let rows = lines(subviews, width: width)
+        let heights = rows.map { $0.map(\.size.height).max() ?? 0 }
+        let widest = rows.map { $0.reduce(0) { $0 + $1.size.width } + spacing * CGFloat(max(0, $0.count - 1)) }.max() ?? 0
+        let total = heights.reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: centered && proposal.width != nil ? width : widest, height: total)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in lines(subviews, width: bounds.width) {
+            let rowWidth = row.reduce(0) { $0 + $1.size.width } + spacing * CGFloat(max(0, row.count - 1))
+            var x = bounds.minX + (centered ? (bounds.width - rowWidth) / 2 : 0)
+            let height = row.map(\.size.height).max() ?? 0
+            for item in row {
+                subviews[item.index].place(at: CGPoint(x: x, y: y + (height - item.size.height) / 2),
+                                           proposal: ProposedViewSize(item.size))
+                x += item.size.width + spacing
+            }
+            y += height + spacing
+        }
     }
 }
 

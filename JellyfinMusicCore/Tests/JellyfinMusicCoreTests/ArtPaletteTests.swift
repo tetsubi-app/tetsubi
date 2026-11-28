@@ -1,5 +1,6 @@
 import XCTest
 import CoreGraphics
+import SwiftUI
 @testable import JellyfinMusicCore
 
 final class ArtPaletteTests: XCTestCase {
@@ -45,5 +46,16 @@ final class ArtPaletteTests: XCTestCase {
         let accent = ArtPalette.accentColor(in: [main, darkRed])
         XCTAssertEqual(accent?.brightness ?? 0, ArtPalette.displayBrightness, accuracy: 0.001)
         XCTAssertGreaterThan(accent?.red ?? 0, accent?.green ?? 1)
+    }
+}
+
+final class NowPlayingAccentTests: XCTestCase {
+    func testFallsBackToBrandBlueWithoutArt() {
+        XCTAssertEqual(NowPlayingAccent.resolve(nil), TetsubiColors.blue)
+    }
+
+    func testUsesTheArtAccentWhenThereIsOne() {
+        let art = Color(.sRGB, red: 0.9, green: 0.8, blue: 0.1)
+        XCTAssertEqual(NowPlayingAccent.resolve(art), art)
     }
 }

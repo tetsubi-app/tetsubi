@@ -459,16 +459,24 @@ final class PlaylistQueueTests: XCTestCase {
         XCTAssertEqual(player.queue.count, 4, "nothing added")
     }
 
-    func testManiacModeStillAddsButDoesntSkip() {
+    func testManiacModeStillAddsAtTheEndButDoesntPlayNextOrSkip() {
         player.play(playlist: playlist, tracks: Array(entries.prefix(2)))
         player.setManiacMode(true)
+        // Play Next is refused, nothing changes; Add to Queue still works.
         XCTAssertNil(player.playNext(playlist: playlist, tracks: [entries[2]], online: true))
+        XCTAssertEqual(player.queue.count, 2)
+        XCTAssertNil(player.addToQueue(playlist: playlist, tracks: [entries[2]], online: true))
         XCTAssertEqual(player.queue.count, 3)
+        player.setManiacMode(false)
+        XCTAssertNil(player.playNext(playlist: playlist, tracks: [entries[3]], online: true))
+        XCTAssertEqual(player.queue.count, 4, "Play Next is back with Maniac Mode off")
+        player.setManiacMode(true)
+        XCTAssertEqual(player.queue.count, 4)
         let last = player.queueEntryIds[2]
         player.skipTo(entryId: last)
         player.removeFromQueue(entryIds: [last])
         player.clearUpcoming()
-        XCTAssertEqual(player.queue.count, 3)
+        XCTAssertEqual(player.queue.count, 4)
         XCTAssertEqual(player.currentIndex, 0)
     }
 

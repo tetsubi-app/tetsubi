@@ -531,13 +531,7 @@ public struct AlbumDetailView: View {
 
     private func actionsSection(_ metrics: DetailMetrics) -> some View {
         VStack(alignment: metrics.horizontal, spacing: Spacing.m) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: Spacing.s) { playButton; favouriteButton; downloadButton }
-                VStack(spacing: Spacing.s) {
-                    HStack(spacing: Spacing.s) { playButton; favouriteButton }
-                    downloadButton
-                }
-            }
+            FlowRow(centered: !metrics.twoPane) { playButton; favouriteButton; downloadButton }
             .frame(maxWidth: .infinity, alignment: metrics.frameAlignment)
 
             // A single-disc album's download under way (a set shows it per disc).
@@ -554,6 +548,7 @@ public struct AlbumDetailView: View {
 
     private var playButton: some View {
         PrimaryButton(viewModel.isThisAlbumPlaying ? "Now playing" : "Play",
+                      systemImage: viewModel.isThisAlbumPlaying ? nil : "play.fill",
                       enabled: viewModel.hasPlayer,
                       color: viewModel.isThisAlbumPlaying ? TetsubiColors.pink : TetsubiColors.blue) {
             viewModel.play()

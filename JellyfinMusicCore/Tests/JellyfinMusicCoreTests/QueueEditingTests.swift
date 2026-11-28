@@ -225,12 +225,20 @@ final class QueueEditingTests: XCTestCase {
     func testManiacModeIsReadOnly() {
         XCTAssertTrue(QueueEditor.isReadOnly(maniacMode: true))
         XCTAssertFalse(QueueEditor.isReadOnly(maniacMode: false))
-        // Adding is still allowed; editing is not.
-        XCTAssertTrue(PlayQueue.canEdit(.playNext, maniacMode: true))
+        // Adding at the end is still allowed; Play Next and editing are not.
+        XCTAssertFalse(PlayQueue.canEdit(.playNext, maniacMode: true))
+        XCTAssertTrue(PlayQueue.canEdit(.playNext, maniacMode: false))
         XCTAssertTrue(PlayQueue.canEdit(.addToQueue, maniacMode: true))
         for edit in [QueueEdit.move, .remove, .clearUpcoming, .skipTo] {
             XCTAssertFalse(PlayQueue.canEdit(edit, maniacMode: true), edit.rawValue)
         }
+    }
+
+    func testQueueMenusHidePlayNextInManiacMode() {
+        XCTAssertEqual(QueueActions.placements(maniacMode: false), [.playNext, .addToQueue])
+        XCTAssertEqual(QueueActions.placements(maniacMode: true), [.addToQueue])
+        // Turning it off again brings Play Next back.
+        XCTAssertEqual(QueueActions.placements(maniacMode: false), [.playNext, .addToQueue])
     }
 
     // MARK: Wording

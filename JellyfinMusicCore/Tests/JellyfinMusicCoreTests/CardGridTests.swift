@@ -58,8 +58,18 @@ final class CardGridTests: XCTestCase {
 
     func testContentWidthLeavesRoomForTheStrip() {
         XCTAssertEqual(CardGridLayout.contentWidth(paneWidth: 390, margin: 16), 358)
-        // The A to Z strip wider than the margin takes the margin's place at the end.
-        XCTAssertEqual(CardGridLayout.contentWidth(paneWidth: 390, margin: 16, endInset: 24), 350)
+        XCTAssertEqual(CardGridLayout.endMargin(margin: 16), 16)
+        // Strip 22 + 8 gap = 30 at the end where the margin is smaller, as Kotlin.
+        XCTAssertEqual(CardGridLayout.endMargin(margin: 16, endInset: 22), 30)
+        XCTAssertEqual(CardGridLayout.endMargin(margin: 24, endInset: 22), 30)
+        XCTAssertEqual(CardGridLayout.endMargin(margin: 32, endInset: 22), 32)
+        // Compact 390 -> content 344, still two columns.
+        XCTAssertEqual(CardGridLayout.contentWidth(paneWidth: 390, margin: 16, endInset: 22), 344)
+        XCTAssertEqual(columns(344, .m, 12), 2)
+        // Medium 706 -> 652, four columns. Expanded 1040 -> 976.
+        XCTAssertEqual(CardGridLayout.contentWidth(paneWidth: 706, margin: 24, endInset: 22), 652)
+        XCTAssertEqual(columns(652, .m, 16), 4)
+        XCTAssertEqual(CardGridLayout.contentWidth(paneWidth: 1040, margin: 32, endInset: 22), 976)
         XCTAssertEqual(CardGridLayout.contentWidth(paneWidth: 390, margin: 16, endInset: 8), 358)
     }
 

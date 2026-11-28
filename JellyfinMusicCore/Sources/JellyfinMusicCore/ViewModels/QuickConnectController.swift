@@ -41,6 +41,8 @@ public final class QuickConnectController {
 
     private var pollTimer: Timer?
     private var attempts = 0
+    /// Moves on every `cancel()`, so a code that arrives after it is ignored.
+    private var generation = 0
 
     // MARK: Init
 
@@ -62,8 +64,10 @@ public final class QuickConnectController {
         cancel()
         attempts = 0
         state = .starting
+        let started = generation
         authenticator.startQuickConnect(serverURL: serverURL) { [weak self] result in
             Task { @MainActor [weak self] in
+                guard self?.generation == started else { return }
                 switch result {
                 case .success(let start):
                     self?.beginPolling(serverURL: serverURL, code: start.code ?? "", secret: start.secret ?? "")
@@ -78,9 +82,18 @@ public final class QuickConnectController {
     /// change `state` — the caller sets it as needed (e.g. switching to the
     /// manual form leaves the view's own mode in control).
     public func cancel() {
+        generation += 1
         pollTimer?.invalidate()
         pollTimer = nil
         attempts = 0
+    }
+
+    /// Stops polling and forgets the code and any failure: back to idle (the address
+    /// changed, the form switched, the screen went away). Each `start` leaves a pending
+    /// approval request on the server, so none is left running unasked.
+    public func reset() {
+        cancel()
+        state = .idle
     }
 
     // MARK: - Polling loop

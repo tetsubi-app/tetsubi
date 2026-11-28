@@ -13,14 +13,17 @@ import SwiftUI
 public struct DockedMiniPlayer: View {
     let manager: PlayerManager
     @Environment(\.windowWidthClass) private var windowClass
+    /// The art's accent (nil until worked out): the progress line and seek bar; brand blue otherwise.
+    @State private var artAccent: Color?
 
     public init(manager: PlayerManager) { self.manager = manager }
 
     public var body: some View {
         if let track = manager.currentTrack {
+            let accent = NowPlayingAccent.resolve(artAccent)
             let wide = windowClass.isWide
             VStack(spacing: 0) {
-                progressLine
+                progressLine(accent)
                 HStack(spacing: Spacing.m) {
                     Button { manager.isNowPlayingPresented = true } label: {
                         HStack(spacing: Spacing.m) {
@@ -47,11 +50,11 @@ public struct DockedMiniPlayer: View {
 
                     controls
                     if wide && !manager.maniacMode {
-                        MiniSeekBar(manager: manager)
+                        MiniSeekBar(manager: manager, accent: accent)
                             .frame(minWidth: 120, maxWidth: 360)
                     }
                     if wide {
-                        AirPlayButton(player: manager.outputPlayer, activeTint: TetsubiColors.blue)
+                        AirPlayButton(player: manager.outputPlayer, activeTint: accent)
                             .frame(width: 32.scaled, height: 32.scaled)
                     }
                 }
@@ -61,6 +64,11 @@ public struct DockedMiniPlayer: View {
             .frame(height: windowClass.miniPlayerHeight.scaled)
             .background { Color.appBackground.opacity(0.88); TetsubiColors.surface }
             .overlay(alignment: .top) { Hairline() }
+            .task(id: track.artKey) {
+                let found = await NowPlayingView.artAccent(for: manager)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.3)) { artAccent = found }
+            }
         }
     }
 
@@ -68,12 +76,12 @@ public struct DockedMiniPlayer: View {
         [track.artist, track.album].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
     }
 
-    /// A 3 pt line over the top edge, blue to the current position.
-    private var progressLine: some View {
+    /// A 3 pt line over the top edge, in the accent to the current position.
+    private func progressLine(_ accent: Color) -> some View {
         let known = manager.duration > 0
         let fraction = known ? min(1, max(0, manager.position / manager.duration)) : 0
         return GeometryReader { geo in
-            Rectangle().fill(TetsubiColors.blue)
+            Rectangle().fill(accent)
                 .frame(width: geo.size.width * fraction)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -123,6 +131,7 @@ public struct DockedMiniPlayer: View {
 /// Elapsed time, a draggable thin bar, the track's length.
 private struct MiniSeekBar: View {
     let manager: PlayerManager
+    let accent: Color
     @State private var dragFraction: Double?
 
     var body: some View {
@@ -134,7 +143,7 @@ private struct MiniSeekBar: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(TetsubiColors.art).frame(height: 4)
-                    Capsule().fill(TetsubiColors.blue).frame(width: geo.size.width * shown, height: 4)
+                    Capsule().fill(accent).frame(width: geo.size.width * shown, height: 4)
                 }
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())

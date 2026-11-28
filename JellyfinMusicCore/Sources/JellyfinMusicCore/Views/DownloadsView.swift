@@ -293,14 +293,18 @@ public struct DownloadsView: View {
     /// The "Remove N" bar shown in edit mode.
     private func removeBar(_ mgr: DownloadManager) -> some View {
         let selectedCount = selection.count + playlistSelection.count
-        return PrimaryButton(selectedCount == 0 ? "Remove selected" : "Remove \(selectedCount)",
-                             enabled: selectedCount > 0, color: TetsubiColors.red) {
-            confirmingRemoval = true
+        // As the tab bar: navy at 85% with a hairline on top, the button at the page margin.
+        return VStack(spacing: 0) {
+            Hairline()
+            PrimaryButton(selectedCount == 0 ? "Remove selected" : "Remove \(selectedCount)",
+                          enabled: selectedCount > 0, color: TetsubiColors.red, fullWidth: true) {
+                confirmingRemoval = true
+            }
+            .padding(.horizontal, windowClass.pageMargin)
+            .padding(.vertical, Spacing.m)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, windowClass.pageMargin)
-        .padding(.vertical, Spacing.m)
-        .background(TetsubiColors.navy.opacity(0.92))
+        .background(TetsubiColors.navy.opacity(0.85))
         .accessibilityIdentifier("DownloadsView.removeSelected")
     }
 

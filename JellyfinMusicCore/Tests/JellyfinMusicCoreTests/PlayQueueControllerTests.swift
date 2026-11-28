@@ -355,14 +355,37 @@ final class PlayQueueControllerTests: XCTestCase {
         XCTAssertEqual(queue, before)
         XCTAssertEqual(engine.calls, [])
 
-        XCTAssertEqual(controller.playNext(group: F.album("C"), tracks: F.tracks("C", 1)), .upcomingChanged)
+        // Play Next is refused (nothing changes); Add to Queue is not.
+        XCTAssertEqual(controller.playNext(group: F.album("C"), tracks: F.tracks("C", 1)), .none)
+        XCTAssertEqual(queue, before)
+        XCTAssertEqual(engine.calls, [])
         XCTAssertEqual(controller.addToQueue(group: F.album("D"), tracks: F.tracks("D", 1)), .upcomingChanged)
-        XCTAssertEqual(heldTracks, ["A1", "A2", "A3", "C1", "B1", "D1"])
+        XCTAssertEqual(heldTracks, ["A1", "A2", "A3", "B1", "D1"])
         // The queue still goes on from album to album.
         controller.trackEnded(engineNext: entryId("A2"))
         controller.trackEnded(engineNext: entryId("A3"))
-        XCTAssertEqual(controller.trackEnded(engineNext: entryId("C1")), .advanced)
-        XCTAssertEqual(current, "C1")
+        XCTAssertEqual(controller.trackEnded(engineNext: entryId("B1")), .advanced)
+        XCTAssertEqual(current, "B1")
+    }
+
+    func testManiacModeRefusesPlayNextButNotPlayReplacing() {
+        playAlbumA()
+        controller.setManiacMode(true)
+        let before = queue
+        XCTAssertEqual(controller.playNext(group: F.album("B"), tracks: F.tracks("B", 2)), .none)
+        XCTAssertEqual(queue, before)
+        // Play (replace) is allowed.
+        controller.replace(group: F.album("E"), tracks: F.tracks("E", 2), startIndex: nil, play: true)
+        XCTAssertEqual(heldTracks, ["E1", "E2"])
+    }
+
+    func testTurningManiacModeOffRestoresPlayNext() {
+        playAlbumA()
+        controller.setManiacMode(true)
+        XCTAssertEqual(controller.playNext(group: F.album("B"), tracks: F.tracks("B", 1)), .none)
+        controller.setManiacMode(false)
+        XCTAssertEqual(controller.playNext(group: F.album("B"), tracks: F.tracks("B", 1)), .upcomingChanged)
+        XCTAssertEqual(heldTracks, ["A1", "A2", "A3", "B1"])
     }
 
     func testManiacModeTurnsShuffleAndRepeatOff() {
