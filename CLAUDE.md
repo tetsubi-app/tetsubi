@@ -5,7 +5,7 @@ Tetsubi is a Jellyfin music player by DEKIRU Ltd. Two codebases, one product:
 - **iOS + Mac (Swift/SwiftUI):** `JellyfinMusicCore/` (shared package: models, API, player, downloads, views) + `Tetsubi-iOS/`, `Tetsubi-macOS/`, `Tetsubi-Widget/`. `Tetsubi.xcodeproj` is generated from `project.yml` (`xcodegen generate`) and is not committed.
 - **Android + Linux (Kotlin Multiplatform, Compose):** `Kotlin/` — `:shared` (commonMain = almost everything; androidMain, desktopMain, jvmSharedMain), `:androidApp`, `:desktopApp`.
 
-Read `docs/gotchas.md` before changing signing, playback, downloads, widgets or the build. `docs/icons.md` covers the icon sizes. `docs/redesign.md` is the UI contract (window classes, the one grid and density, page/section/row patterns, tokens); both apps follow it, so change it first when the layout changes.
+Read `docs/gotchas.md` before changing signing, playback, downloads, widgets or the build. `docs/icons.md` covers the icon sizes. `docs/redesign.md` is the UI contract (window classes, the one grid and density, page/section/row patterns, tokens); both apps follow it, so change it first when the layout changes. `docs/ideas.md` holds parked work (for example the local/remote server address idea) with its context.
 
 ## Names that must not change
 
@@ -29,6 +29,6 @@ The user-facing name is Tetsubi. The permanent IDs are deliberately name-free, s
 - Swift tests: `cd JellyfinMusicCore && swift test`
 - iOS: `xcodegen generate`, then `xcodebuild -project Tetsubi.xcodeproj -scheme Tetsubi-iOS -destination 'id=<simulator>' -derivedDataPath <scratch>/dd build`
 - Mac: `xcodebuild -project Tetsubi.xcodeproj -scheme Tetsubi-macOS -derivedDataPath <scratch>/ddmac CODE_SIGNING_ALLOWED=NO build`
-- Kotlin (all tests + APK + desktop): `cd Kotlin && JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew :shared:allTests :androidApp:assembleDebug :desktopApp:compileKotlin` (add `-Pkotlin.incremental=false` if the incremental cache breaks). Count results from `Kotlin/*/build/test-results/**/*.xml`.
+- Kotlin (all tests + APK + desktop): `cd Kotlin && JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew :audiodek:test :shared:allTests :androidApp:assembleDebug :desktopApp:compileKotlin` (add `-Pkotlin.incremental=false` if the incremental cache breaks). Count results from `Kotlin/*/build/test-results/**/*.xml`.
 - Android release APK (signed, R8): `./gradlew :androidApp:assembleRelease`. It needs the release key outside the repo and its password in the macOS Keychain or `TETSUBI_KEYSTORE_PASSWORD`; without them the build is left unsigned. The names are in `Kotlin/androidApp/build.gradle.kts`.
 - Versions: iOS, Android and Linux share a version and build number, kept in step by hand in two places: `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` at the top of `project.yml` (iOS, Mac), and `tetsubi.versionName` / `tetsubi.versionCode` in `Kotlin/gradle.properties` (Android `versionName`/`versionCode`, the desktop `packageVersion` `<name>.<code>`, and the shared `AppInfo.VERSION`/`BUILD` through a generated `AppVersion`). Raise the build number before each upload. GitHub release tags are `v<name>.<code>` (e.g. `v1.0.6`); see the update-check notes in `docs/gotchas.md`.
