@@ -89,12 +89,12 @@ interface PlayerEngine {
     val directPlayFormats: Set<AudioFormat>
 
     /**
-     * Formats a downloaded file may stay in to be played here. Normally the
-     * same as [directPlayFormats]; Android keeps its fixed list (ALAC is
-     * downloaded as FLAC whatever this device decodes: downloads are not
-     * touched by the device-dependent ALAC direct play).
+     * Formats a file already on disk may be in and stay valid (others are deleted on start and downloaded
+     * again as FLAC). Normally [directPlayFormats]. Android's is the full set with ALAC whatever the
+     * per-build ALAC failure flag says, so that flag never deletes finished downloads; new downloads
+     * follow [directPlayFormats] (see `DownloadManager`).
      */
-    val downloadPlayFormats: Set<AudioFormat> get() = directPlayFormats
+    val storedPlayFormats: Set<AudioFormat> get() = directPlayFormats
 
     /** Device facts for the `play plan:` line, e.g. `alacDecoder=true alacFailed=false`; empty where there are none. */
     val planNote: String get() = ""

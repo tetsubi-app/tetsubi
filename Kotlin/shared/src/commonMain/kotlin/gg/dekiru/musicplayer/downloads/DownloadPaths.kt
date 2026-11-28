@@ -46,6 +46,18 @@ class DownloadPaths(root: String) {
         /** A track ID as compared: the server writes the same ID with or without dashes, in either case. */
         fun idKey(id: String): String = id.replace("-", "").lowercase()
 
+        /**
+         * The format a finished file on disk is in, by its extension: `fallback` when the extension is its
+         * own (so ALAC and AAC, both `.m4a`, keep the planned one), else the first format with that extension
+         * (`.flac` is FLAC, `.m4a` is ALAC), else `fallback`. A file kept from an earlier try may not be in
+         * the format planned now (an ALAC track saved as FLAC before the original was kept, or the reverse).
+         */
+        fun formatOfFile(fileName: String, fallback: AudioFormat): AudioFormat {
+            val ext = fileName.substringAfterLast('.', "").lowercase()
+            if (ext == fallback.fileExtension) return fallback
+            return AudioFormat.entries.firstOrNull { it.fileExtension == ext } ?: fallback
+        }
+
         /** A file name without its extension. */
         fun stem(fileName: String): String = fileName.substringBeforeLast('.')
 

@@ -14,6 +14,8 @@ private val LOSSLESS = setOf("audio/flac", "audio/alac", "audio/raw", "audio/x-w
  * the track's own `bits-per-sample` where the extractor gives one.
  */
 internal actual fun audioFileInfo(path: String): AudioFileInfo {
+    // A downloaded original ALAC (.m4a): its own header says rate and depth, whatever the platform extractor does.
+    if (path.endsWith(".m4a", ignoreCase = true)) alacInfo(path)?.let { return AudioFileInfo(it.sampleRate, it.bitDepth) }
     val extractor = try {
         MediaExtractor()
     } catch (e: Throwable) {
@@ -50,3 +52,12 @@ private fun retrieverBitDepth(path: String): Int? {
 }
 
 private fun MediaFormat.intOrNull(key: String): Int? = if (containsKey(key)) runCatching { getInteger(key) }.getOrNull() else null
+
+/** The ALAC configuration inside an `.m4a`, read straight from the file; null for AAC or anything unreadable. */
+private fun alacInfo(path: String): AlacFileInfo? = runCatching {
+    java.io.RandomAccessFile(path, "r").use { file ->
+        AlacFileInfo.read(file.length()) { offset, length ->
+            if (offset + length > file.length()) null else ByteArray(length).also { file.seek(offset); file.readFully(it) }
+        }
+    }
+}.getOrNull()

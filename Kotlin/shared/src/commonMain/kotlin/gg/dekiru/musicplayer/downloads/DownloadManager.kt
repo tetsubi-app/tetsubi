@@ -101,22 +101,41 @@ class DownloadManager(
     internal val now: () -> Long = ::nowMillis,
     internal val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
     /**
-     * Formats this device's player can play (empty: no player, anything goes).
-     * A track whose chosen format isn't one is downloaded as FLAC instead:
-     * the Pad has no ALAC decoder, and ALAC files played silently.
+     * Formats a downloaded FILE may be in and stay valid (empty: no player, anything goes). A file in
+     * another format is deleted on start and downloaded again as FLAC: the Pad had no ALAC decoder, and
+     * ALAC files played silently. Android's list includes ALAC (audioDEK plays it everywhere) and does
+     * not depend on the per-build ALAC failure flag, so a flag never deletes finished downloads.
      */
     private val playable: Set<AudioFormat> = emptySet(),
     /** False with no connection at all: a queued playlist then waits instead of failing. */
     private val isOnline: () -> Boolean = { true },
+    /**
+     * Formats a NEW download may be saved in, asked at each plan (default [playable]). Android passes the
+     * live direct-play set: without ALAC after a decode failure on this build, so ALAC is then converted to FLAC.
+     */
+    private val downloadable: () -> Set<AudioFormat> = { playable },
 ) {
     val paths = DownloadPaths(downloadsDir)
 
-    /** The format to save a track in: the chosen one if this device plays it, else FLAC (lossless too). */
-    internal fun storedFormat(chosen: AudioFormat): AudioFormat =
-        if (playable.isEmpty() || chosen in playable || AudioFormat.FLAC !in playable) chosen else AudioFormat.FLAC
+    /**
+     * The format to save a track in: the chosen one if this device plays it, else FLAC (lossless too).
+     * ALAC is only ever the original file: a track the server would have to convert to ALAC (a FLAC
+     * source when "ALAC" is chosen) is saved as FLAC, since the server writes live-converted MP4 to a
+     * pipe (no seek map).
+     */
+    internal fun storedFormat(chosen: AudioFormat, track: JellyfinTrack? = null): AudioFormat {
+        val can = downloadable()
+        val alacNotOriginal = chosen == AudioFormat.ALAC && track != null && !DownloadUrls.isOriginal(track, chosen)
+        return when {
+            can.isEmpty() -> chosen
+            alacNotOriginal -> if (AudioFormat.FLAC in can) AudioFormat.FLAC else chosen
+            chosen in can || AudioFormat.FLAC !in can -> chosen
+            else -> AudioFormat.FLAC
+        }
+    }
 
     /** Whether a downloaded file can be played here (unknown formats count as playable). */
-    private fun canPlay(track: ManifestTrack): Boolean = track.fileFormat?.let { storedFormat(it) == it } ?: true
+    private fun canPlay(track: ManifestTrack): Boolean = track.fileFormat?.let { playable.isEmpty() || it in playable || AudioFormat.FLAC !in playable } ?: true
     private val runner: DownloadRunner = runner ?: InProcessDownloadRunner(scope)
     internal val downloader = TrackDownloader(api.http, { api.authorizationHeader() }, ioDispatcher)
     private val dispatcher = scope.coroutineContext[ContinuationInterceptor] as? CoroutineDispatcher ?: Dispatchers.Default
@@ -447,9 +466,11 @@ class DownloadManager(
                 it != DownloadPaths.MANIFEST && it != DownloadPaths.COVER && it != DownloadPaths.COVERS
         }
         return tracks.zip(JellyfinTrack.fileNumbers(tracks)).map { (track, number) ->
-            val format = storedFormat(AudioFormat.downloadFormat(track, preferred))
-            val name = DownloadPaths.trackFileName(number, track.displayName, format)
+            val wanted = storedFormat(AudioFormat.downloadFormat(track, preferred), track)
+            val name = DownloadPaths.trackFileName(number, track.displayName, wanted)
             val file = onDisk.firstOrNull { DownloadPaths.stem(it) == DownloadPaths.stem(name) } ?: name
+            // A file kept from an earlier try is labelled by what it is (FLAC converted from ALAC, or the original).
+            val format = DownloadPaths.formatOfFile(file, wanted)
             val label = if (DownloadUrls.isOriginal(track, format)) {
                 PlaybackTrack.qualityLabel(format, track.mediaSource?.bitrate)
             } else {

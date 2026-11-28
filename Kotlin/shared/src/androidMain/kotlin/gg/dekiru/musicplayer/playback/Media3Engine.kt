@@ -153,8 +153,8 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     override val directPlayFormats: Set<AudioFormat>
         get() = DirectPlayCapabilities.forDevice(alacFailure)
 
-    /** Downloads are not touched: ALAC is downloaded as FLAC whatever this device decodes. */
-    override val downloadPlayFormats: Set<AudioFormat> = DirectPlayCapabilities.baseline
+    /** Files already downloaded stay valid (ALAC .m4a included) whatever the failure flag says. */
+    override val storedPlayFormats: Set<AudioFormat> = DirectPlayCapabilities.android
 
     /** Saved between launches: after one failed direct ALAC decode this build never tries again on this device. */
     private val alacFailure = AlacDirectFailure(AndroidPreferences(context), AppVersion.BUILD)
@@ -1139,6 +1139,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
                     val config = AudioDekFormats.config(format.initializationData)
                     val id = queueItems.getOrNull(eventTime.windowIndex)?.id ?: "?"
                     logLine("Tetsubi", AudioDekFormats.logLine(id, config.bitDepth, config.channels, config.sampleRate.toInt()))
+                    logLine("Tetsubi", AudioDekFormats.outputLine(config.channels))
                 }
             }
         }

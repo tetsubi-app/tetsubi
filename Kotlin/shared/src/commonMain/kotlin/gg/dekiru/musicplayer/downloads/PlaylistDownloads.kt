@@ -457,9 +457,10 @@ class PlaylistDownloads internal constructor(private val manager: DownloadManage
         val albums = albumTracks()
         return entries.map { entry ->
             val track = entry.track
-            val format = manager.storedFormat(AudioFormat.downloadFormat(track, old.preferredFormat))
-            val name = PlaylistPaths.trackFileName(track.id, format)
+            val wanted = manager.storedFormat(AudioFormat.downloadFormat(track, old.preferredFormat), track)
+            val name = PlaylistPaths.trackFileName(track.id, wanted)
             val onDisk = existing.firstOrNull { DownloadPaths.stem(it) == DownloadPaths.stem(name) }
+            val format = onDisk?.let { DownloadPaths.formatOfFile(it, wanted) } ?: wanted
             val inAlbum = albums[DownloadPaths.idKey(track.id)]?.let { (album, t) -> LocalFiles.exists(album.trackPath(t)) } == true
             val file = onDisk ?: if (inAlbum) null else name
             val kept = before[track.id]?.takeIf { onDisk != null && it.file == onDisk }

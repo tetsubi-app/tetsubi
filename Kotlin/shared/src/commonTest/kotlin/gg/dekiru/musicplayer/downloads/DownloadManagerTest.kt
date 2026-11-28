@@ -7,6 +7,7 @@ import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.models.JellyfinPerson
 import gg.dekiru.musicplayer.data.settings.InMemoryPreferences
 import gg.dekiru.musicplayer.playback.AudioFormat
+import gg.dekiru.musicplayer.playback.PlaybackTrack
 import gg.dekiru.musicplayer.playback.settle
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -57,6 +58,7 @@ class DownloadManagerTest {
         dir: String = tempDir(),
         source: String = "flac",
         playable: () -> Set<AudioFormat> = { emptySet() },
+        downloadable: (() -> Set<AudioFormat>)? = null,
         audio: (String) -> ByteArray = { "audio of $it".encodeToByteArray() },
     ): Setup {
         lateinit var s: Setup
@@ -84,7 +86,7 @@ class DownloadManagerTest {
         val runner = InProcessDownloadRunner(backgroundScope)
         val api = server.api(token = "tok", userId = "u1")
         s = Setup(server, dir, prefs, runner) {
-            DownloadManager(api, dir, DownloadSettings(prefs), backgroundScope, { s.metered }, runner, { s.clock }, playable = playable())
+            DownloadManager(api, dir, DownloadSettings(prefs), backgroundScope, { s.metered }, runner, { s.clock }, playable = playable(), downloadable = downloadable ?: { playable() })
         }
         return s
     }
@@ -454,6 +456,105 @@ class DownloadManagerTest {
         assertTrue(s.server.requests.filter { it.path.startsWith("/Audio/") }.all { it.path.endsWith("/universal") })
         // A device that plays ALAC keeps the original.
         assertEquals(AudioFormat.ALAC, s.manager.let { DownloadManager(s.server.api(token = "t", userId = "u1"), tempDir(), DownloadSettings(s.prefs), backgroundScope) }.storedFormat(AudioFormat.ALAC))
+    }
+
+    private val androidAll = setOf(AudioFormat.FLAC, AudioFormat.MP3, AudioFormat.AAC, AudioFormat.OPUS, AudioFormat.WAV, AudioFormat.ALAC)
+    private val androidBaseline = androidAll - AudioFormat.ALAC
+
+    @Test
+    fun alacIsDownloadedAsTheOriginalM4aWhenThePlayerDecodesIt() = runTest {
+        val original = ByteArray(300) { it.toByte() }
+        val s = setup(source = "alac", playable = { androidAll }, audio = { original })
+        s.manager.download(album("al1"))
+        settle()
+        val m = s.manifest("al1")
+        assertEquals(listOf("01 - Song 1.m4a", "02 - Song 2.m4a", "03 - Song 3.m4a"), m.tracks.map { it.file })
+        assertEquals("ALAC", m.tracks[0].format)
+        assertEquals("ALAC 900 kbps", m.tracks[0].qualityLabel)
+        // The original file (static stream URL), byte for byte, not a server conversion.
+        val audio = s.server.requests.filter { it.path.startsWith("/Audio/") }
+        assertEquals(3, audio.size)
+        assertTrue(audio.all { it.path.endsWith("/stream.m4a") && it.url.parameters["static"] == "true" })
+        assertTrue(original.contentEquals(LocalFiles.readBytes("${s.dir}/al1/01 - Song 1.m4a")!!))
+        assertTrue(s.manager.isDownloaded("al1"))
+    }
+
+    @Test
+    fun aFailedDirectAlacDecodeMakesNewAlacDownloadsFlacAgainButKeepsFinishedFiles() = runTest {
+        // Players list ALAC for existing files; new downloads follow the failure flag (no ALAC in `downloadable`).
+        var flagged = false
+        val s = setup(tracks = 2, source = "alac", playable = { androidAll }, downloadable = { if (flagged) androidBaseline else androidAll })
+        s.manager.download(album("a"))
+        settle()
+        flagged = true
+        s.manager.download(album("b"))
+        settle()
+        assertEquals(listOf("01 - Song 1.m4a", "02 - Song 2.m4a"), s.manifest("a").tracks.map { it.file })
+        assertEquals(listOf("01 - Song 1.flac", "02 - Song 2.flac"), s.manifest("b").tracks.map { it.file })
+        assertTrue(s.server.requests.filter { it.path.startsWith("/Audio/b-") }.all { it.path.endsWith("/universal") })
+        // Restart with the flag set: the finished .m4a album is not deleted or downloaded again.
+        val before = s.audio().size
+        s.manager.close()
+        s.manager = s.make()
+        settle()
+        assertTrue(s.manager.isDownloaded("a"))
+        assertTrue(s.manager.isDownloaded("b"))
+        assertEquals(before, s.audio().size)
+    }
+
+    @Test
+    fun earlierFlacDownloadsOfAlacStayValidAndAreNotDownloadedAgain() = runTest {
+        // Downloaded before the original was kept: ALAC converted to FLAC.
+        var downloadable = androidBaseline
+        val s = setup(source = "alac", playable = { androidAll }, downloadable = { downloadable })
+        s.manager.download(album("al1"))
+        settle()
+        assertEquals(listOf("01 - Song 1.flac", "02 - Song 2.flac", "03 - Song 3.flac"), s.manifest("al1").tracks.map { it.file })
+        s.manager.close()
+        // The new build: ALAC is downloadable, the manifest says "FLAC" and the files are there.
+        downloadable = androidAll
+        val requests = s.audio().size
+        s.manager = s.make()
+        settle()
+        assertTrue(s.manager.isDownloaded("al1"))
+        assertEquals(requests, s.audio().size)
+        assertEquals(listOf("01 - Song 1.flac", "02 - Song 2.flac", "03 - Song 3.flac"), s.manifest("al1").tracks.map { it.file })
+        assertEquals(listOf("FLAC", "FLAC", "FLAC"), s.manifest("al1").tracks.map { it.format })
+    }
+
+    @Test
+    fun aMixedAlbumOfOldFlacAndNewOriginalAlacIsDownloadedAndRemovable() = runTest {
+        var downloadable = androidBaseline
+        val s = setup(source = "alac", playable = { androidAll }, downloadable = { downloadable })
+        s.manager.download(album("al1"))
+        settle()
+        // Track 2 gets lost, then the album is downloaded again with the original ALAC.
+        LocalFiles.deleteRecursively("${s.dir}/al1/02 - Song 2.flac")
+        downloadable = androidAll
+        s.manager.close()
+        s.manager = s.make()
+        settle()
+        s.manager.retry("al1")
+        settle()
+        val files = s.manifest("al1").tracks.map { it.file }
+        assertEquals(listOf("01 - Song 1.flac", "02 - Song 2.m4a", "03 - Song 3.flac"), files)
+        assertEquals(listOf("FLAC", "ALAC", "FLAC"), s.manifest("al1").tracks.map { it.format })
+        assertTrue(s.manager.isDownloaded("al1"))
+        assertEquals(2, LocalFiles.list("${s.dir}/al1").count { it.endsWith(".flac") })
+        // The player's lookup finds each file, the .m4a too (ids loosely compared), and labels it like a FLAC.
+        val find = s.manager.playlists.resolver("")
+        assertEquals("${s.dir}/al1/02 - Song 2.m4a", find("AL1-T2")?.path)
+        assertEquals("${s.dir}/al1/01 - Song 1.flac", find("al1-t1")?.path)
+        assertEquals("ALAC 900 kbps", find("al1-t2")?.qualityLabel)
+        assertEquals("ALAC 900 kbps · downloaded", PlaybackTrack.downloadedLabel(find("al1-t2")?.qualityLabel))
+        assertEquals("ALAC · downloaded", PlaybackTrack.downloadedLabel("ALAC"))
+        // A manifest that still says .flac for a track now saved as .m4a (or the reverse) is found by name.
+        LocalFiles.writeText("${s.dir}/al1/03 - Song 3.m4a", "x")
+        LocalFiles.deleteRecursively("${s.dir}/al1/03 - Song 3.flac")
+        assertEquals("${s.dir}/al1/03 - Song 3.m4a", find("al1-t3")?.path)
+        s.manager.delete(listOf("al1"))
+        assertFalse(s.manager.isDownloaded("al1"))
+        assertFalse(LocalFiles.exists("${s.dir}/al1"))
     }
 
     @Test
