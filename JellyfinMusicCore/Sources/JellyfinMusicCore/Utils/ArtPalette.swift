@@ -65,10 +65,12 @@ public enum ArtPalette {
     static let sampleSize = 40
     /// Smallest share of the image a colour needs to be picked (ignores specks).
     static let minimumShare = 0.02
-    /// Colours greyer or darker than this aren't picked: they'd vanish on the
-    /// dark background.
+    /// Colours greyer or darker than this aren't picked. The pick is lifted to
+    /// `displayBrightness` anyway, so the brightness floor is low: a moody red
+    /// and black cover (deep reds that never pass 0.3) must still give a red
+    /// accent, as on Android, where the same floor is 0.15.
     static let minimumSaturation = 0.3
-    static let minimumBrightness = 0.3
+    static let minimumBrightness = 0.15
     /// The picked colour is lifted to at least this brightness so it shows up.
     static let displayBrightness = 0.8
 

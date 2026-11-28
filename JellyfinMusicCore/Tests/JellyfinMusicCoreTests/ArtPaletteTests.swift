@@ -47,6 +47,36 @@ final class ArtPaletteTests: XCTestCase {
         XCTAssertEqual(accent?.brightness ?? 0, ArtPalette.displayBrightness, accuracy: 0.001)
         XCTAssertGreaterThan(accent?.red ?? 0, accent?.green ?? 1)
     }
+
+    /// A near-black cover with a deep-red band (brightness about 0.27, under the old 0.3 floor) gives a lifted red.
+    func testDeepRedOnBlackGivesARedAccent() {
+        for redRows in [10, 20, 35] {
+            let art = image([(10, 10, 12, 100 - redRows), (70, 12, 14, redRows)])
+            let accent = ArtPalette.accentColor(of: art)
+            XCTAssertNotNil(accent, "\(redRows)% deep red")
+            XCTAssertGreaterThan(accent?.red ?? 0, 0.6)
+            XCTAssertLessThan(accent?.green ?? 1, 0.4)
+            XCTAssertEqual(accent?.brightness ?? 0, ArtPalette.displayBrightness, accuracy: 0.001)
+        }
+    }
+
+    /// A near-black cover with a dark blue band (brightness about 0.27) gives a lifted blue, as on Android.
+    func testDarkBlueCoverGivesABlueAccent() {
+        let accent = ArtPalette.accentColor(of: image([(4, 6, 16, 60), (10, 24, 70, 40)]))
+        XCTAssertNotNil(accent)
+        XCTAssertGreaterThan(accent?.blue ?? 0, accent?.red ?? 1)
+        XCTAssertEqual(accent?.brightness ?? 0, ArtPalette.displayBrightness, accuracy: 0.001)
+    }
+
+    /// Different covers give different accents (the playlist case: every track its own cover).
+    func testAccentChangesWithTheCover() {
+        let red = ArtPalette.accentColor(of: image([(10, 10, 12, 80), (70, 12, 14, 20)]))
+        let green = ArtPalette.accentColor(of: image([(10, 12, 10, 80), (20, 140, 40, 20)]))
+        XCTAssertNotNil(red)
+        XCTAssertNotNil(green)
+        XCTAssertGreaterThan(red?.red ?? 0, red?.green ?? 1)
+        XCTAssertGreaterThan(green?.green ?? 0, green?.red ?? 1)
+    }
 }
 
 final class NowPlayingAccentTests: XCTestCase {
