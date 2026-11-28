@@ -33,11 +33,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import gg.dekiru.musicplayer.ui.components.SeekSlider
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -73,9 +72,8 @@ fun NowPlayingBar(
     val track = player.currentTrack ?: return
     val windowClass = LocalWindowClass.current
     val wide = windowClass.isWide
-    // The art's key colour, as Now Playing's progress line (blue when it has none).
-    val accent = rememberArtAccent(api, track.artItemId, track.localArtPath)
-    val line by animateColorAsState(accent ?: TetsubiColors.blue, tween(300), label = "progress")
+    // Progress is blue (docs/redesign.md section 6).
+    val line = TetsubiColors.blue
     val progress = if (player.duration > 0) (player.position / player.duration).toFloat().coerceIn(0f, 1f) else 0f
     Column(
         modifier.fillMaxWidth().background(TetsubiColors.background.copy(alpha = 0.55f)).background(TetsubiColors.surface)
@@ -136,14 +134,13 @@ private fun MiniSeekBar(player: PlayerController, accent: Color, modifier: Modif
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         val shown = dragging?.let { it * player.duration } ?: player.position
         Text(formatTrackTime(shown), style = tetsubiType.caption, color = TetsubiColors.textSecondary, maxLines = 1)
-        Slider(
+        SeekSlider(
             value = dragging ?: progress,
             onValueChange = { dragging = it },
             onValueChangeFinished = {
                 dragging?.let { player.seekToProgress(it.toDouble()) }
                 dragging = null
             },
-            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = accent, inactiveTrackColor = Color.White.copy(alpha = 0.2f)),
             modifier = Modifier.weight(1f).semantics { contentDescription = "Position" },
         )
         Text(formatTrackTime(player.duration), style = tetsubiType.caption, color = TetsubiColors.textSecondary, maxLines = 1)

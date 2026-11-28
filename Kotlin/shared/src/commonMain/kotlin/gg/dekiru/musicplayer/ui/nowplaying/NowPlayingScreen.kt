@@ -32,8 +32,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -42,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import gg.dekiru.musicplayer.ui.components.SeekSlider
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -165,7 +164,7 @@ fun NowPlayingScreen(
                     }
                     Titles(player, track, castName, accent, qualityDetail, rememberArtistTap(api, track, isOnline, onOpenArtist))
                     player.lastError?.let { ErrorText(it) }
-                    Seek(player, accent)
+                    Seek(player)
                     Controls(player)
                     Toggles(player, visualiser.takeUnless { casting }, castButton)
                 } else {
@@ -369,10 +368,9 @@ private fun ErrorText(message: String) {
 }
 
 @Composable
-private fun Seek(player: PlayerController, accent: Color?) {
+private fun Seek(player: PlayerController) {
     var dragging by remember { mutableStateOf<Float?>(null) }
-    // The progress colour from the art (as iOS), fading as the art changes; blue when it has none.
-    val line by animateColorAsState(accent ?: TetsubiColors.blue, tween(300), label = "progress")
+    val line = TetsubiColors.blue
     val progress = if (player.duration > 0) (player.position / player.duration).toFloat().coerceIn(0f, 1f) else 0f
     Column(Modifier.fillMaxWidth()) {
         if (player.maniacMode) {
@@ -380,25 +378,21 @@ private fun Seek(player: PlayerController, accent: Color?) {
             LinearProgressIndicator(
                 progress = { progress }, color = line, trackColor = TetsubiColors.art,
                 drawStopIndicator = {}, gapSize = 0.dp,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp).height(4.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 18.dp).height(4.dp),
             )
         } else {
-            Slider(
+            SeekSlider(
                 value = dragging ?: progress,
                 onValueChange = { dragging = it },
                 onValueChangeFinished = {
                     dragging?.let { player.seekToProgress(it.toDouble()) }
                     dragging = null
                 },
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = line,
-                    inactiveTrackColor = TetsubiColors.art,
-                ),
                 modifier = Modifier.semantics { contentDescription = "Position" },
             )
         }
-        Row(Modifier.fillMaxWidth()) {
+        // 8 dp in: lines the times up with the ends of the track (the thumb sticks out 8 dp).
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
             val shown = dragging?.let { it * player.duration } ?: player.position
             Text(formatTrackTime(shown), style = tetsubiType.navLabel, color = TetsubiColors.textSecondary, modifier = Modifier.weight(1f))
             Text(formatTrackTime(player.duration), style = tetsubiType.navLabel, color = TetsubiColors.textSecondary)

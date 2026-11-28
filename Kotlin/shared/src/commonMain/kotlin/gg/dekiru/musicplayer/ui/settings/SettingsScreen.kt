@@ -326,7 +326,7 @@ internal fun SettingsPickerRow(title: String, value: String, options: List<Strin
     ) {
         Box {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                SettingsValue(value)
+                SettingsValue(value, Modifier.weight(1f, fill = false))
                 ChevronUpDownIcon(14.dp, TetsubiColors.textSecondary)
             }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {

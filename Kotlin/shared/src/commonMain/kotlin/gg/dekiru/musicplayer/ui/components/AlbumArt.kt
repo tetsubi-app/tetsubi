@@ -64,6 +64,8 @@ fun AlbumArt(
     maxWidth: Int = 300,
     modifier: Modifier = Modifier,
     localPath: String? = null,
+    /** What shows when there is no picture (artists use the lighter surface, not grey). */
+    placeholderColor: Color = Color.Gray.copy(alpha = 0.35f),
 ) {
     val context = LocalPlatformContext.current
     val request = remember(api, itemId, maxWidth, localPath) { artRequest(context, api, itemId, maxWidth, localPath) }
@@ -76,7 +78,7 @@ fun AlbumArt(
         Image(painter, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         when (state) {
             is AsyncImagePainter.State.Loading, AsyncImagePainter.State.Empty -> LoadingOutline(cornerRadius)
-            is AsyncImagePainter.State.Error -> ArtPlaceholder(size)
+            is AsyncImagePainter.State.Error -> ArtPlaceholder(size, placeholderColor)
             else -> Unit
         }
     }
@@ -95,8 +97,8 @@ fun artRequest(context: PlatformContext, api: JellyfinApi, itemId: String, maxWi
 
 /** No art: grey with a music note. */
 @Composable
-private fun ArtPlaceholder(size: Dp) {
-    Box(Modifier.fillMaxSize().background(Color.Gray.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) {
+private fun ArtPlaceholder(size: Dp, color: Color) {
+    Box(Modifier.fillMaxSize().background(color), contentAlignment = Alignment.Center) {
         Text("♪", color = Color.White.copy(alpha = 0.55f), fontSize = (maxOf(size.value * 0.28f, 16f)).sp)
     }
 }

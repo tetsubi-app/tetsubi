@@ -130,7 +130,7 @@ fun AlbumCard(
 fun ArtistCard(api: JellyfinApi, artist: JellyfinArtist, width: Dp, onClick: () -> Unit) {
     val pixels = artPixels(width)
     MediaCard(width, artist.name, null, modifier = Modifier.menuClickable(onClick, null), circle = true) { corner ->
-        AlbumArt(api, artist.id, size = width, cornerRadius = corner, maxWidth = pixels)
+        AlbumArt(api, artist.id, size = width, cornerRadius = corner, maxWidth = pixels, placeholderColor = TetsubiColors.surface)
     }
 }
 

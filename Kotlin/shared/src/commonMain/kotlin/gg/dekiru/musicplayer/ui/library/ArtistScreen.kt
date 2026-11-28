@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
+import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
 import gg.dekiru.musicplayer.ui.components.AlbumCard
 import gg.dekiru.musicplayer.ui.components.ArtistAbout
@@ -141,6 +142,8 @@ fun ArtistScreen(
 /** The round picture, name and album count. */
 @Composable
 private fun ArtistInfoBlock(api: JellyfinApi, model: ArtistModel, m: DetailMetrics) {
-    AlbumArt(api, model.artist.id, size = m.artSize, cornerRadius = m.artSize / 2, maxWidth = 600)
+    // Smaller than an album's cover (240 two-pane, 200 stacked) with the lighter placeholder, as on iOS and Mac.
+    val art = minOf(m.artSize, if (m.twoPane) 240.dp else 200.dp)
+    AlbumArt(api, model.artist.id, size = art, cornerRadius = art / 2, maxWidth = 600, placeholderColor = TetsubiColors.surface)
     DetailTitle(m, model.artist.name, meta = model.albums.size.takeIf { it > 0 }?.let { if (it == 1) "1 album" else "$it albums" })
 }

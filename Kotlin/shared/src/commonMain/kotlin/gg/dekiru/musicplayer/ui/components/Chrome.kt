@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.ColumnScope
@@ -443,16 +444,20 @@ fun SettingsRow(
                 if (divider) drawLine(TetsubiColors.hairline, Offset(16.dp.toPx(), size.height - 0.5f), Offset(size.width, size.height - 0.5f), 1f)
             },
     ) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(title, style = tetsubiType.rowTitle.copy(fontWeight = FontWeight.Normal), color = titleColor)
-                if (caption != null) Text(caption, style = tetsubiType.caption, color = TetsubiColors.textSecondary)
+        androidx.compose.foundation.layout.BoxWithConstraints {
+            // The label wraps to two lines and the value keeps its width (at most 60% of the row), with a 12 dp gap.
+            val valueMax = maxWidth * 0.6f
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = tetsubiType.rowTitle.copy(fontWeight = FontWeight.Normal), color = titleColor, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (caption != null) Text(caption, style = tetsubiType.caption, color = TetsubiColors.textSecondary)
+                }
+                if (trailing != null) Box(Modifier.widthIn(max = valueMax)) { trailing() }
             }
-            trailing?.invoke()
         }
     }
 }
@@ -473,8 +478,8 @@ fun SettingsToggleRow(title: String, checked: Boolean, onChange: (Boolean) -> Un
 
 /** A value on the right of a [SettingsRow]. */
 @Composable
-fun SettingsValue(text: String) {
-    Text(text, style = tetsubiType.body, color = TetsubiColors.textSecondary, maxLines = 1)
+fun SettingsValue(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier = modifier, style = tetsubiType.body, color = TetsubiColors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 /** Star button for favourites: outline when off, filled pink when on (replaces the heart). */
