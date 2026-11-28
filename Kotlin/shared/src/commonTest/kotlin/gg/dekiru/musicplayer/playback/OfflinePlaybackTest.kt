@@ -360,12 +360,12 @@ class OfflinePlaybackTest {
     @Test
     fun aTrackIdWrittenWithDashesOrCapitalsFindsItsFile() = runTest {
         val dir = tempDir()
-        writePlaylistDownload(dir, "pl", listOf("ced88229fe9a871138eee464d3761d07"))
-        val s = setup(dir, streamedId = { "CED88229-FE9A-8711-38EE-E464D3761D07" })
+        writePlaylistDownload(dir, "pl", listOf("0123456789abcdef0123456789abcdef"))
+        val s = setup(dir, streamedId = { "01234567-89AB-CDEF-0123-456789ABCDEF" })
         s.player.play(album("elsewhere"))
         settle()
         val item = s.engine.items.single()
-        assertEquals("file://$dir/playlists/pl/ced88229fe9a871138eee464d3761d07.flac", item.url)
+        assertEquals("file://$dir/playlists/pl/0123456789abcdef0123456789abcdef.flac", item.url)
         assertTrue(item.planNote!!.contains("plan=file"), item.planNote)
     }
 
