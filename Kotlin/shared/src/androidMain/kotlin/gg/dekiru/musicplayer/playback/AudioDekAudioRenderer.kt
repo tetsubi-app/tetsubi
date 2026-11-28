@@ -79,6 +79,22 @@ object AudioDekFormats {
     fun canReuse(old: List<ByteArray>, new: List<ByteArray>): Boolean =
         old.size == new.size && old.isNotEmpty() && old.indices.all { old[it].contentEquals(new[it]) }
 
+    /**
+     * The speaker mask the output [Format] carries (`Format.channelMask`, Android `CHANNEL_OUT_*`, which
+     * `DefaultAudioSink` hands to the audio track as it is), or [Format.NO_VALUE] for mono and stereo, where
+     * ExoPlayer's count-based layout is already right. Without it 4 channels become QUAD (FL FR BL BR),
+     * which would put the centre and the rear centre in the back speakers.
+     */
+    fun channelMask(channels: Int): Int =
+        AudioDekChannels.layout(channels).let { if (it.explicitMask) it.androidMask else Format.NO_VALUE }
+
+    /** The `audioDEK output:` line logged at each ALAC track start, next to `alac decode:`. */
+    fun outputLine(channels: Int): String {
+        val layout = AudioDekChannels.layout(channels)
+        val mask = if (layout.explicitMask) "${layout.maskName}(0x${layout.androidMask.toString(16)})" else "default(${layout.maskName})"
+        return "audioDEK output: channels=$channels mask=$mask layout=${layout.alacOrder.replace(' ', '-')}"
+    }
+
     /** The `alac decode:` line logged at each ALAC track start. */
     fun logLine(itemId: String, bits: Int, channels: Int, rate: Int): String =
         "alac decode: item=$itemId bits=$bits channels=$channels rate=$rate mode=audioDEK"
@@ -208,6 +224,7 @@ class AudioDekAudioRenderer(
         Format.Builder()
             .setSampleMimeType(MimeTypes.AUDIO_RAW)
             .setChannelCount(config.channels)
+            .setChannelMask(AudioDekFormats.channelMask(config.channels))
             .setSampleRate(config.sampleRate.toInt())
             .setPcmEncoding(AudioDekFormats.pcmEncoding(config.bitDepth))
             .build()

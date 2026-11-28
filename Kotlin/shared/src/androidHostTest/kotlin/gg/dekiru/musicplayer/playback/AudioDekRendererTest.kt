@@ -1,6 +1,7 @@
 package gg.dekiru.musicplayer.playback
 
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import gg.dekiru.audiodek.AudioDekAlacException
 import java.nio.ByteBuffer
@@ -79,6 +80,20 @@ class AudioDekRendererTest {
     @Test
     fun theLogLineHasNoUrlOrToken() {
         assertEquals("alac decode: item=abc123 bits=16 channels=2 rate=44100 mode=audioDEK", AudioDekFormats.logLine("abc123", 16, 2, 44100))
+    }
+
+    @Test
+    fun theOutputMaskAndLogLineNameTheLayoutForEveryChannelCount() {
+        // 1 and 2: no mask set (ExoPlayer's MONO/STEREO).
+        assertEquals(Format.NO_VALUE, AudioDekFormats.channelMask(1))
+        assertEquals(Format.NO_VALUE, AudioDekFormats.channelMask(2))
+        assertEquals("audioDEK output: channels=2 mask=default(STEREO) layout=L-R", AudioDekFormats.outputLine(2))
+        assertEquals(mapOf(3 to 0x1C, 4 to 0x41C, 5 to 0xDC, 6 to 0xFC, 7 to 0x4FC, 8 to 0x18FC), (3..8).associateWith { AudioDekFormats.channelMask(it) })
+        // The mask Format accepts has as many bits as channels (Format checks this).
+        for (n in 3..8) assertEquals(n, Integer.bitCount(AudioDekFormats.channelMask(n)))
+        assertEquals("audioDEK output: channels=4 mask=SURROUND(0x41c) layout=C-L-R-Cs", AudioDekFormats.outputLine(4))
+        assertEquals("audioDEK output: channels=6 mask=5POINT1(0xfc) layout=C-L-R-Ls-Rs-LFE", AudioDekFormats.outputLine(6))
+        assertEquals("audioDEK output: channels=8 mask=7POINT1_SURROUND(0x18fc) layout=C-Lc-Rc-L-R-Ls-Rs-LFE", AudioDekFormats.outputLine(8))
     }
 
     @Test
