@@ -72,8 +72,8 @@ fun NowPlayingBar(
     val track = player.currentTrack ?: return
     val windowClass = LocalWindowClass.current
     val wide = windowClass.isWide
-    // Progress is blue (docs/redesign.md section 6).
-    val line = TetsubiColors.blue
+    // The art's accent (brand blue until it's worked out), fading as the art changes.
+    val line = rememberAnimatedAccent(rememberArtAccent(api, track.artItemId, track.localArtPath))
     val progress = if (player.duration > 0) (player.position / player.duration).toFloat().coerceIn(0f, 1f) else 0f
     Column(
         modifier.fillMaxWidth().background(TetsubiColors.background.copy(alpha = 0.55f)).background(TetsubiColors.surface)
@@ -141,6 +141,7 @@ private fun MiniSeekBar(player: PlayerController, accent: Color, modifier: Modif
                 dragging?.let { player.seekToProgress(it.toDouble()) }
                 dragging = null
             },
+            accent = accent,
             modifier = Modifier.weight(1f).semantics { contentDescription = "Position" },
         )
         Text(formatTrackTime(player.duration), style = tetsubiType.caption, color = TetsubiColors.textSecondary, maxLines = 1)

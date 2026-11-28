@@ -37,12 +37,19 @@ import kotlin.math.max
 fun gridColumns(contentWidth: Float, density: Density, gutter: Float): Int =
     max(2, floor((contentWidth + gutter) / (density.minCard + gutter)).toInt())
 
+/** Clear space kept between the grid and the A-Z strip, dp. */
+const val STRIP_GAP = 8f
+
 /**
- * The width the columns share: the pane less the start margin and the end margin, which is [endInset]
- * (the A-Z strip) where that is wider than the margin, else the margin itself.
+ * The end margin of the grid: the page margin, or [endInset] (the A-Z strip) plus [STRIP_GAP] where
+ * that is wider. No strip (inset 0) means just the margin.
  */
+fun gridEndMargin(margin: Float, endInset: Float = 0f): Float =
+    if (endInset > 0f) max(margin, endInset + STRIP_GAP) else margin
+
+/** The width the columns share: the pane less the start margin and [gridEndMargin]. */
 fun gridContentWidth(paneWidth: Float, margin: Float, endInset: Float = 0f): Float =
-    paneWidth - margin - max(margin, endInset)
+    paneWidth - margin - gridEndMargin(margin, endInset)
 
 /** Width of one card: the columns and their gutters fill the content width exactly. */
 fun cardWidth(contentWidth: Float, columns: Int, gutter: Float): Float =
@@ -101,11 +108,11 @@ fun CardGrid(
     val margin = windowClass.pageMargin
     val gutter = windowClass.gutter
     BoxWithConstraints(modifier.fillMaxSize()) {
-        // The strip (endInset) sits over the right margin where that is wide enough, else it takes a little more.
-        val end = maxOf(margin, endInset)
+        // The strip (endInset) sits over the right margin where strip + STRIP_GAP fits in it, else it takes more.
+        val end = gridEndMargin(margin.value, endInset.value).dp
         val contentWidth = gridContentWidth(maxWidth.value, margin.value, endInset.value)
         val columns = gridColumns(contentWidth, density, gutter.value)
-        val metrics = CardMetrics(columns, cardWidth(contentWidth, columns, gutter.value).dp, gutter, listColumns(maxWidth.value - endInset.value))
+        val metrics = CardMetrics(columns, cardWidth(contentWidth, columns, gutter.value).dp, gutter, listColumns(maxWidth.value - endInset.value - (if (endInset > 0.dp) STRIP_GAP else 0f)))
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
             state = state,
@@ -130,7 +137,7 @@ fun ListGrid(
     endInset: Dp = 0.dp,
     content: LazyGridScope.() -> Unit,
 ) {
-    BoxWithConstraints(modifier.fillMaxSize().padding(end = endInset)) {
+    BoxWithConstraints(modifier.fillMaxSize().padding(end = if (endInset > 0.dp) endInset + STRIP_GAP.dp else 0.dp)) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(listColumns(maxWidth.value)),
             state = state,

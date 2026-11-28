@@ -136,7 +136,8 @@ fun NowPlayingScreen(
     onOpenArtist: ((JellyfinArtist) -> Unit)? = null,
 ) {
     BackHandler { player.isNowPlayingOpen = false }
-    val accent = rememberArtAccent(api, player.currentTrack?.artItemId, player.currentTrack?.localArtPath)
+    val artAccent = rememberArtAccent(api, player.currentTrack?.artItemId, player.currentTrack?.localArtPath)
+    val accent = rememberAnimatedAccent(artAccent)
     val visualiser = remember(effects, effectsSettings) {
         if (effects != null && effectsSettings != null) VisualiserToggle(effectsSettings) else null
     }
@@ -160,13 +161,13 @@ fun NowPlayingScreen(
                     AlbumArt(api, track.artItemId, size = artSize, cornerRadius = Radii.panel, maxWidth = 800, localPath = track.localArtPath)
                     // While casting the audio isn't decoded here: no bars.
                     if (effects != null && showBars) {
-                        SpectrumBars(effects, player.isPlaying, accent, Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(64.dp))
+                        SpectrumBars(effects, player.isPlaying, artAccent?.let { accent }, Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(64.dp))
                     }
                     Titles(player, track, castName, accent, qualityDetail, rememberArtistTap(api, track, isOnline, onOpenArtist))
                     player.lastError?.let { ErrorText(it) }
-                    Seek(player)
+                    Seek(player, accent)
                     Controls(player)
-                    Toggles(player, visualiser.takeUnless { casting }, castButton)
+                    Toggles(player, visualiser.takeUnless { casting }, castButton, accent)
                 } else {
                     Box(Modifier.size(artSize).clip(RoundedCornerShape(Radii.panel)).background(TetsubiColors.surface))
                     when {
@@ -273,19 +274,19 @@ private fun rememberArtistTap(api: JellyfinApi, track: PlaybackTrack, isOnline: 
 @OptIn(ExperimentalTime::class)
 @Composable
 private fun Titles(
-    player: PlayerController, track: PlaybackTrack, castName: String?, accent: Color?, qualityDetail: QualityDetailSetting,
+    player: PlayerController, track: PlaybackTrack, castName: String?, accent: Color, qualityDetail: QualityDetailSetting,
     onArtist: (() -> Unit)?,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(track.title, style = tetsubiType.nowPlayingTitle, color = TetsubiColors.textPrimary, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
         Text(
-            track.artist, style = tetsubiType.nowPlayingArtist, color = if (onArtist != null) TetsubiColors.blue else TetsubiColors.textSecondary,
+            track.artist, style = tetsubiType.nowPlayingArtist, color = if (onArtist != null) accent else TetsubiColors.textSecondary,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.artistLink(track.artist, onArtist),
         )
         Text(track.album, style = tetsubiType.body.copy(fontSize = 15.sp), color = TetsubiColors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (castName != null) {
             Text(
-                CastRoute.playingOn(castName), style = tetsubiType.control, color = TetsubiColors.blue,
+                CastRoute.playingOn(castName), style = tetsubiType.control, color = accent,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
@@ -333,7 +334,7 @@ private val infoColor = TetsubiColors.textSecondary
  * under the pointer it takes the art's colour, as the toggles.
  */
 @Composable
-private fun QualityLabel(quality: QualityText, setting: QualityDetailSetting, accent: Color?) {
+private fun QualityLabel(quality: QualityText, setting: QualityDetailSetting, accent: Color) {
     if (!quality.switches) {
         Text(quality.text, style = tetsubiType.caption, color = infoColor, maxLines = 1)
         return
@@ -344,7 +345,7 @@ private fun QualityLabel(quality: QualityText, setting: QualityDetailSetting, ac
     Text(
         quality.text,
         style = tetsubiType.caption,
-        color = if (pressed || hovered) accent ?: TetsubiColors.blue else infoColor,
+        color = if (pressed || hovered) accent else infoColor,
         maxLines = 1,
         modifier = Modifier
             .clickable(
@@ -368,9 +369,9 @@ private fun ErrorText(message: String) {
 }
 
 @Composable
-private fun Seek(player: PlayerController) {
+private fun Seek(player: PlayerController, accent: Color) {
     var dragging by remember { mutableStateOf<Float?>(null) }
-    val line = TetsubiColors.blue
+    val line = accent
     val progress = if (player.duration > 0) (player.position / player.duration).toFloat().coerceIn(0f, 1f) else 0f
     Column(Modifier.fillMaxWidth()) {
         if (player.maniacMode) {
@@ -388,6 +389,7 @@ private fun Seek(player: PlayerController) {
                     dragging?.let { player.seekToProgress(it.toDouble()) }
                     dragging = null
                 },
+                accent = accent,
                 modifier = Modifier.semantics { contentDescription = "Position" },
             )
         }
@@ -427,38 +429,38 @@ private val noCastDevice = MutableStateFlow<String?>(null)
 private val noCastDevices = MutableStateFlow(false)
 
 @Composable
-private fun Toggles(player: PlayerController, visualiser: VisualiserToggle?, cast: CastButton) {
+private fun Toggles(player: PlayerController, visualiser: VisualiserToggle?, cast: CastButton, accent: Color) {
     val output = rememberOutputSwitcher()
     val castPicker = rememberCastPicker(cast.casting)
     val showCast = castPicker != null && cast.visible
-    // Round 44 dp buttons: blue tint and a blue icon when on. Shuffle and Repeat are hidden in Maniac Mode;
+    // Round 44 dp buttons: tint and icon in the art's accent when on. Shuffle and Repeat are hidden in Maniac Mode;
     // the rest are hidden where the platform has none (the desktop has no Visualiser, Cast or Output).
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), modifier = Modifier.fillMaxWidth()) {
         if (!player.maniacMode) {
             RoundIconButton(
-                "Shuffle: ${if (player.shuffle) "On" else "Off"}", onClick = player::toggleShuffle, on = player.shuffle,
+                "Shuffle: ${if (player.shuffle) "On" else "Off"}", onClick = player::toggleShuffle, on = player.shuffle, accent = accent,
             ) { ShuffleIcon(22.dp, it) }
             RoundIconButton(
                 "Repeat: ${when (player.repeatMode) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "1" }}",
-                onClick = player::cycleRepeatMode, on = player.repeatMode != RepeatMode.OFF,
+                onClick = player::cycleRepeatMode, on = player.repeatMode != RepeatMode.OFF, accent = accent,
             ) { RepeatIcon(22.dp, it, one = player.repeatMode == RepeatMode.ONE) }
         }
         // Stays in Maniac Mode (as iOS).
         if (visualiser != null) {
             RoundIconButton(
-                if (visualiser.isOn) "Visualiser, on" else "Visualiser, off", onClick = visualiser::toggle, on = visualiser.isOn,
+                if (visualiser.isOn) "Visualiser, on" else "Visualiser, off", onClick = visualiser::toggle, on = visualiser.isOn, accent = accent,
             ) { WaveformIcon(22.dp, it) }
         }
         // Next to the Visualiser (hidden while casting).
         if (castPicker != null && showCast) {
             RoundIconButton(
-                if (cast.casting) "Casting. Change or stop" else "Play on a Cast device", onClick = castPicker, on = cast.casting,
+                if (cast.casting) "Casting. Change or stop" else "Play on a Cast device", onClick = castPicker, on = cast.casting, accent = accent,
             ) { CastIcon(22.dp, it) }
         }
         if (output != null) {
             // On while music goes to headphones, Bluetooth, USB…, as iOS's AirPlay icon.
             val external = rememberExternalOutput()
-            RoundIconButton("Choose speakers or headphones", onClick = output, on = external) { SpeakerIcon(22.dp, it) }
+            RoundIconButton("Choose speakers or headphones", onClick = output, on = external, accent = accent) { SpeakerIcon(22.dp, it) }
         }
     }
 }

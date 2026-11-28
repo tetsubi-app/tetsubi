@@ -593,7 +593,7 @@ class PlayQueueTest {
     @Test
     fun maniacModeAllowsOnlyReplacingAndAdding() {
         val allowed = QueueEdit.entries.filter { PlayQueue.canEdit(it, maniacMode = true) }
-        assertEquals(listOf(QueueEdit.REPLACE, QueueEdit.PLAY_NEXT, QueueEdit.ADD_TO_QUEUE), allowed)
+        assertEquals(listOf(QueueEdit.REPLACE, QueueEdit.ADD_TO_QUEUE), allowed)
         assertTrue(QueueEdit.entries.all { PlayQueue.canEdit(it, maniacMode = false) })
     }
 

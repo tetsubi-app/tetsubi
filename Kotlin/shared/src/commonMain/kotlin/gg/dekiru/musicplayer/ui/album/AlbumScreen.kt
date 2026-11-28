@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -117,7 +118,7 @@ fun AlbumScreen(
     Column(Modifier.fillMaxSize().screenInsets()) {
         PageHeader(null, onBack = onBack) {
             // The listening queue (the player confirms with "Playing next" / "Added to queue"), then the playlist.
-            val queue = player?.takeIf { it.isSupported }?.let { p -> queueActions({ p.playNext(album) }, { p.addToQueue(album) }) }.orEmpty()
+            val queue = player?.takeIf { it.isSupported }?.let { p -> queueActions({ p.playNext(album) }, { p.addToQueue(album) }, p.maniacMode) }.orEmpty()
             val add = onAddToPlaylist?.takeIf { model.tracks.isNotEmpty() }?.let { add ->
                 MenuAction("Add to Playlist…", enabled = isOnline) { add(model.tracks.map { it.id }) }
             }
@@ -187,6 +188,7 @@ private fun Actions(m: DetailMetrics, model: AlbumModel, player: PlayerControlle
                 },
                 enabled = player?.isSupported == true,
                 color = if (nowPlaying) TetsubiColors.pink else TetsubiColors.blue,
+                icon = if (nowPlaying) null else ({ PlayIcon(16.dp, Color.White) }),
             )
             RoundIconButton(
                 if (model.isFavorite) "Remove from favourites" else "Add to favourites", onClick = model::toggleFavorite, size = 40.dp,
@@ -286,20 +288,21 @@ private fun LazyListScope.trackRows(
     isOnline: Boolean,
     prompt: PlayPrompt,
 ) {
-    items(tracks, key = { "track-${it.id}" }) { track ->
+    itemsIndexed(tracks, key = { _, track -> "track-${track.id}" }) { index, track ->
         val playingHere = player != null && player.currentTrack?.id == track.id && player.isPlaying(model.album)
         // Maniac Mode: albums start at track 1, so rows aren't buttons.
         val canTap = player?.isSupported == true && !player.maniacMode
-        // The song's menu (⋯, long press, right-click): Play Next, Add to Queue (in Maniac Mode too), Add to Playlist….
+        // The song's menu (⋯, long press, right-click): Play Next (not in Maniac Mode), Add to Queue, Add to Playlist….
         val queue = player?.takeIf { it.isSupported }?.let { p ->
-            queueActions({ p.playNext(model.album, listOf(track)) }, { p.addToQueue(model.album, listOf(track)) })
+            queueActions({ p.playNext(model.album, listOf(track)) }, { p.addToQueue(model.album, listOf(track)) }, p.maniacMode)
         }.orEmpty()
         val menu = queue + listOfNotNull(onAddToPlaylist?.let { add -> MenuAction("Add to Playlist…", enabled = isOnline) { add(listOf(track.id)) } })
         WithContextMenu(menu) { openMenu ->
             ListRow(
                 title = track.displayName,
                 subtitle = track.album?.takeIf { !model.allTracksFromThisAlbum && it.isNotEmpty() },
-                leadingNumber = track.trackNumber.toString().padStart(2, '0'),
+                // A server without track numbers sends 0: number the rows by position instead of "00".
+                leadingNumber = (track.trackNumber.takeIf { it > 0 } ?: (index + 1)).toString().padStart(2, '0'),
                 trailingMeta = formatDuration(track.durationSeconds),
                 trailing = if (menu.isNotEmpty()) ({ MoreMenuButton("More for ${track.displayName}", menu) }) else null,
                 current = playingHere,

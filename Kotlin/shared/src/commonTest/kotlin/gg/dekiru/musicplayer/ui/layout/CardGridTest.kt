@@ -104,14 +104,22 @@ class CardGridTest {
     }
 
     @Test
-    fun theStripSitsOverTheMarginWhereItFits() {
-        // Medium and Expanded margins (24, 32) already hold the 22 dp strip: no change to the columns.
-        assertEquals(658f, gridContentWidth(706f, 24f, 22f), 0.001f)
+    fun theStripKeepsAnEightDpGapFromTheGrid() {
+        // Strip 22 + gap 8 = 30 on the right everywhere: wider than every page margin (16, 24, 32 except Expanded's 32).
+        assertEquals(30f, gridEndMargin(16f, 22f), 0.001f)
+        assertEquals(30f, gridEndMargin(24f, 22f), 0.001f)
+        assertEquals(32f, gridEndMargin(32f, 22f), 0.001f)
+        // No strip: just the margin.
+        assertEquals(16f, gridEndMargin(16f), 0.001f)
         assertEquals(658f, gridContentWidth(706f, 24f), 0.001f)
-        assertEquals(Density.M.let { columns(gridContentWidth(706f, 24f, 22f), it, 16f) }, 4)
-        // Compact (16): the strip takes 6 dp more on the right.
-        assertEquals(390f - 16f - 22f, gridContentWidth(390f, 16f, 22f), 0.001f)
+        // Compact: 390 - 16 - 30.
+        assertEquals(344f, gridContentWidth(390f, 16f, 22f), 0.001f)
         assertEquals(2, columns(gridContentWidth(390f, 16f, 22f), Density.M, 12f))
+        // Medium: 706 - 24 - 30 = 652, still four columns.
+        assertEquals(652f, gridContentWidth(706f, 24f, 22f), 0.001f)
+        assertEquals(4, columns(gridContentWidth(706f, 24f, 22f), Density.M, 16f))
+        // Expanded: the 32 margin already holds strip + gap.
+        assertEquals(976f, gridContentWidth(1040f, 32f, 22f), 0.001f)
     }
 
     @Test

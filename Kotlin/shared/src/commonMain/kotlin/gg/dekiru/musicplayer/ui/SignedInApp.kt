@@ -319,7 +319,7 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
                                 )
                                 is ArtistEntry -> ArtistScreen(
                                     api, top.model, onOpen = ::open, onBack = ::back,
-                                    network = session.environment.network.state, downloads = downloads,
+                                    network = session.environment.network.state, downloads = downloads, player = playing,
                                 )
                                 is PlaylistPageEntry -> PlaylistScreen(
                                     api, top.model, playing, onOpenAlbum = ::open, onBack = ::back,

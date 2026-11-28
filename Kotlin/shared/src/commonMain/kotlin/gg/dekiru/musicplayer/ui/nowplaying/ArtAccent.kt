@@ -1,5 +1,7 @@
 package gg.dekiru.musicplayer.ui.nowplaying
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -16,6 +18,7 @@ import androidx.compose.ui.unit.IntSize
 import coil3.PlatformContext
 import coil3.compose.LocalPlatformContext
 import gg.dekiru.musicplayer.data.api.JellyfinApi
+import gg.dekiru.musicplayer.ui.TetsubiColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -52,6 +55,18 @@ fun rememberArtAccent(api: JellyfinApi, itemId: String?, localPath: String? = nu
     }
     return accent
 }
+
+/**
+ * The colour Now Playing and the mini player use for progress, active toggle icons and the artist
+ * link: the art's accent ([ArtPalette] already lifts it to a legible brightness), or the brand blue
+ * until it's worked out or when the art has none.
+ */
+fun resolveAccent(art: Color?): Color = art ?: TetsubiColors.blue
+
+/** [resolveAccent] fading as the art changes (as the background does). */
+@Composable
+fun rememberAnimatedAccent(art: Color?): Color =
+    animateColorAsState(resolveAccent(art), tween(300), label = "accent").value
 
 /**
  * The art at `url` through the app's image cache, as a bitmap whose pixels

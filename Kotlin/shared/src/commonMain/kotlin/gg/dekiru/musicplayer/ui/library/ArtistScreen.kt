@@ -1,6 +1,16 @@
 package gg.dekiru.musicplayer.ui.library
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import gg.dekiru.musicplayer.playback.PlayerController
+import gg.dekiru.musicplayer.ui.components.LocalPlayPrompt
+import gg.dekiru.musicplayer.ui.components.PillButton
+import gg.dekiru.musicplayer.ui.components.PlayIcon
+import androidx.compose.ui.graphics.Color
+import gg.dekiru.musicplayer.ui.components.PlayChoice
+import gg.dekiru.musicplayer.ui.components.PlayPrompt
+import gg.dekiru.musicplayer.ui.components.PrimaryButton
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -56,7 +66,8 @@ import kotlinx.coroutines.flow.StateFlow
  * albums as the app's grid with the year under each title. Two panes from Expanded (info 320 on the
  * left, the grid on the right); stacked on Compact. The card size control sits in the header.
  * Offline: their downloaded albums only, and no About.
- * There is no Play all or Shuffle here: the player has no "play an artist" yet.
+ * Play all (oldest release first, in order) and Shuffle (hidden in Maniac Mode) queue up to 500 tracks of
+ * the albums shown; offline that is the downloaded albums.
  */
 @Composable
 fun ArtistScreen(
@@ -66,6 +77,7 @@ fun ArtistScreen(
     onBack: () -> Unit,
     network: StateFlow<NetworkState> = MutableStateFlow(NetworkState()),
     downloads: DownloadManager? = null,
+    player: PlayerController? = null,
 ) {
     val online = network.collectAsState().value.online
     LaunchedEffect(model, online) {
@@ -79,6 +91,7 @@ fun ArtistScreen(
     val downloadedAlbums = remember(downloaded) { HomeModel.downloadedRow(downloaded) }
     val albums = ArtistModel.ordered(model.shown(!online, downloadedAlbums, isDownloaded))
     val grid = rememberLazyGridState()
+    val prompt = LocalPlayPrompt.current
     val info = model.info?.takeIf { online }
     val windowClass = LocalWindowClass.current
     val margin = windowClass.pageMargin
@@ -106,7 +119,7 @@ fun ArtistScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         val metrics = DetailMetrics(true, 240.dp)
-                        ArtistInfoBlock(api, model, metrics)
+                        ArtistInfoBlock(api, model, metrics, player, albums, prompt)
                         info?.let { ArtistAbout(model.artist.name, it) }
                     }
                     Box(Modifier.weight(1f).fillMaxHeight()) { albumGrid() }
@@ -116,7 +129,7 @@ fun ArtistScreen(
                 CardGrid(state = grid) { metrics ->
                     fullWidthItem("artist-info") {
                         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            ArtistInfoBlock(api, model, DetailMetrics(false, 160.dp))
+                            ArtistInfoBlock(api, model, DetailMetrics(false, 160.dp), player, albums, prompt)
                         }
                     }
                     items(albums, key = { it.id }) { album ->
@@ -130,7 +143,7 @@ fun ArtistScreen(
                 }
             } else {
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = margin), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    ArtistInfoBlock(api, model, DetailMetrics(false, 160.dp))
+                    ArtistInfoBlock(api, model, DetailMetrics(false, 160.dp), player, albums, prompt)
                     albumGrid()
                     info?.let { ArtistAbout(model.artist.name, it) }
                 }
@@ -141,9 +154,40 @@ fun ArtistScreen(
 
 /** The round picture, name and album count. */
 @Composable
-private fun ArtistInfoBlock(api: JellyfinApi, model: ArtistModel, m: DetailMetrics) {
+private fun ArtistInfoBlock(
+    api: JellyfinApi, model: ArtistModel, m: DetailMetrics, player: PlayerController?, albums: List<JellyfinAlbum>, prompt: PlayPrompt,
+) {
     // Smaller than an album's cover (240 two-pane, 200 stacked) with the lighter placeholder, as on iOS and Mac.
     val art = minOf(m.artSize, if (m.twoPane) 240.dp else 200.dp)
     AlbumArt(api, model.artist.id, size = art, cornerRadius = art / 2, maxWidth = 600, placeholderColor = TetsubiColors.surface)
     DetailTitle(m, model.artist.name, meta = model.albums.size.takeIf { it > 0 }?.let { if (it == 1) "1 album" else "$it albums" })
+    ArtistActions(model, m, player, albums, prompt)
 }
+
+/** Play all and Shuffle (not in Maniac Mode), as on an album; off until the albums are loaded. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ArtistActions(model: ArtistModel, m: DetailMetrics, player: PlayerController?, albums: List<JellyfinAlbum>, prompt: PlayPrompt) {
+    val canPlay = player?.isSupported == true && albums.isNotEmpty()
+    FlowRow(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, if (m.twoPane) Alignment.Start else Alignment.CenterHorizontally),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PrimaryButton("Play all", onClick = { player?.let { prompt.play(it, artistChoice(model, it, albums)) } }, enabled = canPlay, icon = { PlayIcon(16.dp, Color.White) })
+        if (player?.maniacMode != true) {
+            PillButton(
+                "Shuffle", onClick = { player?.let { prompt.play(it, artistChoice(model, it, albums, shuffled = true)) } }, enabled = canPlay,
+                icon = { ShuffleIcon(18.dp, if (canPlay) TetsubiColors.textPrimary else TetsubiColors.textTertiary) },
+            )
+        }
+    }
+}
+
+/** Play the artist's albums (or shuffled), or, from the prompt, queue them instead. */
+private fun artistChoice(model: ArtistModel, player: PlayerController, albums: List<JellyfinAlbum>, shuffled: Boolean = false) = PlayChoice(
+    title = model.artist.name,
+    replace = { player.play(model.artist, albums, shuffled = shuffled) },
+    playNext = { player.playNext(model.artist, albums) },
+    addToQueue = { player.addToQueue(model.artist, albums) },
+)

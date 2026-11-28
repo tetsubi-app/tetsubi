@@ -182,7 +182,7 @@ fun PillButton(
 }
 
 /**
- * A round icon button: surface fill, or blue tint with a blue icon when [on]. [icon] gets the colour
+ * A round icon button: surface fill, or a tint of [accent] (blue by default) with an [accent] icon when [on]. [icon] gets the colour
  * to draw with. 44 for Now Playing's toggles; 40 beside the Play button.
  */
 @Composable
@@ -193,12 +193,14 @@ fun RoundIconButton(
     size: Dp = 44.dp,
     on: Boolean = false,
     enabled: Boolean = true,
+    /** The on-state colour (Now Playing passes the art's accent). */
+    accent: Color = TetsubiColors.blue,
     icon: @Composable (Color) -> Unit,
 ) {
     val shape = RoundedCornerShape(Radii.FULL_PERCENT)
-    val tint = if (on) TetsubiColors.blue else TetsubiColors.textPrimary
+    val tint = if (on) accent else TetsubiColors.textPrimary
     Box(
-        modifier.size(size).clip(shape).background(if (on) TetsubiColors.blueTint else TetsubiColors.surface, shape)
+        modifier.size(size).clip(shape).background(if (on) accent.copy(alpha = 0.2f) else TetsubiColors.surface, shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,

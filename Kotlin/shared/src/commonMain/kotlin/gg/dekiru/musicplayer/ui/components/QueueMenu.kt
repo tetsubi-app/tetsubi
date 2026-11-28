@@ -64,18 +64,22 @@ object QueueMenuText {
 @Composable
 fun albumQueueActions(album: JellyfinAlbum): List<MenuAction> {
     val player = LocalPlayer.current?.takeIf { it.isSupported } ?: return emptyList()
-    return queueActions({ player.playNext(album) }, { player.addToQueue(album) })
+    return queueActions({ player.playNext(album) }, { player.addToQueue(album) }, player.maniacMode)
 }
 
 /** "Play Next" and "Add to Queue" for a playlist (its songs are fetched); none without a player. */
 @Composable
 fun playlistQueueActions(playlist: JellyfinPlaylist): List<MenuAction> {
     val player = LocalPlayer.current?.takeIf { it.isSupported } ?: return emptyList()
-    return queueActions({ player.playNext(playlist) }, { player.addToQueue(playlist) })
+    return queueActions({ player.playNext(playlist) }, { player.addToQueue(playlist) }, player.maniacMode)
 }
 
-fun queueActions(playNext: () -> Unit, addToQueue: () -> Unit): List<MenuAction> = listOf(
-    MenuAction(QueueMenuText.PLAY_NEXT, action = playNext),
+/**
+ * The queue entries of a menu. In Maniac Mode there is no "Play Next" (hidden, and the
+ * player refuses it too); pass the player's `maniacMode` (observable state) so the menu follows it.
+ */
+fun queueActions(playNext: () -> Unit, addToQueue: () -> Unit, maniacMode: Boolean): List<MenuAction> = listOfNotNull(
+    if (maniacMode) null else MenuAction(QueueMenuText.PLAY_NEXT, action = playNext),
     MenuAction(QueueMenuText.ADD_TO_QUEUE, action = addToQueue),
 )
 
@@ -202,7 +206,7 @@ class PlayPrompt {
 val LocalPlayPrompt = staticCompositionLocalOf { PlayPrompt() }
 
 @Composable
-fun PlayPromptDialog(prompt: PlayPrompt) {
+fun PlayPromptDialog(prompt: PlayPrompt, maniacMode: Boolean = LocalPlayer.current?.maniacMode == true) {
     val choice = prompt.pending ?: return
     fun pick(action: () -> Unit) {
         prompt.dismiss()
@@ -215,7 +219,7 @@ fun PlayPromptDialog(prompt: PlayPrompt) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(PlayPrompt.MESSAGE, modifier = Modifier.padding(bottom = 8.dp))
                 PromptButton(PlayPrompt.REPLACE) { pick(choice.replace) }
-                PromptButton(QueueMenuText.PLAY_NEXT) { pick(choice.playNext) }
+                if (!maniacMode) PromptButton(QueueMenuText.PLAY_NEXT) { pick(choice.playNext) }
                 PromptButton(QueueMenuText.ADD_TO_QUEUE) { pick(choice.addToQueue) }
             }
         },

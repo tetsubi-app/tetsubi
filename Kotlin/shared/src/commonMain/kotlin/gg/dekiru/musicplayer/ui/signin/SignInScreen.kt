@@ -36,6 +36,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -80,12 +81,18 @@ import org.jetbrains.compose.resources.painterResource
  * code or the username & password form.
  */
 @Composable
-fun SignInScreen(authenticator: Authenticator, onConnected: (JellyfinApi) -> Unit) {
+fun SignInScreen(
+    authenticator: Authenticator,
+    onConnected: (JellyfinApi) -> Unit,
+    /** The network search; replaceable so a preview or test never touches the network. */
+    searchNetwork: suspend () -> List<gg.dekiru.musicplayer.data.auth.DiscoveredServer> = { gg.dekiru.musicplayer.data.auth.ServerDiscovery.search() },
+) {
     val scope = rememberCoroutineScope()
-    val model = remember { SignInModel(authenticator, scope, onConnected) }
+    val model = remember { SignInModel(authenticator, scope, onConnected, searchNetwork = searchNetwork) }
     val quickConnectState by model.quickConnect.state.collectAsState()
 
     LaunchedEffect(Unit) { model.onAppear() }
+    DisposableEffect(model) { onDispose { model.onDisappear() } }
     LaunchedEffect(quickConnectState) {
         // Any Quick Connect failure reveals the manual form with the reason.
         (quickConnectState as? State.Failed)?.let { model.onQuickConnectFailed(it.message) }
@@ -153,15 +160,14 @@ private fun ServerBox(model: SignInModel) {
         Field("Server URL") {
             OutlinedTextField(
                 value = model.serverUrl,
-                onValueChange = { model.serverUrl = it },
+                onValueChange = model::changeServerUrl,
                 placeholder = { Text(ServerAddress.EXAMPLE, color = TetsubiColors.textTertiary) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Uri,
                     autoCorrectEnabled = false,
-                    imeAction = ImeAction.Go,
+                    imeAction = ImeAction.Done,
                 ),
-                keyboardActions = KeyboardActions(onGo = { model.submitServer() }),
                 colors = fieldColors(),
                 shape = RoundedCornerShape(Radii.card),
                 modifier = Modifier.fillMaxWidth(),
@@ -242,12 +248,15 @@ private fun QuickConnectPanel(model: SignInModel, state: State) {
                 Waiting("Waiting for approval…")
             }
             state is State.Failed -> ErrorText(state.message)
-            else -> Text(
-                if (model.hasServerUrl) "Press Go to get a code." else "Choose your server above, or type its address.",
-                style = tetsubiType.control.copy(fontWeight = FontWeight.Normal),
-                color = TetsubiColors.textTertiary,
-                textAlign = TextAlign.Center,
-            )
+            else -> {
+                Text(
+                    if (model.hasServerUrl) "Tap Use Quick Connect to get a code." else "Choose your server above, or type its address.",
+                    style = tetsubiType.control.copy(fontWeight = FontWeight.Normal),
+                    color = TetsubiColors.textTertiary,
+                    textAlign = TextAlign.Center,
+                )
+                PrimaryButton("Use Quick Connect", onClick = model::startQuickConnect, enabled = model.hasServerUrl, modifier = Modifier.fillMaxWidth())
+            }
         }
         LinkButton("Sign in with username & password", onClick = model::useManual)
     }

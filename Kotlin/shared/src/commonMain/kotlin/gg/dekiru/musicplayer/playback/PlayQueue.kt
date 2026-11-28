@@ -50,6 +50,10 @@ data class QueueGroup(
         fun playlist(playlist: JellyfinPlaylist) =
             QueueGroup(playlist.id, QueueGroupKind.PLAYLIST, playlist.displayName, null, playlist.id.takeIf { playlist.hasArt })
 
+        /** An artist's tracks (Play all, Shuffle): titled and pictured by the artist. */
+        fun artist(artist: gg.dekiru.musicplayer.data.models.JellyfinArtist) =
+            QueueGroup(artist.id, QueueGroupKind.TRACKS, artist.name, null, artist.id)
+
         /** Single tracks: titled and pictured by the first. */
         fun tracks(tracks: List<QueueTrack>): QueueGroup? {
             val first = tracks.firstOrNull() ?: return null
@@ -495,9 +499,9 @@ class PlayQueue(
     )
 
     companion object {
-        /** Maniac Mode allows only replacing and adding; otherwise everything. */
+        /** Maniac Mode allows only replacing and adding at the end (not Play Next); otherwise everything. */
         fun canEdit(edit: QueueEdit, maniacMode: Boolean): Boolean =
-            !maniacMode || edit == QueueEdit.REPLACE || edit == QueueEdit.PLAY_NEXT || edit == QueueEdit.ADD_TO_QUEUE
+            !maniacMode || edit == QueueEdit.REPLACE || edit == QueueEdit.ADD_TO_QUEUE
 
         /**
          * The queue a snapshot holds, repaired: later duplicate entry IDs

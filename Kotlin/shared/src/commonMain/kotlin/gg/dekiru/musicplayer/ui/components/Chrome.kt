@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -259,7 +260,7 @@ fun LoadingSpinner(modifier: Modifier = Modifier) {
 
 /** The primary button: 40 high pill, blue fill, white label; [working] shows a spinner in place of the label's room. */
 @Composable
-fun PrimaryButton(title: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, working: Boolean = false, color: Color = TetsubiColors.blue) {
+fun PrimaryButton(title: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, working: Boolean = false, color: Color = TetsubiColors.blue, icon: (@Composable () -> Unit)? = null) {
     val shape = RoundedCornerShape(Radii.FULL_PERCENT)
     Box(
         modifier.height(40.dp).clip(shape)
@@ -269,7 +270,10 @@ fun PrimaryButton(title: String, onClick: () -> Unit, modifier: Modifier = Modif
         contentAlignment = Alignment.Center,
     ) {
         // The title keeps the button's width while the spinner shows.
-        Text(title, style = tetsubiType.rowTitle.copy(fontWeight = FontWeight.SemiBold), color = Color.White.copy(alpha = if (working) 0f else 1f), maxLines = 1)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (icon != null) Box(Modifier.alpha(if (working) 0f else 1f)) { icon() }
+            Text(title, style = tetsubiType.rowTitle.copy(fontWeight = FontWeight.SemiBold), color = Color.White.copy(alpha = if (working) 0f else 1f), maxLines = 1)
+        }
         if (working) CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
     }
 }

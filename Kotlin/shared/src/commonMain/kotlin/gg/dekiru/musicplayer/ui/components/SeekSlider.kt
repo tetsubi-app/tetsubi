@@ -19,11 +19,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import gg.dekiru.musicplayer.ui.TetsubiColors
 
 /**
- * The seek slider of the redesign: a thin 4 dp track (white 12%) with blue progress and a small
+ * The seek slider of the redesign: a thin 4 dp track (white 12%) with progress in [accent] (blue by default) and a small
  * round thumb (12 dp, 16 dp while hovered, dragged, pressed or focused) instead of Material's tall bar.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,6 +34,8 @@ fun SeekSlider(
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The progress colour: the art's accent on Now Playing and the mini player, brand blue elsewhere. */
+    accent: Color = TetsubiColors.blue,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val active = interaction.collectIsDraggedAsState().value || interaction.collectIsHoveredAsState().value ||
@@ -51,7 +54,7 @@ fun SeekSlider(
         track = { state ->
             val fraction = ((state.value - state.valueRange.start) / (state.valueRange.endInclusive - state.valueRange.start)).coerceIn(0f, 1f)
             Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(TetsubiColors.hairline)) {
-                Box(Modifier.fillMaxWidth(fraction).height(4.dp).background(TetsubiColors.blue))
+                Box(Modifier.fillMaxWidth(fraction).height(4.dp).background(accent))
             }
         },
     )

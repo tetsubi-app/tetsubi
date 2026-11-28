@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -74,6 +75,7 @@ import gg.dekiru.musicplayer.ui.components.MinusCircleIcon
 import gg.dekiru.musicplayer.ui.components.MoreMenuButton
 import gg.dekiru.musicplayer.ui.components.PageHeader
 import gg.dekiru.musicplayer.ui.components.PillButton
+import gg.dekiru.musicplayer.ui.components.PlayIcon
 import gg.dekiru.musicplayer.ui.components.PlayChoice
 import gg.dekiru.musicplayer.ui.components.PlayPrompt
 import gg.dekiru.musicplayer.ui.components.PrimaryButton
@@ -138,7 +140,7 @@ fun PlaylistScreen(
     val prompt = LocalPlayPrompt.current
     // Play Next and Add to Queue for the whole playlist (its loaded songs).
     val queue = player?.takeIf { it.isSupported && model.entries.isNotEmpty() }?.let { p ->
-        queueActions({ p.playNext(model.playlist, model.entries) }, { p.addToQueue(model.playlist, model.entries) })
+        queueActions({ p.playNext(model.playlist, model.entries) }, { p.addToQueue(model.playlist, model.entries) }, p.maniacMode)
     }.orEmpty()
 
     Column(Modifier.fillMaxSize().screenInsets()) {
@@ -211,9 +213,9 @@ fun PlaylistScreen(
                             player.currentPlace == position && player.currentTrack?.id == entry.track.id
                         // Maniac Mode: playlists start at the first song, so rows aren't buttons.
                         val canTap = player?.isSupported == true && !player.maniacMode
-                        // The song's own Play Next / Add to Queue (in Maniac Mode too), as part of the playlist.
+                        // The song's own Play Next (not in Maniac Mode) / Add to Queue, as part of the playlist.
                         val songQueue = player?.takeIf { it.isSupported }?.let { p ->
-                            queueActions({ p.playNext(model.playlist, listOf(entry)) }, { p.addToQueue(model.playlist, listOf(entry)) })
+                            queueActions({ p.playNext(model.playlist, listOf(entry)) }, { p.addToQueue(model.playlist, listOf(entry)) }, p.maniacMode)
                         }.orEmpty()
                         EntryRow(
                             api, entry,
@@ -473,6 +475,7 @@ private fun Actions(
                 },
                 enabled = canPlay,
                 color = if (nowPlaying) TetsubiColors.pink else TetsubiColors.blue,
+                icon = if (nowPlaying) null else ({ PlayIcon(16.dp, Color.White) }),
             )
             if (player?.maniacMode != true) {
                 PillButton(

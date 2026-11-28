@@ -32,10 +32,17 @@ object SettingsText {
     const val STREAMING_OVER_MOBILE = "Streaming over mobile data"
     const val NORMALISE = "Normalise volume"
     const val EQUALISER = "Equaliser"
-    const val PLAYBACK_FOOTER =
+    const val PLAYBACK_MOBILE_FOOTER =
         "On mobile data, tracks stream at the chosen quality (from the next track); Original (as served) streams " +
-            "the files as they are. Normalise volume evens out loud and quiet tracks using Jellyfin's loudness data; it can " +
+            "the files as they are. "
+    const val PLAYBACK_FOOTER =
+        "Normalise volume evens out loud and quiet tracks using Jellyfin's loudness data; it can " +
             "only turn tracks down, and downloaded tracks play at full volume."
+
+    /** The Playback footer: the mobile-data sentence only where there is mobile data. */
+    fun playbackFooter(platformName: String): String =
+        if (showsMobileData(platformName)) PLAYBACK_MOBILE_FOOTER + PLAYBACK_FOOTER else PLAYBACK_FOOTER
+
     // iOS adds "Gapless playback is on unless the equaliser or visualiser is in use." Not on Android:
     // the effects run inside ExoPlayer's audio output, so gapless stays on with them.
 
@@ -76,7 +83,7 @@ object SettingsText {
         DEKIRU Sans — based on IBM Plex Sans by IBM Corp., SIL Open Font License 1.1.
     """.trimIndent()
 
-    /** "Download over mobile data" and its footer: Android only (the desktop has no metered networks). */
+    /** "Download over mobile data", "Streaming over mobile data" and their footer sentences: Android only (the desktop has no metered networks). */
     fun showsMobileData(platformName: String): Boolean = platformName == "Android"
 
     /** The version row: the version name and build number, "1.0 (5)". */

@@ -307,7 +307,7 @@ class QueuePlaybackTest {
         settle()
         s.player.addToQueue(album("B"))
         settle()
-        s.player.playNext(album("C"))
+        s.player.playNext(album("C")) // refused
         settle()
         val before = s.player.playQueue
         val ids = before.playOrder
@@ -318,11 +318,50 @@ class QueuePlaybackTest {
         s.player.changeShuffle(true)
         s.player.changeRepeatMode(RepeatMode.ALL)
         assertEquals(before, s.player.playQueue)
-        assertEquals(listOf("A-t1", "A-t2", "C-t1", "C-t2", "B-t1", "B-t2"), s.engineTracks)
+        assertEquals(listOf("A-t1", "A-t2", "B-t1", "B-t2"), s.engineTracks)
         // The queue still moves on to the next album.
         s.engine.finishTrack()
         s.engine.finishTrack()
-        assertEquals("C-t1", s.player.currentTrack?.id)
+        assertEquals("B-t1", s.player.currentTrack?.id)
+    }
+
+    @Test
+    fun maniacModeRefusesEveryPlayNextButAllowsAddAndPlay() = runTest {
+        val s = setup(tracks = 2, maniac = true)
+        s.player.play(album("A"))
+        settle()
+        val before = s.player.playQueue
+        val playlist = gg.dekiru.musicplayer.data.models.JellyfinPlaylist(id = "P", name = "Mix")
+        s.player.playNext(album("C"))
+        s.player.playNext(playlist)
+        s.player.playNext(album("C"), emptyList())
+        s.player.playNext(playlist, emptyList())
+        settle()
+        assertEquals(before, s.player.playQueue, "Play Next changes nothing in Maniac Mode")
+        assertEquals(listOf("A-t1", "A-t2"), s.engineTracks)
+        assertEquals(null, s.player.queueNotice, "a refusal says nothing, like the other refused edits")
+        // Add to Queue still works.
+        s.player.addToQueue(album("B"))
+        settle()
+        assertEquals(listOf("A-t1", "A-t2", "B-t1", "B-t2"), s.engineTracks)
+        // Play replaces the queue.
+        s.player.play(album("D"))
+        settle()
+        assertEquals(listOf("D-t1", "D-t2"), s.engineTracks)
+    }
+
+    @Test
+    fun turningManiacModeOffRestoresPlayNext() = runTest {
+        val s = setup(tracks = 2, maniac = true)
+        s.player.play(album("A"))
+        settle()
+        s.player.playNext(album("C"))
+        settle()
+        assertEquals(listOf("A-t1", "A-t2"), s.engineTracks)
+        s.player.changeManiacMode(false)
+        s.player.playNext(album("C"))
+        settle()
+        assertEquals(listOf("A-t1", "A-t2", "C-t1", "C-t2"), s.engineTracks)
     }
 
     @Test

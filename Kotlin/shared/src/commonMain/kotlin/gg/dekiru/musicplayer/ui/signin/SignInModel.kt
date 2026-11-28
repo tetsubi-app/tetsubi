@@ -16,10 +16,13 @@ import kotlinx.coroutines.launch
 
 /**
  * The sign-in screen's state and actions (as `ServerConfigView`'s on iOS).
- * Quick Connect first; username & password as the fallback, shown on any
+ * Quick Connect panel first; username & password as the fallback, shown on any
  * Quick Connect failure. The server field is shared by both, with servers
  * found on the network listed below it (one found and nothing typed: picked).
- * Everything stops when `scope` ends (the screen goes away).
+ * Discovery and picking only fill in the address: Quick Connect (which creates a
+ * pending approval request on the server) starts only from the user's explicit
+ * "Use Quick Connect" tap, and stops (code discarded) when the address changes,
+ * on the manual form and when the screen goes away.
  */
 class SignInModel(
     private val authenticator: Authenticator,
@@ -37,6 +40,7 @@ class SignInModel(
     var mode by mutableStateOf(Mode.QuickConnect)
         private set
     var serverUrl by mutableStateOf("")
+        private set
     var username by mutableStateOf("")
     var password by mutableStateOf("")
     var isConnecting by mutableStateOf(false)
@@ -61,12 +65,29 @@ class SignInModel(
     val hasServerUrl: Boolean get() = trimmedServerUrl.isNotEmpty()
     val canSignIn: Boolean get() = !isConnecting && password.isNotEmpty() && hasServerUrl
 
-    /** First time the screen shows: search the network (and start Quick Connect if an address is there). */
+    /** First time the screen shows: search the network. Nothing contacts a server but the search itself. */
     fun onAppear() {
         if (started) return
         started = true
-        if (mode == Mode.QuickConnect && hasServerUrl) startQuickConnect()
         search()
+    }
+
+    /** The user edited the address: a Quick Connect request for the old one is dropped. */
+    fun changeServerUrl(text: String) {
+        if (text == serverUrl) return
+        serverUrl = text
+        stopQuickConnect()
+    }
+
+    /** The screen goes away: no Quick Connect request is left waiting. */
+    fun onDisappear() {
+        stopQuickConnect()
+    }
+
+    private fun stopQuickConnect() {
+        findJob?.cancel()
+        isFindingServer = false
+        quickConnect.reset()
     }
 
     /** Called by the screen when Quick Connect fails: reveal the manual form with the reason. */
@@ -90,21 +111,16 @@ class SignInModel(
 
     fun pick(server: DiscoveredServer) {
         if (server.address == trimmedServerUrl) return
-        serverUrl = server.address
+        changeServerUrl(server.address)
         errorMessage = null
-        if (mode == Mode.QuickConnect) startQuickConnect()
-    }
-
-    /** Return in the server field. */
-    fun submitServer() {
-        if (mode == Mode.QuickConnect) startQuickConnect()
     }
 
     fun useManual() {
-        quickConnect.cancel()
+        stopQuickConnect()
         mode = Mode.Manual
     }
 
+    /** "Use Quick Connect": the one way a Quick Connect request starts (also from the manual form's link). */
     fun useQuickConnect() {
         errorMessage = null
         mode = Mode.QuickConnect

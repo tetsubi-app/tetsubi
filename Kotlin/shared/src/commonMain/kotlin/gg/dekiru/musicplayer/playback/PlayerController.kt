@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.api.JellyfinError
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
+import gg.dekiru.musicplayer.data.models.JellyfinArtist
 import gg.dekiru.musicplayer.data.models.JellyfinPlaylist
 import gg.dekiru.musicplayer.data.models.JellyfinTrack
 import gg.dekiru.musicplayer.data.models.PlaylistEntry
@@ -294,6 +295,64 @@ class PlayerController(
         return null
     }
 
+    /**
+     * Plays an artist's `albums` (as their page shows them), oldest release first, each in disc and track
+     * order, up to [ArtistTracks.CAP] tracks: the queue becomes these tracks, from the first. `shuffled`
+     * turns shuffle on first (the Shuffle button; refused in Maniac Mode, which plays in order). Shuffle
+     * otherwise stays as it is, as for an album. Downloaded albums play from their files; offline, only
+     * those play. Opens Now Playing; a failure shows as the player's error.
+     */
+    fun play(artist: JellyfinArtist, albums: List<JellyfinAlbum>, shuffled: Boolean = false, openNowPlaying: Boolean = true) {
+        if (!engine.isSupported) return
+        addTurns.cancelAll()
+        val turn = addTurns.take()
+        if (openNowPlaying) isNowPlayingOpen = true
+        lastError = null
+        loadJob?.cancel()
+        isLoading = true
+        loadJob = scope.launch {
+            try {
+                val (media, capped) = artistMedia(albums).getOrElse {
+                    if (!turn.isCancelled) fail(it.message ?: ARTIST_NOT_LOADED)
+                    return@launch
+                }
+                if (media.isEmpty()) {
+                    if (!turn.isCancelled) fail(if (isOnline()) "This artist has no tracks." else ARTIST_NOT_DOWNLOADED)
+                    return@launch
+                }
+                addTurns.finish(turn) {
+                    if (shuffled) changeShuffle(true)
+                    startQueue(QueueGroup.artist(artist), media, null, null)
+                    if (capped) say(ArtistTracks.cappedMessage())
+                }
+            } finally {
+                addTurns.drop(turn)
+            }
+        }
+    }
+
+    /** Queues an artist's tracks (as [play]) after the playing album, or at the end. */
+    fun playNext(artist: JellyfinArtist, albums: List<JellyfinAlbum>) = enqueue(artist, albums, next = true)
+
+    fun addToQueue(artist: JellyfinArtist, albums: List<JellyfinAlbum>) = enqueue(artist, albums, next = false)
+
+    private fun enqueue(artist: JellyfinArtist, albums: List<JellyfinAlbum>, next: Boolean) {
+        if (!engine.isSupported || refusesPlayNext(next)) return
+        val turn = addTurns.take()
+        launchInTurn(turn) {
+            val (media, capped) = artistMedia(albums).getOrElse {
+                if (!turn.isCancelled) say(it.message ?: ARTIST_NOT_LOADED, isError = true)
+                return@launchInTurn
+            }
+            if (turn.isCancelled) return@launchInTurn
+            if (media.isEmpty()) return@launchInTurn say(if (isOnline()) "This artist has no tracks." else ARTIST_NOT_DOWNLOADED, isError = true)
+            addTurns.finish(turn) {
+                add(next, QueueGroup.artist(artist), media, null)
+                if (capped) say(ArtistTracks.cappedMessage())
+            }
+        }
+    }
+
     /** Whether `album` (or one of its discs) is what the playing entry was queued from. A playlist with one of its songs doesn't count. */
     fun isPlaying(album: JellyfinAlbum): Boolean {
         if (currentTrack == null) return false
@@ -363,7 +422,7 @@ class PlayerController(
         }
 
     private fun enqueue(playlist: JellyfinPlaylist, next: Boolean) {
-        if (!engine.isSupported) return
+        if (!engine.isSupported || refusesPlayNext(next)) return
         if (!isOnline()) {
             val saved = downloads()?.playlists?.saved(playlist.id)?.takeIf { it.isAvailableOffline }
                 ?: return say(NOTHING_DOWNLOADED, isError = true)
@@ -386,7 +445,7 @@ class PlayerController(
     }
 
     private fun enqueue(album: JellyfinAlbum, next: Boolean) {
-        if (!engine.isSupported) return
+        if (!engine.isSupported || refusesPlayNext(next)) return
         val group = QueueGroup.album(album)
         downloadedDiscs(album)?.let { discs ->
             addInTurn(next, group, localMedia(discs, album), idsOf(album)) { lookUpCastUrls(discs) }
@@ -415,7 +474,7 @@ class PlayerController(
      * still as part of the playlist), each at its place in the playlist.
      */
     private fun enqueue(playlist: JellyfinPlaylist, entries: List<PlaylistEntry>, next: Boolean) {
-        if (!engine.isSupported) return
+        if (!engine.isSupported || refusesPlayNext(next)) return
         val media = playlistMedia(playlist, entries, byPosition = true)
         if (entries.isNotEmpty() && media.isEmpty()) {
             return say(if (entries.size == 1) SONG_NOT_QUEUED else NOTHING_DOWNLOADED, isError = true)
@@ -424,7 +483,7 @@ class PlayerController(
     }
 
     private fun enqueue(album: JellyfinAlbum, tracks: List<JellyfinTrack>, next: Boolean) {
-        if (!engine.isSupported) return
+        if (!engine.isSupported || refusesPlayNext(next)) return
         val local = downloads()?.playlists?.resolver("") ?: { null }
         val online = isOnline()
         val cap = cap()
@@ -460,6 +519,9 @@ class PlayerController(
         }
         say(if (next) PLAYING_NEXT else ADDED_TO_QUEUE)
     }
+
+    /** Maniac Mode refuses Play Next (before anything is fetched); [add] checks again. */
+    private fun refusesPlayNext(next: Boolean) = next && !PlayQueue.canEdit(QueueEdit.PLAY_NEXT, maniacMode)
 
     private var noticeCount = 0L
 
@@ -578,6 +640,29 @@ class PlayerController(
         }
         results.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { return Result.failure(it) }
         return Result.success(results.flatMap { it.getOrThrow() })
+    }
+
+    /**
+     * An artist's albums as queue media: [ArtistTracks.albumOrder], from the files for a downloaded album
+     * (offline only those), else streamed; at most [ArtistTracks.CAP] tracks (the flag says some were left
+     * out). Albums are fetched one at a time and no more once the cap is passed.
+     */
+    private suspend fun artistMedia(albums: List<JellyfinAlbum>): Result<Pair<List<Media>, Boolean>> {
+        val online = isOnline()
+        val manager = downloads()
+        val all = ArrayList<Media>()
+        for (album in ArtistTracks.albumOrder(albums)) {
+            if (!ArtistTracks.needsMore(all.size)) break
+            val discs = downloadedDiscs(album)
+            all += when {
+                discs != null -> localMedia(discs, album)
+                !online -> album.allDiscs.mapNotNull { manager?.downloadedAlbum(it.id) }.takeIf { it.isNotEmpty() }?.let { localMedia(it, album) } ?: continue
+                else -> streamMedia(fetchAlbum(album).getOrElse { return Result.failure(it) }, album)
+            }
+        }
+        val (kept, capped) = ArtistTracks.limit(all)
+        // Each entry's place is its position in this queue (Maniac Mode's order).
+        return Result.success(kept.mapIndexed { i, m -> Media(m.track, m.item, m.queueTrack, i) } to capped)
     }
 
     private fun idsOf(album: JellyfinAlbum) = AlbumIds((album.allDiscs.map { it.id } + album.id).toSet(), album.allDiscs.map { it.id })
@@ -1246,6 +1331,12 @@ class PlayerController(
 
         /** A song couldn't be queued (offline and not downloaded). */
         const val SONG_NOT_QUEUED = "Couldn't add this song. Check the connection, or download it first."
+
+        /** An artist's tracks couldn't be fetched. */
+        const val ARTIST_NOT_LOADED = "Couldn't load this artist's music. Check the connection, then try again."
+
+        /** Offline, none of the artist's albums are on this device. */
+        const val ARTIST_NOT_DOWNLOADED = "None of this artist's music is downloaded."
 
         /** A playlist card's songs couldn't be fetched. */
         const val PLAYLIST_NOT_LOADED = "Couldn't load this playlist. Check the connection, then try again."

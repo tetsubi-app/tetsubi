@@ -224,13 +224,15 @@ private fun DownloadsSection(model: SettingsModel, manager: gg.dekiru.musicplaye
 
 @Composable
 private fun PlaybackSection(model: SettingsModel, equalizer: EqualizerModel, showsEqualizerRow: Boolean, onOpenEqualizer: () -> Unit) {
-    SettingsGroup(title = SettingsText.PLAYBACK, footer = SettingsText.PLAYBACK_FOOTER) {
-        SettingsPickerRow(
-            SettingsText.STREAMING_OVER_MOBILE,
-            value = model.cellularQuality.displayName,
-            options = SettingsText.qualityOptions.map { it.displayName },
-            onSelect = { model.changeCellularQuality(SettingsText.qualityOptions[it]) },
-        )
+    SettingsGroup(title = SettingsText.PLAYBACK, footer = SettingsText.playbackFooter(platformName)) {
+        if (SettingsText.showsMobileData(platformName)) {
+            SettingsPickerRow(
+                SettingsText.STREAMING_OVER_MOBILE,
+                value = model.cellularQuality.displayName,
+                options = SettingsText.qualityOptions.map { it.displayName },
+                onSelect = { model.changeCellularQuality(SettingsText.qualityOptions[it]) },
+            )
+        }
         if (showsEqualizerRow) {
             SettingsRow(SettingsText.EQUALISER, onClick = onOpenEqualizer) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

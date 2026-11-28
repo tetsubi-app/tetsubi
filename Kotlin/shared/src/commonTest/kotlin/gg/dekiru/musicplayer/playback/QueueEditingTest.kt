@@ -200,8 +200,9 @@ class QueueEditingTest {
     fun maniacModeMakesTheQueueReadOnly() {
         assertTrue(QueueEditor.isReadOnly(maniacMode = true))
         assertFalse(QueueEditor.isReadOnly(maniacMode = false))
-        // Adding is still allowed.
-        assertTrue(PlayQueue.canEdit(QueueEdit.PLAY_NEXT, maniacMode = true))
+        // Adding at the end is still allowed; Play Next is not.
+        assertFalse(PlayQueue.canEdit(QueueEdit.PLAY_NEXT, maniacMode = true))
+        assertTrue(PlayQueue.canEdit(QueueEdit.PLAY_NEXT, maniacMode = false))
         assertTrue(PlayQueue.canEdit(QueueEdit.ADD_TO_QUEUE, maniacMode = true))
         assertFalse(PlayQueue.canEdit(QueueEdit.CLEAR_UPCOMING, maniacMode = true))
         assertEquals("Maniac Mode: the queue plays in order.", QueueEditor.MANIAC_NOTE)

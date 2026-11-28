@@ -49,6 +49,12 @@ class QuickConnectController(
         job = null
     }
 
+    /** Stops polling and forgets the code and any failure: back to idle. */
+    fun reset() {
+        cancel()
+        _state.value = State.Idle
+    }
+
     private suspend fun run(serverUrl: String) {
         val api = authenticator.api(serverUrl)
         val start = try {

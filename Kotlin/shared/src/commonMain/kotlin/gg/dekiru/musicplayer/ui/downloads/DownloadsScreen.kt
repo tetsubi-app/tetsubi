@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -188,13 +189,13 @@ fun DownloadsScreen(api: JellyfinApi, downloads: DownloadManager?, player: Playe
                     }
                 }
                 if (isEditing) {
-                    Box(
-                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(TetsubiColors.background.copy(alpha = 0.92f))
-                            .padding(horizontal = windowClass.pageMargin, vertical = 12.dp),
-                    ) {
+                    // As the tab bar: navy at 85% with a hairline on top, content at the page margin.
+                    Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(TetsubiColors.background.copy(alpha = 0.85f))) {
+                        Box(Modifier.fillMaxWidth().height(0.5.dp).background(TetsubiColors.hairline))
                         PrimaryButton(
                             DownloadsText.removeLabel(selection.size), { confirmRemove = true },
-                            Modifier.fillMaxWidth(), enabled = selection.isNotEmpty(), color = TetsubiColors.red,
+                            Modifier.fillMaxWidth().padding(horizontal = windowClass.pageMargin, vertical = 12.dp),
+                            enabled = selection.isNotEmpty(), color = TetsubiColors.red,
                         )
                     }
                 }
