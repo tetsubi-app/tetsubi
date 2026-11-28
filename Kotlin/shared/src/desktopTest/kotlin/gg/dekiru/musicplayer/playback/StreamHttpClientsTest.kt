@@ -31,6 +31,13 @@ class StreamHttpClientsTest {
     }
 
     @Test
+    fun convertedStreamsUseHttp1AndEverythingElseKeepsHttp2() {
+        assertEquals(listOf(okhttp3.Protocol.HTTP_1_1), StreamHttpClients.converted().protocols)
+        assertEquals(TetsubiOkHttp.client.protocols, StreamHttpClients.direct().protocols)
+        assertEquals(TetsubiOkHttp.client.protocols, TetsubiOkHttp.client.newBuilder().build().protocols)
+    }
+
+    @Test
     fun streamsShareTheAppsConnectionsButNotItsRequestQueue() {
         val app = TetsubiOkHttp.client
         val streams = listOf(StreamHttpClients.direct(), StreamHttpClients.converted())

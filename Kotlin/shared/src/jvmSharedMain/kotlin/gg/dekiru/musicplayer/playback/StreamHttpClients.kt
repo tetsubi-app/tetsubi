@@ -3,6 +3,7 @@ package gg.dekiru.musicplayer.playback
 import gg.dekiru.musicplayer.data.api.TetsubiOkHttp
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import java.util.concurrent.TimeUnit
 
 /**
@@ -28,7 +29,13 @@ object StreamHttpClients {
      * by `FirstResponseDataSource`.
      */
     fun converted(base: OkHttpClient = TetsubiOkHttp.client): OkHttpClient =
-        derive(base, StreamTimeouts.CONVERTED_CONNECT_MILLIS)
+        derive(base, StreamTimeouts.CONVERTED_CONNECT_MILLIS).newBuilder()
+            // HTTP/1.1 only: a converted stream has no length (chunked, `accept-ranges: none`)
+            // and over HTTP/2 through Cloudflare it was reset with PROTOCOL_ERROR at the same
+            // point of the same track every time while the server had finished the file;
+            // see docs/gotchas.md.
+            .protocols(listOf(Protocol.HTTP_1_1))
+            .build()
 
     private val dispatcher: Dispatcher by lazy {
         Dispatcher().apply { maxRequestsPerHost = maxRequests }
