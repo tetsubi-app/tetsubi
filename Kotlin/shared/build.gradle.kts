@@ -106,6 +106,8 @@ kotlin {
             implementation(libs.ktor.client.okhttp)
         }
         androidMain.dependencies {
+            // audioDEK: the built-in ALAC decoder (pure Kotlin JVM library).
+            implementation(project(":audiodek"))
             implementation(libs.kotlinx.coroutines.android)
             api(libs.androidx.media3.exoplayer)
             api(libs.androidx.media3.session)

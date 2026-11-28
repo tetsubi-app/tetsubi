@@ -159,6 +159,14 @@ class SettingsModelTest {
     }
 
     @Test
+    fun androidAboutListsAudioDekAndAppleAttributionOthersDoNot() {
+        val android = SettingsText.aboutFooter("Android")
+        assertTrue(android.endsWith("audioDEK: Kotlin ALAC decoder, structure follows Apple's ALAC reference decoder (Apache-2.0)."))
+        assertTrue(android.startsWith(SettingsText.ABOUT_FOOTER))
+        assertEquals(SettingsText.ABOUT_FOOTER, SettingsText.aboutFooter("Linux"))
+    }
+
+    @Test
     fun aboutListsTheQaTeam() {
         assertEquals("QA team", SettingsText.QA_TEAM)
         assertEquals(listOf("Matt Evans", "Eloy Smith Rodriguez", "Adam Buchanan"), SettingsText.QA_TEAM_NAMES)

@@ -16,11 +16,13 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** ALAC direct play where the device decodes it, its fallback, and the stall watchdog's decision. */
+/** ALAC direct play (audioDEK decodes it on every Android device), its fallback, and the stall watchdog's decision. */
 class DirectPlayAndStallTest {
 
-    private val withAlac = DirectPlayCapabilities.forDevice(hasAlacDecoder = true)
-    private val withoutAlac = DirectPlayCapabilities.forDevice(hasAlacDecoder = false)
+    private val withAlac = DirectPlayCapabilities.android
+
+    /** What a device plays after an ALAC decode failure: ALAC converted again. */
+    private val withoutAlac = DirectPlayCapabilities.baseline
 
     private fun jt(container: String, codec: String?) =
         JellyfinTrack(id = "t", mediaSource = MediaSource(container = container, codecs = codec))
@@ -30,43 +32,30 @@ class DirectPlayAndStallTest {
     // ALAC capability
 
     @Test
-    fun alacIsDirectOnlyWhereTheDeviceHasADecoder() {
+    fun alacIsAlwaysDirectOnAndroidBecauseAudioDekDecodesIt() {
         assertTrue(AudioFormat.ALAC in withAlac)
-        assertFalse(AudioFormat.ALAC in withoutAlac)
-        assertEquals(DirectPlayCapabilities.baseline, withoutAlac)
+        assertFalse(AudioFormat.ALAC in DirectPlayCapabilities.baseline)
         assertEquals(DirectPlayCapabilities.baseline + AudioFormat.ALAC, withAlac)
+        assertEquals(withAlac, DirectPlayCapabilities.forDevice(AlacDirectFailure(InMemoryPreferences(), build = 7)))
         assertTrue(setOf(AudioFormat.FLAC, AudioFormat.MP3, AudioFormat.AAC, AudioFormat.OPUS, AudioFormat.WAV) == DirectPlayCapabilities.baseline)
-    }
-
-    @Test
-    fun theProbeLooksForADecoderNotAnEncoder() {
-        val mediaTek = listOf(
-            DirectPlayCapabilities.Codec(false, listOf("audio/flac", "audio/mp4a-latm")),
-            DirectPlayCapabilities.Codec(true, listOf("audio/mp4a-latm")),
-        )
-        val qualcomm = mediaTek + DirectPlayCapabilities.Codec(false, listOf("audio/ALAC"))
-        assertFalse(DirectPlayCapabilities.hasDecoder("audio/alac", mediaTek))
-        assertTrue(DirectPlayCapabilities.hasDecoder("audio/alac", qualcomm))
-        assertFalse(DirectPlayCapabilities.hasDecoder("audio/alac", listOf(DirectPlayCapabilities.Codec(true, listOf("audio/alac")))))
-        assertFalse(DirectPlayCapabilities.hasDecoder("audio/alac", emptyList()))
+        // ALAC in m4a is DIRECT (the original file) in the stream plan.
+        assertEquals(StreamUrls.Plan(StreamUrls.Plan.Kind.DIRECT, listOf("original")), StreamUrls.plan(jt("m4a", "alac"), withAlac, null))
     }
 
     @Test
     fun oneFailedDirectAlacDecodeIsRememberedForThisBuildOnly() {
         val prefs = InMemoryPreferences()
         val first = AlacDirectFailure(prefs, build = 7)
-        assertEquals(withAlac, DirectPlayCapabilities.forDevice(hasAlacDecoder = true, failure = first))
+        assertEquals(withAlac, DirectPlayCapabilities.forDevice(first))
         first.record()
         assertEquals("7", prefs.getString("playback.alacDirectFailed"))
-        // A later launch (a new object over the same settings) reads it at once: no ALAC direct play.
+        // A later launch (a new object over the same settings) reads it at once: ALAC is converted again.
         val later = AlacDirectFailure(prefs, build = 7)
         assertTrue(later.failed)
-        assertEquals(withoutAlac, DirectPlayCapabilities.forDevice(hasAlacDecoder = true, failure = later))
+        assertEquals(withoutAlac, DirectPlayCapabilities.forDevice(later))
         // An updated app tries again.
         assertFalse(AlacDirectFailure(prefs, build = 8).failed)
-        assertEquals(withAlac, DirectPlayCapabilities.forDevice(hasAlacDecoder = true, failure = AlacDirectFailure(prefs, build = 8)))
-        // No decoder at all stays without ALAC either way.
-        assertEquals(withoutAlac, DirectPlayCapabilities.forDevice(hasAlacDecoder = false, failure = AlacDirectFailure(InMemoryPreferences(), 7)))
+        assertEquals(withAlac, DirectPlayCapabilities.forDevice(AlacDirectFailure(prefs, build = 8)))
     }
 
     @Test
@@ -305,8 +294,8 @@ class DirectPlayAndStallTest {
     @Test
     fun thePlanLineHasIdentifiersAndFormatsOnly() {
         val track = jt("m4a", "alac")
-        val line = StreamUrls.planLine("t", track, StreamUrls.plan(track, withoutAlac, null), "alacDecoder=false alacFailed=false")
-        assertEquals("play plan: item=t codec=alac container=m4a plan=converted reasons=notDirect:ALAC alacDecoder=false alacFailed=false", line)
+        val line = StreamUrls.planLine("t", track, StreamUrls.plan(track, withoutAlac, null), "alacDecoder=audioDEK alacFailed=true")
+        assertEquals("play plan: item=t codec=alac container=m4a plan=converted reasons=notDirect:ALAC alacDecoder=audioDEK alacFailed=true", line)
         assertEquals("play plan: item=t plan=file reasons=downloaded format=flac", StreamUrls.fileLine("t", "/data/x/01 - A.FLAC"))
     }
 

@@ -83,6 +83,13 @@ object SettingsText {
         DEKIRU Sans — based on IBM Plex Sans by IBM Corp., SIL Open Font License 1.1.
     """.trimIndent()
 
+    /** Android only (the player decodes ALAC itself there): audioDEK follows Apple's open-source ALAC decoder (Apache License 2.0). */
+    const val AUDIODEK_NOTICE = "audioDEK: Kotlin ALAC decoder, structure follows Apple's ALAC reference decoder (Apache-2.0)."
+
+    /** The credits under About: [ABOUT_FOOTER], with the audioDEK notice on Android. */
+    fun aboutFooter(platformName: String): String =
+        if (platformName == "Android") ABOUT_FOOTER + "\n\n" + AUDIODEK_NOTICE else ABOUT_FOOTER
+
     /** "Download over mobile data", "Streaming over mobile data" and their footer sentences: Android only (the desktop has no metered networks). */
     fun showsMobileData(platformName: String): Boolean = platformName == "Android"
 

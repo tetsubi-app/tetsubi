@@ -146,13 +146,12 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     override val isSupported = true
 
     /**
-     * ALAC isn't decoded on every device: it plays as the original file only
-     * where MediaCodec has an ALAC decoder ([AlacDecoderProbe], asked once) and
-     * none has failed to decode yet ([alacFailed]); elsewhere the server sends
-     * it as FLAC.
+     * ALAC plays as the original file on every device: audioDEK, the app's own
+     * decoder ([AudioDekAudioRenderer]), decodes it. Only after a decode error
+     * ([alacFailed], saved for this build) does ALAC go converted again.
      */
     override val directPlayFormats: Set<AudioFormat>
-        get() = DirectPlayCapabilities.forDevice(AlacDecoderProbe.available && !alacFailed, alacFailure)
+        get() = DirectPlayCapabilities.forDevice(alacFailure)
 
     /** Downloads are not touched: ALAC is downloaded as FLAC whatever this device decodes. */
     override val downloadPlayFormats: Set<AudioFormat> = DirectPlayCapabilities.baseline
@@ -163,7 +162,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     /** An ALAC file played as it is failed to decode on this device (now, or earlier on this build): ALAC goes converted. */
     private var alacFailed = alacFailure.failed
 
-    override val planNote: String get() = "alacDecoder=${AlacDecoderProbe.available} alacFailed=$alacFailed"
+    override val planNote: String get() = "alacDecoder=audioDEK alacFailed=$alacFailed"
 
     override var listener: EngineListener? = null
 
@@ -506,6 +505,19 @@ class Media3Engine(private val context: Context) : PlayerEngine {
      * then has no fallback left, so nothing loops. Returns false to treat the
      * error as any other.
      */
+    /**
+     * What a decoder was given, for the `decoder input format:` log line: the MIME type, codecs,
+     * channel count, sample rate, PCM encoding and the initialisation data (length and the first
+     * bytes in hex). Numbers and bytes of the codec set-up only; no URL, no token.
+     */
+    private fun describeFormat(format: androidx.media3.common.Format): String {
+        val csd = format.initializationData.mapIndexed { i, bytes ->
+            "csd$i[len=${bytes.size} hex=" + bytes.take(48).joinToString("") { "%02x".format(it) } + "]"
+        }.joinToString(" ").ifEmpty { "csd=none" }
+        return "mime=${format.sampleMimeType} codecs=${format.codecs} channels=${format.channelCount} rate=${format.sampleRate} " +
+            "pcm=${format.pcmEncoding} bitrate=${format.bitrate} $csd"
+    }
+
     private fun fallBackToConverted(error: PlaybackException): Boolean {
         val current = player.currentMediaItemIndex
         val index = failedIndex(error) ?: current
@@ -517,6 +529,10 @@ class Media3Engine(private val context: Context) : PlayerEngine {
         val codec = causes.filterIsInstance<MediaCodecDecoderException>().firstNotNullOfOrNull { it.codecInfo?.name }
         val why = DirectPlayFallback.describeFailure(causes.map { it.message }, causes.map { it::class.java.name }, codec)
         logLine("Tetsubi", "direct stream failed to decode: item=${item.id} error=${error.errorCodeName} $why position=$position fallback=converted")
+        (error as? ExoPlaybackException)?.rendererFormat?.let { logLine("Tetsubi", "decoder input format: ${describeFormat(it)}") }
+        causes.filterIsInstance<android.media.MediaCodec.CodecException>().firstOrNull()?.let { ce ->
+            logLine("Tetsubi", "codec exception: code=${ce.errorCode} recoverable=${ce.isRecoverable} transient=${ce.isTransient} info=${ce.diagnosticInfo}")
+        }
         alacFailed = true
         runCatching { alacFailure.record() }
         queueItems[index] = fallback
@@ -805,8 +821,7 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     init {
         logLine(
             "Tetsubi",
-            "directPlay formats=${directPlayFormats.map { it.name }.sorted()} alacDecoder=${AlacDecoderProbe.available} " +
-                "decoders=${AlacDecoderProbe.decoders} selected=${AlacDecoderProbe.selectedDecoders}",
+            "directPlay formats=${directPlayFormats.map { it.name }.sorted()} alacDecoder=audioDEK",
         )
         player.addListener(Events(player))
         player.addAnalyticsListener(StartEvents())
@@ -1118,6 +1133,14 @@ class Media3Engine(private val context: Context) : PlayerEngine {
     private inner class StartEvents : AnalyticsListener {
         override fun onAudioInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
             sourceOf(eventTime)?.let { startLog.firstAudio(it) }
+            if (AudioDekFormats.handles(format.sampleMimeType)) {
+                // One line per ALAC track (the format is read once per item, also for the next one loaded ahead).
+                runCatching {
+                    val config = AudioDekFormats.config(format.initializationData)
+                    val id = queueItems.getOrNull(eventTime.windowIndex)?.id ?: "?"
+                    logLine("Tetsubi", AudioDekFormats.logLine(id, config.bitDepth, config.channels, config.sampleRate.toInt()))
+                }
+            }
         }
 
         override fun onIsPlayingChanged(eventTime: AnalyticsListener.EventTime, isPlaying: Boolean) {

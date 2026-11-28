@@ -1,15 +1,20 @@
 package gg.dekiru.musicplayer.playback
 
 import android.content.Context
+import android.os.Handler
 import androidx.media3.common.C
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import gg.dekiru.musicplayer.playback.effects.AudioEffects
 import gg.dekiru.musicplayer.playback.effects.EqualizerChain
 import java.nio.ByteBuffer
@@ -161,11 +166,29 @@ private class EffectsAudioSink(
 
 /**
  * ExoPlayer's usual renderers, with [TetsubiAudioProcessor] in the audio
- * output (`DefaultAudioSink`), working with [effects].
+ * output (`DefaultAudioSink`), working with [effects]. ALAC is decoded by
+ * audioDEK ([AudioDekAudioRenderer]), which comes before the MediaCodec
+ * audio renderer, and MediaCodec is given no ALAC decoders at all (a device
+ * may list one that fails, or none), so ALAC is never handed to it.
  */
 @UnstableApi
 fun effectsRenderersFactory(context: Context, effects: AudioEffects): DefaultRenderersFactory =
     object : DefaultRenderersFactory(context) {
+        override fun buildAudioRenderers(
+            context: Context,
+            extensionRendererMode: Int,
+            mediaCodecSelector: MediaCodecSelector,
+            enableDecoderFallback: Boolean,
+            audioSink: AudioSink,
+            eventHandler: Handler,
+            eventListener: AudioRendererEventListener,
+            out: ArrayList<Renderer>,
+        ) {
+            // First, so for ALAC it wins even if another renderer also claimed it.
+            out.add(AudioDekAudioRenderer(eventHandler, eventListener, audioSink))
+            super.buildAudioRenderers(context, extensionRendererMode, mediaCodecSelector, enableDecoderFallback, audioSink, eventHandler, eventListener, out)
+        }
+
         override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink {
             val processor = TetsubiAudioProcessor(effects)
             val sink = DefaultAudioSink.Builder(context)
@@ -175,4 +198,13 @@ fun effectsRenderersFactory(context: Context, effects: AudioEffects): DefaultRen
                 .build()
             return EffectsAudioSink(sink, processor, effects)
         }
-    }
+    }.setMediaCodecSelector(withoutAlac(MediaCodecSelector.DEFAULT))
+        // 24- and 32-bit PCM (audioDEK's 24-bit ALAC, 24-bit FLAC) reaches the audio track as float: a float32 holds
+        // every 24-bit sample exactly, whereas ExoPlayer's default would cut it to 16 bits. 16-bit stays 16-bit.
+        .setEnableAudioFloatOutput(true)
+
+/** [base] without any decoder for ALAC: the MediaCodec renderer then cannot claim it. */
+@UnstableApi
+fun withoutAlac(base: MediaCodecSelector): MediaCodecSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+    if (mimeType.equals(MimeTypes.AUDIO_ALAC, ignoreCase = true)) emptyList() else base.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+}
