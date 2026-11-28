@@ -82,6 +82,15 @@ import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
 import gg.dekiru.musicplayer.ui.components.AlbumBackdrop
 import gg.dekiru.musicplayer.ui.components.ChevronDownIcon
+import gg.dekiru.musicplayer.ui.Radii
+import gg.dekiru.musicplayer.ui.components.MoreIcon
+import gg.dekiru.musicplayer.ui.components.RepeatIcon
+import gg.dekiru.musicplayer.ui.components.RoundIconButton
+import gg.dekiru.musicplayer.ui.components.WarningIcon
+import gg.dekiru.musicplayer.ui.layout.LocalWindowClass
+import gg.dekiru.musicplayer.ui.library.ShuffleIcon
+import gg.dekiru.musicplayer.ui.tetsubiType
+import androidx.compose.foundation.layout.fillMaxHeight
 import gg.dekiru.musicplayer.ui.components.SkipIcon
 import gg.dekiru.musicplayer.ui.components.SpeakerIcon
 import kotlin.time.Clock
@@ -93,21 +102,19 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
 /**
- * Full-screen Now Playing (as `NowPlayingView` on iOS): art, title / artist /
- * album, the album's length and when it finishes, the seek bar, previous /
- * play-pause / next, shuffle, repeat, the output picker, and the queue
- * ([QueueSection]: reorder, remove, clear). In
- * Maniac Mode: no skips, shuffle, repeat or scrubbing. Back or ⌄ closes it.
- * Where the player has audio effects (Android), the Visualiser toggle shows
- * spectrum bars under the art; the choice is remembered. Where there's
- * Google Cast (Android), the Cast button sits next to it; while casting,
- * "Playing on <device>" shows under the album and the Visualiser is hidden.
- * The info line's quality text shows the sample rate and bit depth; a tap
- * switches it to the format and bitrate and back (remembered).
- * Wide (a tablet on its side, a Linux window; see [NowPlayingLayout]): two
- * columns as iOS, the art, titles and controls on the left and the queue on
- * the right, everything drawn bigger by [NowPlayingLayout.scale]. Phones keep
- * the single column at the normal size.
+ * Now Playing (as `NowPlayingView` on iOS): art, title / artist / album, the album's length and
+ * when it finishes, the seek bar, previous / play-pause / next, then a row of round icon buttons
+ * (Shuffle, Repeat, Visualiser, Cast, Output; blue when on) and the queue ([QueueSection]: reorder,
+ * remove, clear). In Maniac Mode: no skips, shuffle, repeat or scrubbing. Back or ⌄ closes it.
+ * Where the player has audio effects (Android), the Visualiser toggle shows spectrum bars under the
+ * art; the choice is remembered. Where there's Google Cast (Android), the Cast button sits next to
+ * it; while casting, "Playing on <device>" shows under the album and the Visualiser is hidden. The
+ * info line's quality text shows the sample rate and bit depth; a tap switches it to the format and
+ * bitrate and back (remembered).
+ *
+ * The window class picks the layout ([NowPlayingLayout]): Compact is one column, a full-screen sheet
+ * with the queue below the controls; Medium and Expanded are two, the player on the left and the
+ * queue in a panel on the right, each scrolling on its own.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -145,18 +152,13 @@ fun NowPlayingScreen(
     AppBackground {
         AlbumBackdrop(api, player.currentTrack?.artItemId, localPath = player.currentTrack?.localArtPath)
         BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-            // Wide (a tablet on its side, a Linux window): two columns, everything
-            // grown by the scale. Otherwise one column at the normal size.
-            val wide = NowPlayingLayout.isWide(maxWidth.value, maxHeight.value)
-            val scale = NowPlayingLayout.scale(maxWidth.value, maxHeight.value)
-            val density = LocalDensity.current
+            val twoColumns = NowPlayingLayout.usesTwoColumns(LocalWindowClass.current)
             val showBars = effects != null && visualiser?.isOn == true && !casting
-            // Art, titles, progress and buttons: the single column's top and the
-            // wide layout's left column.
+            // Art, titles, progress and buttons: the single column's top and the left column.
             val details: @Composable (Dp) -> Unit = { artSize ->
                 val track = player.currentTrack
                 if (track != null) {
-                    AlbumArt(api, track.artItemId, size = artSize, cornerRadius = 16.dp, maxWidth = 600, localPath = track.localArtPath)
+                    AlbumArt(api, track.artItemId, size = artSize, cornerRadius = Radii.panel, maxWidth = 800, localPath = track.localArtPath)
                     // While casting the audio isn't decoded here: no bars.
                     if (effects != null && showBars) {
                         SpectrumBars(effects, player.isPlaying, accent, Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(64.dp))
@@ -165,97 +167,81 @@ fun NowPlayingScreen(
                     player.lastError?.let { ErrorText(it) }
                     Seek(player, accent)
                     Controls(player)
-                    Toggles(player, visualiser.takeUnless { casting }, castButton, accent)
+                    Toggles(player, visualiser.takeUnless { casting }, castButton)
                 } else {
-                    Box(Modifier.size(artSize).clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = 0.06f)))
+                    Box(Modifier.size(artSize).clip(RoundedCornerShape(Radii.panel)).background(TetsubiColors.surface))
                     when {
                         player.isLoading -> {
-                            CircularProgressIndicator(Modifier.size(24.dp), color = TetsubiColors.albumArtistText, strokeWidth = 2.dp)
-                            Text("Loading…", color = TetsubiColors.albumArtistText, fontSize = 20.sp)
+                            CircularProgressIndicator(Modifier.size(24.dp), color = TetsubiColors.textSecondary, strokeWidth = 2.dp)
+                            Text("Loading…", style = tetsubiType.sectionTitle, color = TetsubiColors.textSecondary)
                         }
                         player.lastError != null -> ErrorText(player.lastError.orEmpty())
-                        else -> Text("Nothing playing", color = TetsubiColors.albumArtistText, fontSize = 20.sp)
+                        else -> Text("Nothing playing", style = tetsubiType.sectionTitle, color = TetsubiColors.textSecondary)
                     }
                 }
             }
-            // Drawn at the scale: dp and sp inside are `scale` times bigger, so
-            // the sizes below are the normal ones (as iOS's `.scaled` values).
-            CompositionLocalProvider(
-                LocalDensity provides if (wide) Density(density.density * scale, density.fontScale) else density,
-            ) {
-                // The area's size in the scaled dp.
-                val width = maxWidth / scale
-                val height = maxHeight / scale
-                if (wide) {
-                    val left = NowPlayingLayout.leftColumnWidth(width.value)
-                    val art = NowPlayingLayout.wideArtSize(left, height.value, showBars).dp
-                    // Two columns, each scrolling on its own. The top padding keeps both
-                    // clear of the More and close buttons in the corners.
-                    Row(Modifier.fillMaxSize()) {
-                        Column(
-                            Modifier.width(left.dp).fillMaxHeight().verticalScroll(rememberScrollState())
-                                .padding(start = 28.dp, end = 28.dp, top = 56.dp, bottom = 24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                        ) { details(art) }
-                        Column(
-                            Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())
-                                .padding(start = 20.dp, end = 20.dp, top = 44.dp, bottom = 24.dp),
-                        ) { if (player.currentTrack != null) QueueSection(api, player) }
-                    }
-                } else {
-                    val artSize = minOf(width - 40.dp, 340.dp, height * 0.42f)
+            if (twoColumns) {
+                val left = NowPlayingLayout.leftColumnWidth(maxWidth.value)
+                val art = NowPlayingLayout.wideArtSize(left, maxHeight.value, showBars).dp
+                // Two columns, each scrolling on its own.
+                Row(Modifier.fillMaxSize()) {
                     Column(
-                        Modifier.align(Alignment.TopCenter).widthIn(max = 560.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
+                        Modifier.width(left.dp).fillMaxHeight().verticalScroll(rememberScrollState())
+                            .padding(start = 32.dp, end = 32.dp, top = 8.dp, bottom = 24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        Spacer(Modifier.height(28.dp))
-                        details(artSize)
-                        if (player.currentTrack != null) QueueSection(api, player)
+                        TopBar(player, onAddToPlaylist)
+                        details(art)
+                    }
+                    if (player.currentTrack != null) {
+                        val shape = RoundedCornerShape(Radii.panel)
+                        Box(Modifier.weight(1f).fillMaxHeight().padding(top = 12.dp, end = 24.dp, bottom = 16.dp)) {
+                            Column(
+                                Modifier.fillMaxSize().clip(shape).background(TetsubiColors.surface, shape)
+                                    .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+                            ) { QueueSection(api, player) }
+                        }
+                    } else {
+                        Box(Modifier.weight(1f))
                     }
                 }
-                CornerButtons(player, onAddToPlaylist)
+            } else {
+                val art = NowPlayingLayout.compactArtSize(maxWidth.value, maxHeight.value).dp
+                Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = NowPlayingLayout.COMPACT_MARGIN.dp).padding(top = 8.dp, bottom = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    TopBar(player, onAddToPlaylist)
+                    details(art)
+                    if (player.currentTrack != null) QueueSection(api, player)
+                }
             }
         }
     }
 }
 
-/** ⋯ (Add to Playlist…) top left and ⌄ (close) top right. */
+/** ⌄ (close) on the left and ⋯ (Add to Playlist…) on the right. */
 @Composable
-private fun BoxScope.CornerButtons(player: PlayerController, onAddToPlaylist: ((String) -> Unit)?) {
-    Box(
-        Modifier
-            .align(Alignment.TopEnd)
-            .padding(top = 12.dp, end = 16.dp)
-            .size(40.dp)
-            .clip(RoundedCornerShape(50))
-            .background(Color.White.copy(alpha = 0.12f))
-            .clickable(role = Role.Button) { player.isNowPlayingOpen = false }
-            .semantics { contentDescription = "Close Now Playing" },
-        contentAlignment = Alignment.Center,
-    ) { ChevronDownIcon(24.dp) }
-    val current = player.currentTrack
-    if (onAddToPlaylist != null && current != null) {
-        var menuOpen by remember { mutableStateOf(false) }
-        Box(Modifier.align(Alignment.TopStart).padding(top = 12.dp, start = 16.dp)) {
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.White.copy(alpha = 0.12f))
-                    .clickable(role = Role.Button) { menuOpen = true }
-                    .semantics { contentDescription = "More" },
-                contentAlignment = Alignment.Center,
-            ) { Text("⋯", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Add to Playlist…", color = Color.White) },
-                    onClick = {
-                        menuOpen = false
-                        onAddToPlaylist(current.id)
-                    },
-                )
+private fun TopBar(player: PlayerController, onAddToPlaylist: ((String) -> Unit)?) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        RoundIconButton("Close Now Playing", onClick = { player.isNowPlayingOpen = false }, size = 40.dp) { ChevronDownIcon(24.dp, it) }
+        Box(Modifier.weight(1f))
+        val current = player.currentTrack
+        if (onAddToPlaylist != null && current != null) {
+            var menuOpen by remember { mutableStateOf(false) }
+            Box {
+                RoundIconButton("More", onClick = { menuOpen = true }, size = 40.dp) { MoreIcon(22.dp, it) }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Add to Playlist…", color = Color.White) },
+                        onClick = {
+                            menuOpen = false
+                            onAddToPlaylist(current.id)
+                        },
+                    )
+                }
             }
         }
     }
@@ -292,15 +278,15 @@ private fun Titles(
     onArtist: (() -> Unit)?,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(track.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
+        Text(track.title, style = tetsubiType.nowPlayingTitle, color = TetsubiColors.textPrimary, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
         Text(
-            track.artist, color = TetsubiColors.albumArtistText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.artistLink(track.artist, onArtist),
+            track.artist, style = tetsubiType.nowPlayingArtist, color = if (onArtist != null) TetsubiColors.blue else TetsubiColors.textSecondary,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.artistLink(track.artist, onArtist),
         )
-        Text(track.album, color = TetsubiColors.albumYearText, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(track.album, style = tetsubiType.body.copy(fontSize = 15.sp), color = TetsubiColors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (castName != null) {
             Text(
-                CastRoute.playingOn(castName), color = accent ?: TetsubiColors.blue, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                CastRoute.playingOn(castName), style = tetsubiType.control, color = TetsubiColors.blue,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
@@ -330,7 +316,7 @@ private fun Titles(
                 if (quality != null) QualityLabel(quality, qualityDetail, accent)
                 Text(
                     "${if (quality != null) "      " else ""}Duration: ${formatAlbumDuration(player.queueLength)}      ${EndTimes.text(groupEnd, queueEnd, short, label)}",
-                    color = infoColor, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = tetsubiType.caption, color = TetsubiColors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     softWrap = false,
                     onTextLayout = { if (queueEnd != null && !short && it.hasVisualOverflow) short = true },
                     modifier = Modifier.weight(1f, fill = false),
@@ -340,7 +326,7 @@ private fun Titles(
     }
 }
 
-private val infoColor = Color.White.copy(alpha = 0.5f)
+private val infoColor = TetsubiColors.textSecondary
 
 /**
  * The quality part of the info line: the sample rate or the format and
@@ -350,7 +336,7 @@ private val infoColor = Color.White.copy(alpha = 0.5f)
 @Composable
 private fun QualityLabel(quality: QualityText, setting: QualityDetailSetting, accent: Color?) {
     if (!quality.switches) {
-        Text(quality.text, color = infoColor, fontSize = 12.sp, maxLines = 1)
+        Text(quality.text, style = tetsubiType.caption, color = infoColor, maxLines = 1)
         return
     }
     val interaction = remember { MutableInteractionSource() }
@@ -358,8 +344,8 @@ private fun QualityLabel(quality: QualityText, setting: QualityDetailSetting, ac
     val hovered by interaction.collectIsHoveredAsState()
     Text(
         quality.text,
+        style = tetsubiType.caption,
         color = if (pressed || hovered) accent ?: TetsubiColors.blue else infoColor,
-        fontSize = 12.sp,
         maxLines = 1,
         modifier = Modifier
             .clickable(
@@ -376,7 +362,10 @@ private fun QualityLabel(quality: QualityText, setting: QualityDetailSetting, ac
 /** A playback failure: what went wrong and what to do. */
 @Composable
 private fun ErrorText(message: String) {
-    Text("⚠  $message", color = Color(1f, 0.55f, 0.55f), fontSize = 13.sp, textAlign = TextAlign.Center)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+        WarningIcon(18.dp, TetsubiColors.red)
+        Text(message, style = tetsubiType.control.copy(fontWeight = FontWeight.Normal), color = TetsubiColors.red, textAlign = TextAlign.Center, modifier = Modifier.weight(1f, fill = false))
+    }
 }
 
 @Composable
@@ -389,7 +378,7 @@ private fun Seek(player: PlayerController, accent: Color?) {
         if (player.maniacMode) {
             // No scrubbing: a plain progress bar.
             LinearProgressIndicator(
-                progress = { progress }, color = line, trackColor = Color.White.copy(alpha = 0.2f),
+                progress = { progress }, color = line, trackColor = TetsubiColors.art,
                 drawStopIndicator = {}, gapSize = 0.dp,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp).height(4.dp),
             )
@@ -404,22 +393,22 @@ private fun Seek(player: PlayerController, accent: Color?) {
                 colors = SliderDefaults.colors(
                     thumbColor = Color.White,
                     activeTrackColor = line,
-                    inactiveTrackColor = Color.White.copy(alpha = 0.2f),
+                    inactiveTrackColor = TetsubiColors.art,
                 ),
                 modifier = Modifier.semantics { contentDescription = "Position" },
             )
         }
         Row(Modifier.fillMaxWidth()) {
             val shown = dragging?.let { it * player.duration } ?: player.position
-            Text(formatTrackTime(shown), color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, modifier = Modifier.weight(1f))
-            Text(formatTrackTime(player.duration), color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+            Text(formatTrackTime(shown), style = tetsubiType.navLabel, color = TetsubiColors.textSecondary, modifier = Modifier.weight(1f))
+            Text(formatTrackTime(player.duration), style = tetsubiType.navLabel, color = TetsubiColors.textSecondary)
         }
     }
 }
 
 @Composable
 private fun Controls(player: PlayerController) {
-    Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
         if (!player.maniacMode) ControlButton("Previous", 56.dp, player::skipToPrevious) { SkipIcon(false, 32.dp) }
         PlayPauseButton(player, 72.dp, 44.dp)
         if (!player.maniacMode) ControlButton("Next", 56.dp, player::skipToNext) { SkipIcon(true, 32.dp) }
@@ -444,88 +433,38 @@ private val noCastDevice = MutableStateFlow<String?>(null)
 private val noCastDevices = MutableStateFlow(false)
 
 @Composable
-private fun Toggles(player: PlayerController, visualiser: VisualiserToggle?, cast: CastButton, accent: Color?) {
+private fun Toggles(player: PlayerController, visualiser: VisualiserToggle?, cast: CastButton) {
     val output = rememberOutputSwitcher()
     val castPicker = rememberCastPicker(cast.casting)
-    val dim = Color.White.copy(alpha = 0.6f)
-    val activeTint = accent ?: TetsubiColors.blue
     val showCast = castPicker != null && cast.visible
-    val count = (if (player.maniacMode) 0 else 2) + listOf(visualiser != null, showCast, output != null).count { it }
-    // Equal columns, each label on one line: five fit a 360 dp phone ("Output"
-    // wrapped letter by letter on a 394 dp one with fixed 32 dp gaps). Up to
-    // 80 dp a column, so two or three stay together, centred.
-    Row(Modifier.widthIn(max = 80.dp * count).fillMaxWidth()) {
-        val column = Modifier.weight(1f)
+    // Round 44 dp buttons: blue tint and a blue icon when on. Shuffle and Repeat are hidden in Maniac Mode;
+    // the rest are hidden where the platform has none (the desktop has no Visualiser, Cast or Output).
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), modifier = Modifier.fillMaxWidth()) {
         if (!player.maniacMode) {
-            Toggle("⇄", "Shuffle", active = player.shuffle, onClick = player::toggleShuffle, tint = activeTint, modifier = column)
-            Toggle(
-                if (player.repeatMode == RepeatMode.ONE) "↻1" else "↻",
-                when (player.repeatMode) {
-                    RepeatMode.OFF -> "Off"
-                    RepeatMode.ALL -> "All"
-                    RepeatMode.ONE -> "1"
-                },
-                active = player.repeatMode != RepeatMode.OFF,
-                onClick = player::cycleRepeatMode,
-                description = "Repeat",
-                tint = activeTint,
-                modifier = column,
-            )
+            RoundIconButton(
+                "Shuffle: ${if (player.shuffle) "On" else "Off"}", onClick = player::toggleShuffle, on = player.shuffle,
+            ) { ShuffleIcon(22.dp, it) }
+            RoundIconButton(
+                "Repeat: ${when (player.repeatMode) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "1" }}",
+                onClick = player::cycleRepeatMode, on = player.repeatMode != RepeatMode.OFF,
+            ) { RepeatIcon(22.dp, it, one = player.repeatMode == RepeatMode.ONE) }
         }
         // Stays in Maniac Mode (as iOS).
         if (visualiser != null) {
-            Toggle("", "Visualiser", active = visualiser.isOn, onClick = visualiser::toggle, onOff = visualiser.isOn, modifier = column) {
-                WaveformIcon(22.dp, if (visualiser.isOn) activeTint else Color.White.copy(alpha = 0.6f))
-            }
+            RoundIconButton(
+                if (visualiser.isOn) "Visualiser, on" else "Visualiser, off", onClick = visualiser::toggle, on = visualiser.isOn,
+            ) { WaveformIcon(22.dp, it) }
         }
-        // Next to the Visualiser (hidden while casting); in the art's colour while casting, as iOS's AirPlay icon.
+        // Next to the Visualiser (hidden while casting).
         if (castPicker != null && showCast) {
-            val description = if (cast.casting) "Casting. Change or stop" else "Play on a Cast device"
-            Toggle("", "Cast", active = cast.casting, onClick = castPicker, description = description, modifier = column) {
-                CastIcon(22.dp, if (cast.casting) activeTint else dim)
-            }
+            RoundIconButton(
+                if (cast.casting) "Casting. Change or stop" else "Play on a Cast device", onClick = castPicker, on = cast.casting,
+            ) { CastIcon(22.dp, it) }
         }
         if (output != null) {
-            // In the art's colour while music goes to headphones, Bluetooth, USB…, as iOS's AirPlay icon.
+            // On while music goes to headphones, Bluetooth, USB…, as iOS's AirPlay icon.
             val external = rememberExternalOutput()
-            Toggle("", "Output", active = external, onClick = output, description = "Choose speakers or headphones", modifier = column) {
-                SpeakerIcon(22.dp, if (external) activeTint else dim)
-            }
+            RoundIconButton("Choose speakers or headphones", onClick = output, on = external) { SpeakerIcon(22.dp, it) }
         }
-    }
-}
-
-@Composable
-private fun Toggle(
-    symbol: String,
-    label: String,
-    active: Boolean,
-    onClick: () -> Unit,
-    description: String = label,
-    /** For an on/off toggle named by its label: read out as "Visualiser, On". */
-    onOff: Boolean? = null,
-    /** The symbol's colour when on: the art's colour (blue when it has none). */
-    tint: Color = TetsubiColors.blue,
-    modifier: Modifier = Modifier,
-    icon: (@Composable () -> Unit)? = null,
-) {
-    Column(
-        modifier.clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 2.dp, vertical = 4.dp)
-            .semantics(mergeDescendants = true) {
-                if (onOff != null) {
-                    contentDescription = label
-                    stateDescription = if (onOff) "On" else "Off"
-                } else {
-                    contentDescription = "$description: $label"
-                }
-            },
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        if (icon != null) {
-            Box(Modifier.height(27.dp), contentAlignment = Alignment.Center) { icon() }
-        } else {
-            Text(symbol, color = if (active) tint else Color.White.copy(alpha = 0.6f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        }
-        Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, maxLines = 1, softWrap = false)
     }
 }

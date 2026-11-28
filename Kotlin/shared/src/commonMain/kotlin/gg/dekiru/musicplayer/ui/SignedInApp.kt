@@ -1,7 +1,17 @@
 package gg.dekiru.musicplayer.ui
 
 import gg.dekiru.musicplayer.data.models.JellyfinArtist
-import gg.dekiru.musicplayer.ui.components.GearIcon
+import gg.dekiru.musicplayer.ui.layout.DensityState
+import gg.dekiru.musicplayer.ui.layout.LocalDensityState
+import gg.dekiru.musicplayer.ui.layout.LocalWindowClass
+import gg.dekiru.musicplayer.ui.layout.WindowClass
+import gg.dekiru.musicplayer.ui.shell.BottomTabBar
+import gg.dekiru.musicplayer.ui.shell.NavRail
+import gg.dekiru.musicplayer.ui.shell.RailWidth
+import gg.dekiru.musicplayer.ui.shell.Sidebar
+import gg.dekiru.musicplayer.ui.shell.SidebarWidth
+import gg.dekiru.musicplayer.ui.shell.Tab
+import androidx.compose.foundation.layout.fillMaxHeight
 import gg.dekiru.musicplayer.ui.components.LocalPlayPrompt
 import gg.dekiru.musicplayer.ui.components.LocalPlayer
 import gg.dekiru.musicplayer.ui.components.PlayPrompt
@@ -17,6 +27,8 @@ import gg.dekiru.musicplayer.ui.search.MagnifyingGlassIcon
 import gg.dekiru.musicplayer.ui.search.SearchHistory
 import gg.dekiru.musicplayer.ui.search.SearchModel
 import gg.dekiru.musicplayer.ui.search.SearchScreen
+import gg.dekiru.musicplayer.ui.settings.EqualizerModel
+import gg.dekiru.musicplayer.ui.settings.EqualizerScreen
 import gg.dekiru.musicplayer.ui.settings.SettingsScreen
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
@@ -105,24 +117,18 @@ private class ListEntry(key: String, val model: AlbumListModel, scope: Coroutine
 private class ArtistEntry(key: String, val model: ArtistModel, scope: CoroutineScope) : Entry(key, scope)
 private class RecentEntry(key: String, val model: RecentlyPlayedModel, scope: CoroutineScope) : Entry(key, scope)
 private class PlaylistPageEntry(key: String, val model: PlaylistModel, scope: CoroutineScope) : Entry(key, scope)
-
-/** The tabs along the bottom, in the order of iOS `AppRootView`. */
-private enum class Tab(val title: String, val icon: @Composable (Color) -> Unit) {
-    HOME("Home", { HouseIcon(24.dp, it) }),
-    LIBRARY("Library", { GridTabIcon(24.dp, it) }),
-    SEARCH("Search", { MagnifyingGlassIcon(24.dp, it) }),
-    DOWNLOADS("Downloads", { DownloadCircleIcon(24.dp, it) }),
-    SETTINGS("Settings", { GearIcon(24.dp, it) }),
-}
+/** Settings ▸ Equaliser, pushed on Compact (a section of Playback on wide windows). */
+private class EqualizerEntry(key: String, scope: CoroutineScope) : Entry(key, scope)
 
 /**
- * The signed-in app: a tab bar along the bottom (Home, Library, Search, Downloads, Settings), each
+ * The signed-in app: five destinations (Home, Library, Search, Downloads, Settings) in a bottom
+ * tab bar (Compact), a rail (Medium) or a sidebar (Expanded), each
  * tab with its own stack of pages (album and playlist pages, full lists). System back
  * (Android) or Escape (desktop) and the page's Back button go back; back
  * on a tab's first page goes to Home. Tapping the open tab goes to its
  * first page. Each page keeps its scroll position. While something is
- * loaded: the blurred album art behind, the Now Playing bar above the tab
- * bar, and Now Playing sliding up over everything.
+ * loaded: the blurred album art behind, the Now Playing bar docked at the bottom of
+ * the content (above the tab bar), and Now Playing sliding up over everything.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -139,6 +145,7 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
             downloadedPlaylists = { session.downloads.value?.playlists?.availableOffline.orEmpty().map { it.manifest.toPlaylist() } },
         )
     }
+    val equalizer = remember(session) { EqualizerModel(session.effectsSettings, session.environment.playerEngine.audioEffects) }
     val stacks = remember(api) { Tab.entries.associateWith { mutableStateListOf<Entry>() } }
     var tab by rememberSaveable(api) { mutableStateOf(Tab.HOME) }
     val saved = rememberSaveableStateHolder()
@@ -175,7 +182,12 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
 
     fun openArtist(artist: JellyfinArtist) {
         val entryScope = childScope()
-        stacks.getValue(tab) += ArtistEntry("artist-${counter[0]++}-${artist.id}", ArtistModel(artist, api, entryScope), entryScope)
+        stacks.getValue(tab) += ArtistEntry("artist-${counter[0]++}-${artist.id}", ArtistModel(artist, api, entryScope, session.artistInfo), entryScope)
+    }
+
+    fun openEqualizer() {
+        val entryScope = childScope()
+        stacks.getValue(Tab.SETTINGS) += EqualizerEntry("equalizer-${counter[0]++}", entryScope)
     }
 
     fun openPlaylist(playlist: JellyfinPlaylist) {
@@ -233,74 +245,113 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
 
     // Play Next / Add to Queue in the cards' menus, and the Play prompt (one for the app).
     val playPrompt = remember { PlayPrompt() }
-    CompositionLocalProvider(LocalPlayer provides playing, LocalPlayPrompt provides playPrompt) {
+    val windowClass = LocalWindowClass.current
+    val compact = windowClass == WindowClass.Compact
+    val density = remember(api) { DensityState(session.environment.preferences) }
+    // The rail and sidebar keep clear of the system bars; so does the mini player on wide windows.
+    val consumeBottom = compact || showBar
+    val navInset = when (windowClass) {
+        WindowClass.Compact -> 0.dp
+        WindowClass.Medium -> RailWidth
+        WindowClass.Expanded -> SidebarWidth
+    }
+    CompositionLocalProvider(LocalPlayer provides playing, LocalPlayPrompt provides playPrompt, LocalDensityState provides density) {
     Box(Modifier.fillMaxSize()) {
         // The blurred album art while something is loaded.
         AlbumBackdrop(api, playing?.currentTrack?.artItemId, localPath = playing?.currentTrack?.localArtPath)
-        Column(Modifier.fillMaxSize()) {
-            // The tab bar keeps clear of the navigation bar, so the screens don't.
-            Box(Modifier.weight(1f).fillMaxWidth().consumeWindowInsets(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
-                val top = stacks.getValue(tab).lastOrNull()
-                saved.SaveableStateProvider(top?.key ?: "root-${tab.name}") {
-                    when (top) {
-                        null -> when (tab) {
-                            Tab.HOME -> HomeScreen(
-                                api, home, onOpen = ::open, onMore = ::openList,
-                                network = session.environment.network.state, downloads = downloads,
-                                playlists = playlists, onOpenPlaylist = ::openPlaylist,
-                                onMorePlaylists = {
-                                    // The Library's first page, on its Playlists tab.
-                                    stacks.getValue(Tab.LIBRARY).let { while (it.isNotEmpty()) pop(it) }
-                                    library.tab = LibraryTab.PLAYLISTS
-                                    tab = Tab.LIBRARY
-                                },
-                                onMoreRecentlyPlayed = ::openRecentlyPlayed,
-                                zoom = library.gridZoom,
-                                updates = session.updates,
-                                playerUnavailable = session.environment.playerEngine.unavailableReason,
-                            )
-                            Tab.LIBRARY -> LibraryScreen(
-                                api, library, onOpen = ::open, onOpenArtist = ::openArtist,
-                                network = session.environment.network.state, downloads = downloads,
-                                playlists = playlists, onOpenPlaylist = ::openPlaylist,
-                            )
-                            Tab.SEARCH -> SearchScreen(
-                                api, search, onOpen = ::open, player = playing, downloads = downloads,
-                                network = session.environment.network.state,
-                                playlists = playlists, onOpenPlaylist = ::openPlaylist,
-                            )
-                            Tab.DOWNLOADS -> DownloadsScreen(api, downloads, playing, onOpenPlaylist = ::openPlaylist)
-                            Tab.SETTINGS -> SettingsScreen(session, api)
-                        }
-                        is AlbumEntry -> AlbumScreen(
-                            api, top.model, playing, onOpen = ::open, onBack = ::back, onAddToPlaylist = addToPlaylist::start,
-                            onOpenArtist = ::openArtist, isOnline = network.online,
-                        )
-                        is ArtistEntry -> ArtistScreen(
-                            api, top.model, onOpen = ::open, onBack = ::back,
-                            network = session.environment.network.state, downloads = downloads, zoom = library.gridZoom,
-                        )
-                        is PlaylistPageEntry -> PlaylistScreen(
-                            api, top.model, playing, onOpenAlbum = ::open, onBack = ::back,
-                            isOnline = network.online, onAddToPlaylist = addToPlaylist::start, onDeleted = { leave(top) },
-                            manager = downloads,
-                        )
-                        is RecentEntry -> RecentlyPlayedScreen(
-                            api, top.model, session.environment.preferences, onOpen = ::open, onBack = ::back,
-                            network = session.environment.network.state, downloads = downloads,
-                            homeRow = home.recentlyPlayed,
-                        )
-                        is ListEntry -> AlbumListScreen(
-                            api, top.model, onOpen = ::open, onBack = ::back, downloads = downloads,
-                            zoom = library.gridZoom, favourites = library.favouritesOptions,
-                        )
-                    }
+        Row(Modifier.fillMaxSize()) {
+            when (windowClass) {
+                WindowClass.Compact -> {}
+                WindowClass.Medium -> NavRail(tab, onSelect = ::select)
+                WindowClass.Expanded -> {
+                    LaunchedEffect(playlists) { if (!playlists.loaded) playlists.load() }
+                    Sidebar(
+                        tab, onSelect = ::select, playlists = playlists.playlists, onOpenPlaylist = ::openPlaylist,
+                        serverName = api.baseUrl.removePrefix("https://").removePrefix("http://"), online = network.online,
+                    )
                 }
             }
-            if (showBar && playing != null) {
-                NowPlayingBar(api, playing, Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)))
+            // The content area: at most 1600 wide, centred.
+            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                Column(
+                    Modifier.widthIn(max = WindowClass.MAX_CONTENT_WIDTH).fillMaxHeight().fillMaxWidth()
+                        .then(if (compact) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End))),
+                ) {
+                    // The tab bar (Compact) keeps clear of the navigation bar, so the screens don't.
+                    Box(
+                        Modifier.weight(1f).fillMaxWidth()
+                            .then(if (consumeBottom) Modifier.consumeWindowInsets(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)) else Modifier),
+                    ) {
+                        val top = stacks.getValue(tab).lastOrNull()
+                        saved.SaveableStateProvider(top?.key ?: "root-${tab.name}") {
+                            when (top) {
+                                null -> when (tab) {
+                                    Tab.HOME -> HomeScreen(
+                                        api, home, onOpen = ::open, onMore = ::openList,
+                                        network = session.environment.network.state, downloads = downloads,
+                                        playlists = playlists, onOpenPlaylist = ::openPlaylist,
+                                        onMorePlaylists = {
+                                            // The Library's first page, on its Playlists tab.
+                                            stacks.getValue(Tab.LIBRARY).let { while (it.isNotEmpty()) pop(it) }
+                                            library.tab = LibraryTab.PLAYLISTS
+                                            tab = Tab.LIBRARY
+                                        },
+                                        onMoreRecentlyPlayed = ::openRecentlyPlayed,
+                                        updates = session.updates,
+                                        playerUnavailable = session.environment.playerEngine.unavailableReason,
+                                    )
+                                    Tab.LIBRARY -> LibraryScreen(
+                                        api, library, onOpen = ::open, onOpenArtist = ::openArtist,
+                                        network = session.environment.network.state, downloads = downloads,
+                                        playlists = playlists, onOpenPlaylist = ::openPlaylist,
+                                    )
+                                    Tab.SEARCH -> SearchScreen(
+                                        api, search, onOpen = ::open, player = playing, downloads = downloads,
+                                        network = session.environment.network.state,
+                                        playlists = playlists, onOpenPlaylist = ::openPlaylist, onOpenArtist = ::openArtist,
+                                    )
+                                    Tab.DOWNLOADS -> DownloadsScreen(api, downloads, playing, onOpenPlaylist = ::openPlaylist)
+                                    Tab.SETTINGS -> SettingsScreen(session, api, equalizer, onOpenEqualizer = ::openEqualizer)
+                                }
+                                is AlbumEntry -> AlbumScreen(
+                                    api, top.model, playing, onOpen = ::open, onBack = ::back, onAddToPlaylist = addToPlaylist::start,
+                                    onOpenArtist = ::openArtist, isOnline = network.online,
+                                )
+                                is ArtistEntry -> ArtistScreen(
+                                    api, top.model, onOpen = ::open, onBack = ::back,
+                                    network = session.environment.network.state, downloads = downloads,
+                                )
+                                is PlaylistPageEntry -> PlaylistScreen(
+                                    api, top.model, playing, onOpenAlbum = ::open, onBack = ::back,
+                                    isOnline = network.online, onAddToPlaylist = addToPlaylist::start, onDeleted = { leave(top) },
+                                    manager = downloads,
+                                )
+                                is EqualizerEntry -> EqualizerScreen(
+                                    equalizer, onBack = ::back,
+                                    casting = session.environment.playerEngine.cast?.deviceName?.collectAsState()?.value != null,
+                                )
+                                is RecentEntry -> RecentlyPlayedScreen(
+                                    api, top.model, session.environment.preferences, onOpen = ::open, onBack = ::back,
+                                    network = session.environment.network.state, downloads = downloads,
+                                    homeRow = home.recentlyPlayed,
+                                )
+                                is ListEntry -> AlbumListScreen(
+                                    api, top.model, onOpen = ::open, onBack = ::back, downloads = downloads,
+                                    favourites = library.favouritesOptions,
+                                )
+                            }
+                        }
+                    }
+                    if (showBar && playing != null) {
+                        val insets = if (compact) WindowInsetsSides.Horizontal else WindowInsetsSides.Bottom
+                        NowPlayingBar(
+                            api, playing, Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(insets)),
+                            cast = session.environment.playerEngine.cast, isOnline = network.online,
+                        )
+                    }
+                    if (compact && !keyboardUp) BottomTabBar(tab, onSelect = ::select)
+                }
             }
-            if (!keyboardUp) TabBar(tab, onSelect = ::select)
         }
         AnimatedVisibility(
             visible = playing?.isNowPlayingOpen == true,
@@ -325,48 +376,18 @@ fun SignedInApp(session: AppSession, api: JellyfinApi) {
         AddToPlaylistSheet(addToPlaylist)
         PlaylistNoticeBanner(
             addToPlaylist,
-            Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).widthIn(max = 720.dp),
+            Modifier.align(Alignment.TopCenter).padding(start = navInset).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).widthIn(max = WindowClass.MAX_CONTENT_WIDTH),
         )
         // "Playing next" / "Added to queue".
         if (playing != null) {
             QueueNoticeBanner(
                 playing,
-                Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).widthIn(max = 720.dp),
+                Modifier.align(Alignment.TopCenter).padding(start = navInset).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).widthIn(max = WindowClass.MAX_CONTENT_WIDTH),
             )
         }
         // Replace queue · Play Next · Add to Queue, when Play would replace more than the playing album.
         PlayPromptDialog(playPrompt)
     }
-    }
-}
-
-/** Icons over labels, the open tab in blue (as the iOS tab bar), clear of the navigation bar. */
-@Composable
-private fun TabBar(selected: Tab, onSelect: (Tab) -> Unit) {
-    Column(Modifier.fillMaxWidth().background(TetsubiColors.background.copy(alpha = 0.85f))) {
-        Box(Modifier.fillMaxWidth().height(0.5.dp).background(Color.White.copy(alpha = 0.15f)))
-        Row(
-            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
-                .selectableGroup(),
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            for (t in Tab.entries) {
-                val isSelected = t == selected
-                val color = if (isSelected) TetsubiColors.blue else Color.White.copy(alpha = 0.55f)
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .widthIn(max = 160.dp)
-                        .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(t) })
-                        .padding(top = 6.dp, bottom = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    t.icon(color)
-                    Text(t.title, color = color, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                }
-            }
-        }
     }
 }
 

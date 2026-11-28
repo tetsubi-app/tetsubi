@@ -2,41 +2,24 @@ package gg.dekiru.musicplayer.ui.playlist
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,22 +31,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
@@ -74,49 +51,57 @@ import gg.dekiru.musicplayer.downloads.DownloadPaths
 import gg.dekiru.musicplayer.downloads.DownloadedPlaylist
 import gg.dekiru.musicplayer.downloads.LocalFiles
 import gg.dekiru.musicplayer.downloads.PlaylistDownloads
+import gg.dekiru.musicplayer.playback.PlayerController
+import gg.dekiru.musicplayer.ui.Radii
+import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.album.AlbumDownloads
 import gg.dekiru.musicplayer.ui.album.DownloadProgress
+import gg.dekiru.musicplayer.ui.album.formatDuration
+import gg.dekiru.musicplayer.ui.components.AlbumArt
+import gg.dekiru.musicplayer.ui.components.BannerKind
 import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
+import gg.dekiru.musicplayer.ui.components.DetailMetrics
+import gg.dekiru.musicplayer.ui.components.DetailPage
+import gg.dekiru.musicplayer.ui.components.DetailTitle
 import gg.dekiru.musicplayer.ui.components.DownloadCircleIcon
+import gg.dekiru.musicplayer.ui.components.GripIcon
+import gg.dekiru.musicplayer.ui.components.ListMessage
+import gg.dekiru.musicplayer.ui.components.ListRow
+import gg.dekiru.musicplayer.ui.components.LoadingSpinner
+import gg.dekiru.musicplayer.ui.components.LocalPlayPrompt
+import gg.dekiru.musicplayer.ui.components.MenuAction
+import gg.dekiru.musicplayer.ui.components.MinusCircleIcon
+import gg.dekiru.musicplayer.ui.components.MoreMenuButton
+import gg.dekiru.musicplayer.ui.components.PageHeader
+import gg.dekiru.musicplayer.ui.components.PillButton
+import gg.dekiru.musicplayer.ui.components.PlayChoice
+import gg.dekiru.musicplayer.ui.components.PlayPrompt
+import gg.dekiru.musicplayer.ui.components.PrimaryButton
 import gg.dekiru.musicplayer.ui.components.ProgressRing
+import gg.dekiru.musicplayer.ui.components.WithContextMenu
+import gg.dekiru.musicplayer.ui.components.queueActions
 import gg.dekiru.musicplayer.ui.downloads.DownloadsText
 import gg.dekiru.musicplayer.ui.downloads.collectActive
 import gg.dekiru.musicplayer.ui.downloads.collectPlaylists
-import gg.dekiru.musicplayer.playback.PlayerController
-import gg.dekiru.musicplayer.ui.TetsubiColors
-import gg.dekiru.musicplayer.ui.album.formatDuration
-import gg.dekiru.musicplayer.ui.components.AlbumArt
-import gg.dekiru.musicplayer.ui.components.LocalPlayPrompt
-import gg.dekiru.musicplayer.ui.components.MenuAction
-import gg.dekiru.musicplayer.ui.components.MoreMenuButton
-import gg.dekiru.musicplayer.ui.components.PlayChoice
-import gg.dekiru.musicplayer.ui.components.PlayPrompt
-import gg.dekiru.musicplayer.ui.components.WithContextMenu
-import gg.dekiru.musicplayer.ui.components.menuClickable
-import gg.dekiru.musicplayer.ui.components.queueActions
 import gg.dekiru.musicplayer.ui.home.OFFLINE_MESSAGE
 import gg.dekiru.musicplayer.ui.home.StatusBanner
+import gg.dekiru.musicplayer.ui.layout.LocalWindowClass
+import gg.dekiru.musicplayer.ui.layout.screenInsets
 import gg.dekiru.musicplayer.ui.library.ShuffleIcon
-
-/** Content width on wide screens, as the album page. */
-private val readableWidth = 720.dp
+import gg.dekiru.musicplayer.ui.tetsubiType
 
 /**
- * A playlist (laid out as the album page): art, name, song count and
- * playing time; Play and Shuffle; the songs in playlist order, each with
- * its own album's art and "artist · album". Tap a song to play the
- * playlist from there; its menu has Add to Playlist… and Go to Album. The
- * same song may be listed twice, so rows go by position.
+ * A playlist (laid out as the album page, [DetailPage]): art, name, song count and playing time;
+ * Play, Shuffle and Download; the songs in playlist order, each with its own album's art and
+ * "artist · album". Tap a song to play the playlist from there; its menu has Add to Playlist… and
+ * Go to Album. The same song may be listed twice, so rows go by position.
  *
- * When the server lets the user change the playlist there's Edit: the
- * rows become a list to drag (by the handle) and remove from, with Rename
- * above and Delete Playlist below. What's playing isn't touched.
+ * When the server lets the user change the playlist there's Edit: the rows become a list to drag
+ * (by the handle) and remove from, with Rename and Delete Playlist. What's playing isn't touched.
  *
- * Download keeps the playlist on the device (Download → Downloading, with
- * the progress under the buttons → Downloaded; tapping Downloaded offers
- * to remove it). Offline, a downloaded playlist's page is filled from its
- * saved list with its saved pictures, and there's no Edit or Add to
- * Playlist….
+ * Download keeps the playlist on the device (Download → Downloading, with the progress under the
+ * buttons → Downloaded; tapping Downloaded offers to remove it). Offline, a downloaded playlist's
+ * page is filled from its saved list with its saved pictures, and there's no Edit or Add to Playlist….
  */
 @Composable
 fun PlaylistScreen(
@@ -145,10 +130,8 @@ fun PlaylistScreen(
     val download = allDownloads.firstOrNull { it.playlistId == model.playlist.id }
     val downloadState = active[PlaylistDownloads.key(model.playlist.id)]
     var confirmingRemove by remember { mutableStateOf(false) }
-    // Scrolling content stops below the status bar; the bottom inset is padding inside the list.
-    val insets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues()
     val editing = model.isEditing
-    val listState = rememberLazyListState()
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val drag = remember { RowDrag() }
     var renaming by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
@@ -158,32 +141,46 @@ fun PlaylistScreen(
         queueActions({ p.playNext(model.playlist, model.entries) }, { p.addToQueue(model.playlist, model.entries) })
     }.orEmpty()
 
-    BoxWithConstraints(
-        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        val wide = maxWidth > 600.dp
-        LazyColumn(
-            state = listState,
-            contentPadding = insets,
-            modifier = Modifier.widthIn(max = readableWidth).fillMaxSize()
-                .then(if (editing && !model.isDeleting) Modifier.dragRows(listState, drag, { model.entries.size }, model::move) else Modifier),
-        ) {
-            item {
-                TopBar(
-                    model.playlist.displayName, onBack,
-                    editTitle = when {
-                        editing -> "Done"
-                        model.canEdit && model.loaded && isOnline -> "Edit"
-                        else -> null
-                    },
-                    onEdit = { if (editing) model.doneEditing() else model.startEditing() },
-                    menu = if (editing) emptyList() else queue,
+    Column(Modifier.fillMaxSize().screenInsets()) {
+        PageHeader(null, onBack = onBack) {
+            val editTitle = when {
+                editing -> "Done"
+                model.canEdit && model.loaded && isOnline -> "Edit"
+                else -> null
+            }
+            if (editTitle != null) {
+                Text(
+                    editTitle, style = tetsubiType.rowTitle, color = TetsubiColors.blue,
+                    modifier = Modifier.clip(RoundedCornerShape(Radii.FULL_PERCENT)).clickable(role = Role.Button) { if (editing) model.doneEditing() else model.startEditing() }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
+            MoreMenuButton("More", if (editing) emptyList() else queue)
+        }
+        DetailPage(
+            modifier = Modifier.weight(1f),
+            state = listState,
+            listModifier = if (editing && !model.isDeleting) Modifier.dragRows(listState, drag, { model.entries.size }, model::move) else Modifier,
+            info = { m ->
+                if (editing) {
+                    if (m.twoPane) {
+                        AlbumArt(api, model.artItemId, size = m.artSize, cornerRadius = Radii.card, maxWidth = 800, localPath = download?.coverPath)
+                        DetailTitle(m, model.playlist.displayName, meta = model.summary)
+                    }
+                    RenameRow(model.playlist.displayName, enabled = !model.isDeleting) { renaming = true }
+                } else {
+                    AlbumArt(api, model.artItemId, size = m.artSize, cornerRadius = Radii.card, maxWidth = 800, localPath = download?.coverPath)
+                    DetailTitle(m, model.playlist.displayName, meta = model.summary)
+                    Actions(
+                        m, model, player, manager, download, downloadState, prompt,
+                        canDownload = isOnline && model.loaded && model.entries.isNotEmpty(),
+                        onRemove = { confirmingRemove = true },
+                    )
+                }
+            },
+        ) {
             if (editing) {
-                model.saveError?.let { error -> item { StatusBanner(error) } }
-                item { RenameRow(model.playlist.displayName, enabled = !model.isDeleting) { renaming = true } }
+                model.saveError?.let { error -> item(key = "save-error") { StatusBanner(error) } }
                 itemsIndexed(model.entries, key = { position, _ -> "entry-$position" }) { position, entry ->
                     EditRow(
                         api, entry,
@@ -194,39 +191,21 @@ fun PlaylistScreen(
                         onMoveDown = if (position < model.entries.lastIndex) ({ model.move(position, position + 1) }) else null,
                     )
                 }
-                item { DeleteRow(enabled = !model.isDeleting) { confirmingDelete = true } }
+                item(key = "delete") { DeleteRow(enabled = !model.isDeleting) { confirmingDelete = true } }
             } else {
-                item { Header(api, model, artSize = if (wide) 240.dp else 160.dp, localArt = download?.coverPath) }
-                item {
-                    Actions(
-                        model, player, manager, download, downloadState, prompt,
-                        canDownload = isOnline && model.loaded && model.entries.isNotEmpty(),
-                        onRemove = { confirmingRemove = true },
-                    )
-                }
-                model.playNotice?.let { notice -> item { StatusBanner(notice) } }
+                model.playNotice?.let { notice -> item(key = "play-notice") { StatusBanner(notice) } }
                 val loadError = model.errorMessage
                 val saveError = model.saveError
                 val albumError = model.albumError
                 when {
-                    !isOnline && !model.loaded -> item { StatusBanner(OFFLINE_MESSAGE, icon = "\u2298") }
-                    loadError != null -> item { StatusBanner(loadError, "Retry", model::load) }
-                    saveError != null -> item { StatusBanner(saveError) }
-                    albumError != null -> item { StatusBanner(albumError) }
+                    !isOnline && !model.loaded -> item(key = "offline") { StatusBanner(OFFLINE_MESSAGE, kind = BannerKind.Offline) }
+                    loadError != null -> item(key = "load-error") { StatusBanner(loadError, "Retry", model::load) }
+                    saveError != null -> item(key = "save-error") { StatusBanner(saveError) }
+                    albumError != null -> item(key = "album-error") { StatusBanner(albumError) }
                 }
-                item { Spacer(Modifier.height(12.dp)) }
                 when {
-                    model.isLoading -> item {
-                        Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(Modifier.size(28.dp), color = Color.White, strokeWidth = 2.5.dp)
-                        }
-                    }
-                    model.loaded && model.entries.isEmpty() -> item {
-                        Text(
-                            "This playlist is empty.", color = TetsubiColors.albumArtistText, fontSize = 13.sp, textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        )
-                    }
+                    model.isLoading -> item(key = "loading") { LoadingSpinner() }
+                    model.loaded && model.entries.isEmpty() -> item(key = "empty") { ListMessage("This playlist is empty.") }
                     else -> itemsIndexed(model.entries, key = { position, _ -> "entry-$position" }) { position, entry ->
                         val playingHere = player != null && player.isPlaying(model.playlist) &&
                             player.currentPlace == position && player.currentTrack?.id == entry.track.id
@@ -248,7 +227,6 @@ fun PlaylistScreen(
                     }
                 }
             }
-            item { Spacer(Modifier.height(32.dp)) }
         }
     }
 
@@ -292,25 +270,6 @@ fun PlaylistScreen(
 private fun rememberSavedArt(download: DownloadedPlaylist, itemId: String): String? =
     remember(download, itemId) { "${download.directory}/${DownloadPaths.COVERS}/${DownloadPaths.sanitize(itemId)}.jpg".takeIf(LocalFiles::exists) }
 
-@Composable
-private fun TopBar(title: String, onBack: () -> Unit, editTitle: String?, onEdit: () -> Unit, menu: List<MenuAction> = emptyList()) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back" }) {
-            Text("‹ Back", color = TetsubiColors.blue, fontSize = 16.sp)
-        }
-        Text(
-            title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 16.dp),
-        )
-        if (editTitle != null) {
-            TextButton(onClick = onEdit) {
-                Text(editTitle, color = TetsubiColors.blue, fontSize = 16.sp, fontWeight = if (editTitle == "Done") FontWeight.SemiBold else FontWeight.Normal)
-            }
-        }
-        MoreMenuButton("More", menu, Modifier.padding(end = 8.dp))
-    }
-}
-
 /**
  * Play the playlist (from the tapped `song`, or shuffled), or, from the
  * prompt, queue it instead (a tapped song: just that song; Shuffle leaves
@@ -334,7 +293,7 @@ private class RowDrag {
 }
 
 /** The drag handle's width at the right of an edit row (with the row's own edge padding). */
-private val handleWidth = 64.dp
+private val handleWidth = 96.dp
 
 /**
  * Dragging a row by its handle: the press is taken before the list can
@@ -397,40 +356,31 @@ private fun Modifier.dragRows(listState: LazyListState, drag: RowDrag, count: ()
         }
     }
 
-/** The playlist's name with "Rename…". */
+/** A grouped-row button: rounded 16 surface, [title] in [color]. */
 @Composable
-private fun RenameRow(name: String, enabled: Boolean, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(10.dp)
+private fun GroupButton(title: String, color: androidx.compose.ui.graphics.Color, enabled: Boolean, onClick: () -> Unit, value: String? = null) {
+    val shape = RoundedCornerShape(Radii.panel)
     Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(shape)
-            .background(TetsubiColors.groupBackground, shape)
+        Modifier.fillMaxWidth().clip(shape).background(TetsubiColors.surface, shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(name, color = Color.White, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        Text("Rename…", color = TetsubiColors.pink, fontSize = 15.sp)
+        Text(title, style = tetsubiType.rowTitle, color = color, maxLines = 1, modifier = Modifier.weight(1f, fill = value == null))
+        if (value != null) Text(value, style = tetsubiType.rowTitle, color = TetsubiColors.blue, maxLines = 1)
     }
 }
 
+/** The playlist's name with "Rename…". */
+@Composable
+private fun RenameRow(name: String, enabled: Boolean, onClick: () -> Unit) =
+    GroupButton(name, TetsubiColors.textPrimary, enabled, onClick, value = "Rename…")
+
 @Composable
 private fun DeleteRow(enabled: Boolean, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(10.dp)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 16.dp)
-            .clip(shape)
-            .background(TetsubiColors.groupBackground, shape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("Delete Playlist", color = TetsubiColors.red, fontSize = 17.sp)
+    Box(Modifier.fillMaxWidth().padding(horizontal = LocalWindowClass.current.pageMargin, vertical = 16.dp)) {
+        GroupButton("Delete Playlist", TetsubiColors.red, enabled, onClick)
     }
 }
 
@@ -445,35 +395,32 @@ private fun EditRow(
     onMoveUp: (() -> Unit)?,
     onMoveDown: (() -> Unit)?,
 ) {
-    val shape = RoundedCornerShape(6.dp)
     val title = entry.track.displayName
     Row(
         Modifier
             .fillMaxWidth()
             .zIndex(if (dragOffset != null) 1f else 0f)
             .graphicsLayer { translationY = dragOffset ?: 0f }
-            .padding(horizontal = 16.dp, vertical = 1.dp)
-            .clip(shape)
-            .background(if (dragOffset != null) TetsubiColors.groupBackground else Color.Gray.copy(alpha = 0.05f), shape)
-            .padding(top = 6.dp, bottom = 6.dp),
+            .background(if (dragOffset != null) TetsubiColors.background else androidx.compose.ui.graphics.Color.Transparent)
+            .heightIn(min = 56.dp)
+            .padding(horizontal = LocalWindowClass.current.pageMargin, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(
-            Modifier.size(40.dp).clip(RoundedCornerShape(50))
+            Modifier.size(32.dp).clip(RoundedCornerShape(Radii.FULL_PERCENT))
                 .clickable(enabled = enabled, role = Role.Button, onClick = onRemove)
                 .semantics { contentDescription = "Remove $title" },
             contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.size(22.dp).background(TetsubiColors.red, RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
-                Box(Modifier.width(10.dp).height(2.dp).background(Color.White))
-            }
+        ) { MinusCircleIcon(24.dp) }
+        Box(Modifier.size(40.dp).clip(RoundedCornerShape(Radii.thumb)).background(TetsubiColors.art)) {
+            AlbumArt(api, entry.artItemId, size = 40.dp, cornerRadius = 0.dp, maxWidth = 100)
         }
-        AlbumArt(api, entry.artItemId, size = 40.dp, cornerRadius = 4.dp, maxWidth = 100)
-        Column(Modifier.weight(1f).padding(start = 10.dp)) {
-            Text(title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = tetsubiType.rowTitle, color = TetsubiColors.textPrimary, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             val detail = entryDetail(entry)
             if (detail.isNotEmpty()) {
-                Text(detail, color = TetsubiColors.albumArtistText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(detail, style = tetsubiType.caption, color = TetsubiColors.textSecondary, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
         }
         Box(
@@ -485,33 +432,18 @@ private fun EditRow(
                 )
             },
             contentAlignment = Alignment.Center,
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                repeat(3) { Box(Modifier.width(18.dp).height(2.dp).background(Color.White.copy(alpha = 0.5f))) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun Header(api: JellyfinApi, model: PlaylistModel, artSize: Dp, localArt: String?) {
-    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Bottom) {
-        AlbumArt(api, model.artItemId, size = artSize, cornerRadius = 12.dp, maxWidth = 600, localPath = localArt)
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(model.playlist.displayName, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Text(model.summary, color = TetsubiColors.albumArtistText, fontSize = 15.sp)
-        }
+        ) { GripIcon(24.dp, TetsubiColors.textSecondary) }
     }
 }
 
 /**
- * Play (or "Now playing" while this playlist plays), Shuffle (not in
- * Maniac Mode) and Download; the buttons wrap on a narrow screen. A
- * download under way shows its progress below.
+ * Play (or "Now playing" while this playlist plays), Shuffle (not in Maniac Mode) and Download; the
+ * buttons wrap on a narrow screen. A download under way shows its progress below.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Actions(
+    m: DetailMetrics,
     model: PlaylistModel,
     player: PlayerController?,
     manager: DownloadManager?,
@@ -522,36 +454,35 @@ private fun Actions(
     onRemove: () -> Unit,
 ) {
     val canPlay = player?.isSupported == true && model.entries.isNotEmpty()
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        val nowPlaying = player?.isPlaying(model.playlist) == true
-        Button(
-            onClick = {
-                when {
-                    player == null -> {}
-                    nowPlaying -> player.isNowPlayingOpen = true
-                    // More than the playing album queued: Replace queue, Play Next or Add to Queue.
-                    else -> prompt.play(player, playlistChoice(model, player))
-                }
-            },
-            enabled = canPlay,
-            colors = ButtonDefaults.buttonColors(containerColor = if (nowPlaying) TetsubiColors.pink else TetsubiColors.blue, contentColor = Color.White),
-        ) { Text(if (nowPlaying) "Now playing" else "▶  Play") }
-        if (player?.maniacMode != true) {
-            OutlinedButton(
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, if (m.twoPane) Alignment.Start else Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val nowPlaying = player?.isPlaying(model.playlist) == true
+            PrimaryButton(
+                if (nowPlaying) "Now playing" else "Play",
                 onClick = {
-                    player?.let { prompt.play(it, playlistChoice(model, it, shuffled = true)) }
+                    when {
+                        player == null -> {}
+                        nowPlaying -> player.isNowPlayingOpen = true
+                        // More than the playing album queued: Replace queue, Play Next or Add to Queue.
+                        else -> prompt.play(player, playlistChoice(model, player))
+                    }
                 },
                 enabled = canPlay,
-            ) {
-                ShuffleIcon(18.dp, if (canPlay) Color.White else Color.White.copy(alpha = 0.5f))
-                Spacer(Modifier.width(8.dp))
-                Text("Shuffle", color = if (canPlay) Color.White else Color.White.copy(alpha = 0.5f))
+                color = if (nowPlaying) TetsubiColors.pink else TetsubiColors.blue,
+            )
+            if (player?.maniacMode != true) {
+                PillButton(
+                    "Shuffle", onClick = { player?.let { prompt.play(it, playlistChoice(model, it, shuffled = true)) } }, enabled = canPlay,
+                    icon = { ShuffleIcon(18.dp, if (canPlay) TetsubiColors.textPrimary else TetsubiColors.textTertiary) },
+                )
             }
+            if (manager != null) DownloadButton(model, manager, download, state, canDownload, onRemove)
         }
-        if (manager != null) DownloadButton(model, manager, download, state, canDownload, onRemove)
-    }
-    if (manager != null && state != null) DownloadProgress(manager, state)
+        if (manager != null && state != null) DownloadProgress(manager, state)
     }
 }
 
@@ -569,31 +500,23 @@ private fun DownloadButton(
     onRemove: () -> Unit,
 ) {
     when {
-        state != null -> OutlinedButton(
-            onClick = { AlbumDownloads.toggle(manager, state) },
-            modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "Downloading. ${AlbumDownloads.actionLabel(state)}" },
-        ) {
-            ProgressRing(state.progress, 18.dp)
-            Spacer(Modifier.width(8.dp))
-            Text("Downloading", color = Color.White)
-        }
-        download?.isComplete == true -> OutlinedButton(
-            onClick = onRemove,
-            modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "Downloaded. Remove download" },
-        ) {
-            CheckCircleIcon(18.dp, TetsubiColors.green)
-            Spacer(Modifier.width(8.dp))
-            Text("Downloaded", color = TetsubiColors.green)
-        }
-        else -> OutlinedButton(onClick = { manager.playlists.download(model.playlist, model.entries) }, enabled = canDownload) {
-            DownloadCircleIcon(18.dp, if (canDownload) Color.White else Color.White.copy(alpha = 0.5f))
-            Spacer(Modifier.width(8.dp))
-            Text("Download", color = if (canDownload) Color.White else Color.White.copy(alpha = 0.5f))
-        }
+        state != null -> PillButton(
+            "Downloading", onClick = { AlbumDownloads.toggle(manager, state) },
+            description = "Downloading. ${AlbumDownloads.actionLabel(state)}",
+            icon = { ProgressRing(state.progress, 18.dp) },
+        )
+        download?.isComplete == true -> PillButton(
+            "Downloaded", onClick = onRemove, color = TetsubiColors.green, description = "Downloaded. Remove download",
+            icon = { CheckCircleIcon(18.dp, TetsubiColors.green) },
+        )
+        else -> PillButton(
+            "Download", onClick = { manager.playlists.download(model.playlist, model.entries) }, enabled = canDownload,
+            icon = { DownloadCircleIcon(18.dp, if (canDownload) TetsubiColors.textPrimary else TetsubiColors.textTertiary) },
+        )
     }
 }
 
-/** One song: its album's art, title, "artist · album", length, and the ⋯ menu. The playing row is solid pink. */
+/** One song: its album's art, title, "artist · album", length, and the ⋯ menu. The playing row is pink-tinted. */
 @Composable
 private fun EntryRow(
     api: JellyfinApi,
@@ -605,50 +528,23 @@ private fun EntryRow(
     onAddToPlaylist: (() -> Unit)?,
     onGoToAlbum: (() -> Unit)?,
 ) {
-    val shape = RoundedCornerShape(6.dp)
     // ⋯, a long press and a right-click: Play Next, Add to Queue, Add to Playlist…, Go to Album.
     val menu = queue + listOfNotNull(
         onAddToPlaylist?.let { MenuAction("Add to Playlist…", action = it) },
         onGoToAlbum?.let { MenuAction("Go to Album", action = it) },
     )
     WithContextMenu(menu) { openMenu ->
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 1.dp)
-            .clip(shape)
-            .background(if (isPlaying) TetsubiColors.pink else Color.Gray.copy(alpha = 0.05f), shape)
-            .then(
-                when {
-                    onClick != null -> Modifier.menuClickable(onClick, openMenu)
-                    openMenu != null -> Modifier.menuClickable({}, openMenu)
-                    else -> Modifier
-                },
-            )
-            .padding(start = 8.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AlbumArt(api, entry.artItemId, size = 40.dp, cornerRadius = 4.dp, maxWidth = 100, localPath = localArt)
-        Column(Modifier.weight(1f).padding(start = 10.dp)) {
-            Text(
-                entry.track.displayName, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Normal,
-            )
-            val detail = entryDetail(entry)
-            if (detail.isNotEmpty()) {
-                Text(
-                    detail, color = if (isPlaying) Color.White.copy(alpha = 0.85f) else TetsubiColors.albumArtistText,
-                    fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        Text(
-            formatDuration(entry.track.durationSeconds), color = if (isPlaying) Color.White.copy(alpha = 0.85f) else TetsubiColors.albumArtistText,
-            fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp),
+        ListRow(
+            title = entry.track.displayName,
+            subtitle = entryDetail(entry).ifEmpty { null },
+            art = { AlbumArt(api, entry.artItemId, size = 40.dp, cornerRadius = 0.dp, maxWidth = 100, localPath = localArt) },
+            trailingMeta = formatDuration(entry.track.durationSeconds),
+            // Keeps its room when empty, so the lengths line up.
+            trailing = { if (menu.isEmpty()) Box(Modifier.size(40.dp)) else MoreMenuButton("More for ${entry.track.displayName}", menu) },
+            current = isPlaying,
+            onClick = onClick,
+            onMenu = openMenu,
         )
-        // Keeps its room when empty, so the lengths line up.
-        if (menu.isEmpty()) Spacer(Modifier.size(40.dp)) else MoreMenuButton("More for ${entry.track.displayName}", menu)
-    }
     }
 }
 

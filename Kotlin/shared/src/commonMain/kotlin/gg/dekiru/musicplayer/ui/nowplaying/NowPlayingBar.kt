@@ -33,6 +33,21 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import gg.dekiru.musicplayer.playback.CastRoute
+import gg.dekiru.musicplayer.playback.formatTrackTime
+import gg.dekiru.musicplayer.ui.Radii
+import gg.dekiru.musicplayer.ui.components.QueueIcon
+import gg.dekiru.musicplayer.ui.layout.LocalWindowClass
+import gg.dekiru.musicplayer.ui.tetsubiType
+import kotlinx.coroutines.flow.MutableStateFlow
 import gg.dekiru.musicplayer.playback.PlayerController
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
@@ -40,62 +55,116 @@ import gg.dekiru.musicplayer.ui.components.PauseIcon
 import gg.dekiru.musicplayer.ui.components.PlayIcon
 import gg.dekiru.musicplayer.ui.components.SkipIcon
 
-private val lozenge = RoundedCornerShape(28.dp)
-
 /**
- * The floating now-playing lozenge (as `NowPlayingBarView` on iOS): art,
- * title, previous / play-pause / next (no skips in Maniac Mode) and a thin
- * progress line. Tapping the art or title opens Now Playing.
+ * The mini player, docked full width of the content area (as `NowPlayingBarView` on iOS, but not a
+ * floating pill): 44 art, title and artist, previous / play-pause / next (no skips in Maniac Mode)
+ * and a 3 dp progress line on the top edge. Medium and Expanded (72 high) add a seek bar, Queue
+ * (opens Now Playing, where the queue is) and Cast when there is one; Compact is 64 high. Tapping
+ * the art or title opens Now Playing.
  */
 @Composable
-fun NowPlayingBar(api: JellyfinApi, player: PlayerController, modifier: Modifier = Modifier) {
+fun NowPlayingBar(
+    api: JellyfinApi,
+    player: PlayerController,
+    modifier: Modifier = Modifier,
+    cast: CastRoute? = null,
+    isOnline: Boolean = true,
+) {
     val track = player.currentTrack ?: return
+    val windowClass = LocalWindowClass.current
+    val wide = windowClass.isWide
     // The art's key colour, as Now Playing's progress line (blue when it has none).
     val accent = rememberArtAccent(api, track.artItemId, track.localArtPath)
     val line by animateColorAsState(accent ?: TetsubiColors.blue, tween(300), label = "progress")
-    Box(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-        Column(
-            Modifier
-                .widthIn(max = 720.dp)
-                .fillMaxWidth()
-                .clip(lozenge)
-                .background(Color(0xE6101A33), lozenge)
-                .border(1.dp, Color.White.copy(alpha = 0.12f), lozenge),
+    val progress = if (player.duration > 0) (player.position / player.duration).toFloat().coerceIn(0f, 1f) else 0f
+    Column(
+        modifier.fillMaxWidth().background(TetsubiColors.background.copy(alpha = 0.55f)).background(TetsubiColors.surface)
+            .drawBehind { drawLine(TetsubiColors.hairline, Offset(0f, 0f), Offset(size.width, 0f), 1f) },
+    ) {
+        // The 3 dp progress line on the top edge.
+        Box(Modifier.fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.12f))) {
+            if (player.duration > 0) Box(Modifier.fillMaxWidth(progress).height(3.dp).background(line))
+        }
+        Row(
+            Modifier.fillMaxWidth().height(if (wide) 69.dp else 61.dp).padding(horizontal = if (wide) windowClass.pageMargin else 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(Modifier.padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Row(
-                    Modifier
-                        .weight(1f)
-                        .clickable(role = Role.Button) { player.isNowPlayingOpen = true }
-                        .semantics { contentDescription = "Now playing: ${track.title}. Open Now Playing" },
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    AlbumArt(api, track.artItemId, size = 36.dp, cornerRadius = 6.dp, maxWidth = 100, localPath = track.localArtPath)
-                    Column {
-                        Text(track.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (player.trackFailed) {
-                            Text("Couldn't play — press Play to try again", color = Color(1f, 0.55f, 0.55f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(
+                Modifier
+                    .weight(if (wide) 0.9f else 1f)
+                    .clip(RoundedCornerShape(Radii.thumb))
+                    .clickable(role = Role.Button) { player.isNowPlayingOpen = true }
+                    .semantics { contentDescription = "Now playing: ${track.title}. Open Now Playing" },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                AlbumArt(api, track.artItemId, size = 44.dp, cornerRadius = 6.dp, maxWidth = 100, localPath = track.localArtPath)
+                Column(Modifier.weight(1f)) {
+                    Text(track.title, style = tetsubiType.rowTitle, color = TetsubiColors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (player.trackFailed) {
+                        Text("Couldn't play \u2014 press Play to try again", style = tetsubiType.caption, color = TetsubiColors.pink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    } else {
+                        val subtitle = if (wide) listOf(track.artist, track.album).filter { it.isNotBlank() }.joinToString(" \u00B7 ") else track.artist
+                        if (subtitle.isNotBlank()) {
+                            Text(subtitle, style = tetsubiType.caption, color = TetsubiColors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
-                if (!player.maniacMode) ControlButton("Previous", 44.dp, player::skipToPrevious) { SkipIcon(forward = false, size = 22.dp) }
-                PlayPauseButton(player, 48.dp, 26.dp)
-                if (!player.maniacMode) ControlButton("Next", 44.dp, player::skipToNext) { SkipIcon(forward = true, size = 22.dp) }
             }
-            if (player.duration > 0) {
-                LinearProgressIndicator(
-                    progress = { (player.position / player.duration).toFloat().coerceIn(0f, 1f) },
-                    color = line,
-                    trackColor = Color.White.copy(alpha = 0.15f),
-                    drawStopIndicator = {},
-                    gapSize = 0.dp,
-                    modifier = Modifier.fillMaxWidth().padding(start = 28.dp, end = 28.dp, bottom = 10.dp).height(3.dp),
-                )
+            if (!player.maniacMode) ControlButton("Previous", 40.dp, player::skipToPrevious) { SkipIcon(forward = false, size = 22.dp) }
+            PlayPauseButton(player, 44.dp, 26.dp)
+            if (!player.maniacMode) ControlButton("Next", 40.dp, player::skipToNext) { SkipIcon(forward = true, size = 22.dp) }
+            if (wide) {
+                MiniSeekBar(player, line, Modifier.weight(1f).padding(horizontal = 8.dp))
+                ControlButton("Queue", 40.dp, { player.isNowPlayingOpen = true }) { QueueIcon(22.dp, TetsubiColors.textSecondary) }
+                MiniCastButton(cast, isOnline, line)
             }
         }
     }
 }
+
+/** A seek bar for the docked player: a slider with the time at each end; none in Maniac Mode (no scrubbing). */
+@Composable
+private fun MiniSeekBar(player: PlayerController, accent: Color, modifier: Modifier) {
+    if (player.maniacMode) {
+        Box(modifier)
+        return
+    }
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    val progress = if (player.duration > 0) (player.position / player.duration).toFloat().coerceIn(0f, 1f) else 0f
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val shown = dragging?.let { it * player.duration } ?: player.position
+        Text(formatTrackTime(shown), style = tetsubiType.caption, color = TetsubiColors.textSecondary, maxLines = 1)
+        Slider(
+            value = dragging ?: progress,
+            onValueChange = { dragging = it },
+            onValueChangeFinished = {
+                dragging?.let { player.seekToProgress(it.toDouble()) }
+                dragging = null
+            },
+            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = accent, inactiveTrackColor = Color.White.copy(alpha = 0.2f)),
+            modifier = Modifier.weight(1f).semantics { contentDescription = "Position" },
+        )
+        Text(formatTrackTime(player.duration), style = tetsubiType.caption, color = TetsubiColors.textSecondary, maxLines = 1)
+    }
+}
+
+/** Opens the Cast device list; hidden where there is no Cast (the desktop) or nothing to pick. */
+@Composable
+private fun MiniCastButton(cast: CastRoute?, isOnline: Boolean, accent: Color) {
+    val name by (cast?.deviceName ?: noCastName).collectAsState()
+    val devices by (cast?.devicesAvailable ?: noCastDevices).collectAsState()
+    val casting = name != null
+    val picker = rememberCastPicker(casting)
+    if (cast == null || picker == null || !CastRoute.showsButton(isOnline, devices, casting)) return
+    ControlButton(if (casting) "Casting. Change or stop" else "Play on a Cast device", 40.dp, picker) {
+        CastIcon(22.dp, if (casting) accent else TetsubiColors.textSecondary)
+    }
+}
+
+private val noCastName = MutableStateFlow<String?>(null)
+private val noCastDevices = MutableStateFlow(false)
 
 /**
  * Play or Pause; while the track is starting ([PlayerController.isStarting])

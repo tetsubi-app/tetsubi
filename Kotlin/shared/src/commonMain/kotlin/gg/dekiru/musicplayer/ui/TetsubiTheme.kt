@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -51,6 +52,8 @@ private fun Typography.inFamily(family: FontFamily): Typography {
 fun TetsubiTheme(content: @Composable () -> Unit) {
     val family = dekiruSans()
     val typography = remember(family) { Typography().inFamily(family) }
+    val tokens = remember(family) { TetsubiType(family) }
+    CompositionLocalProvider(LocalTetsubiType provides tokens) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = TetsubiColors.blue,
@@ -65,4 +68,5 @@ fun TetsubiTheme(content: @Composable () -> Unit) {
         typography = typography,
         content = content,
     )
+    }
 }

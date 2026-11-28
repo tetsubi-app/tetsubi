@@ -8,6 +8,7 @@ import coil3.compose.setSingletonImageLoaderFactory
 import gg.dekiru.musicplayer.ui.AppBackground
 import gg.dekiru.musicplayer.ui.TetsubiTheme
 import gg.dekiru.musicplayer.ui.SignedInApp
+import gg.dekiru.musicplayer.ui.layout.ProvideWindowClass
 import gg.dekiru.musicplayer.ui.components.tetsubiImageLoader
 import gg.dekiru.musicplayer.ui.signin.SignInScreen
 
@@ -23,6 +24,7 @@ fun App(session: AppSession) {
     val api by session.api.collectAsState()
 
     TetsubiTheme {
+      ProvideWindowClass {
         AppBackground {
             val signedIn = api
             if (signedIn == null) {
@@ -31,5 +33,6 @@ fun App(session: AppSession) {
                 SignedInApp(session, signedIn)
             }
         }
+      }
     }
 }

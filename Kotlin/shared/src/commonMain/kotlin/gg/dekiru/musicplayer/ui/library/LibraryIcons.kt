@@ -74,21 +74,3 @@ fun ShuffleIcon(size: Dp, color: Color = Color.White, modifier: Modifier = Modif
         }
     }
 }
-
-/**
- * A magnifying glass with + or − in the lens ("plus.magnifyingglass" /
- * "minus.magnifyingglass"), drawn as Search's `MagnifyingGlassIcon`: the grid's zoom buttons.
- */
-@Composable
-fun ZoomIcon(size: Dp, plus: Boolean, color: Color = Color.White, modifier: Modifier = Modifier) {
-    Canvas(modifier.size(size)) {
-        val s = this.size.width
-        val w = s * 0.09f
-        val c = Offset(s * 0.42f, s * 0.42f)
-        drawCircle(color, radius = s * 0.28f, center = c, style = Stroke(width = w))
-        drawLine(color, Offset(s * 0.63f, s * 0.63f), Offset(s * 0.88f, s * 0.88f), strokeWidth = w * 1.3f, cap = StrokeCap.Round)
-        val arm = s * 0.13f
-        drawLine(color, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), strokeWidth = w * 0.8f, cap = StrokeCap.Round)
-        if (plus) drawLine(color, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), strokeWidth = w * 0.8f, cap = StrokeCap.Round)
-    }
-}

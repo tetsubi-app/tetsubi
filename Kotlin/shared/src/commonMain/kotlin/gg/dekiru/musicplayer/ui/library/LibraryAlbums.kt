@@ -1,69 +1,38 @@
 package gg.dekiru.musicplayer.ui.library
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.models.JellyfinArtist
+import gg.dekiru.musicplayer.ui.Radii
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.AlbumArt
+import gg.dekiru.musicplayer.ui.components.AlbumCard
+import gg.dekiru.musicplayer.ui.components.ArtistCard
+import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
+import gg.dekiru.musicplayer.ui.components.ListRow
 import gg.dekiru.musicplayer.ui.components.WithContextMenu
 import gg.dekiru.musicplayer.ui.components.albumQueueActions
 import gg.dekiru.musicplayer.ui.components.menuClickable
-import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
+import gg.dekiru.musicplayer.ui.layout.CardGrid
+import gg.dekiru.musicplayer.ui.layout.ListGrid
+import gg.dekiru.musicplayer.ui.layout.fullWidthItem
 
-// The album grid and list shared by the Library's tabs and artist pages.
+// The album and artist grids and lists shared by the Library's tabs, artist pages and the full lists.
 
 /**
- * Square covers in columns (as iOS `AlbumGridView`): fixed 120 dp covers,
- * three across on a phone, a green tick on downloaded albums. Wide (with
- * [zoom]): the shared cards-per-row, each cover filling its column, the
- * text growing with it. [onAppear] runs as each album comes into view.
- * [footer]: full width after the last row, scrolling with the grid.
- * [showsYear]: each album's year in place of the artist (an artist's page).
+ * Album cards in the app's one grid ([CardGrid]: columns from the card size setting and the window).
+ * [onAppear] runs as each album comes into view. [footer]: full width after the last row, scrolling
+ * with the grid. [showsYear]: each album's year in place of the artist (an artist's page).
+ * [endInset]: room for the A-Z strip.
  */
 @Composable
 fun LibraryAlbumGrid(
@@ -73,189 +42,88 @@ fun LibraryAlbumGrid(
     onOpen: (JellyfinAlbum) -> Unit,
     isDownloaded: (JellyfinAlbum) -> Boolean,
     localArt: (JellyfinAlbum) -> String? = { null },
-    trailingEdge: Boolean = true,
+    endInset: Dp = 0.dp,
     onAppear: (JellyfinAlbum) -> Unit = {},
-    zoom: GridZoom? = null,
     footer: (@Composable () -> Unit)? = null,
-    fixedColumns: Int? = null,
-    widensWithoutZoom: Boolean = false,
     showsYear: Boolean = false,
+    titleLines: Int = 1,
 ) {
-    CardGridView(albums, { it.id }, state, trailingEdge, zoom, footer, fixedColumns, widensWithoutZoom) { album, grid ->
-        LaunchedEffect(album.id, albums.size) { onAppear(album) }
-        GridCell(api, album, grid, isDownloaded(album), localArt(album), showsYear = showsYear) { onOpen(album) }
+    CardGrid(state = state, endInset = endInset) { metrics ->
+        items(albums, key = { it.id }) { album ->
+            LaunchedEffect(album.id, albums.size) { onAppear(album) }
+            AlbumCard(
+                api, album, metrics.cardWidth, onClick = { onOpen(album) }, localArtPath = localArt(album),
+                isDownloaded = isDownloaded(album), showsYear = showsYear, titleLines = titleLines,
+            )
+        }
+        if (footer != null) fullWidthItem("grid-footer", footer)
     }
 }
 
-/** Round artist pictures with the name underneath, the same size and columns as album cards (as the iOS Artists grid). */
+/** Round artist pictures with the name underneath, in the same grid. */
 @Composable
 internal fun LibraryArtistGrid(
     api: JellyfinApi,
     artists: List<JellyfinArtist>,
     state: LazyGridState,
     onOpen: (JellyfinArtist) -> Unit,
-    zoom: GridZoom? = null,
+    endInset: Dp = 0.dp,
 ) {
-    CardGridView(artists, { it.id }, state, trailingEdge = false, zoom = zoom) { artist, grid ->
-        val t = grid.textScale
-        Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { onOpen(artist) },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy((4 * t).dp),
-        ) {
-            AlbumArt(api, artist.id, size = grid.cardWidth.dp, cornerRadius = (grid.cardWidth / 2).dp, maxWidth = grid.imageSize)
-            Text(
-                artist.name, color = Color.White, fontSize = (12 * t).sp, fontWeight = FontWeight.Bold, maxLines = 2,
-                overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-            )
-        }
+    CardGrid(state = state, endInset = endInset) { metrics ->
+        items(artists, key = { it.id }) { artist -> ArtistCard(api, artist, metrics.cardWidth) { onOpen(artist) } }
     }
 }
 
-/**
- * The columns shared by album and artist grids ([LibraryModel.cardGrid]).
- * Wide with [zoom]: tells it how many columns show, for the zoom buttons.
- * [fixedColumns]: exactly that many on every device, cards filling their
- * columns, [zoom] neither read nor told (Recently Played: the export's
- * size). [widensWithoutZoom]: without [zoom], wide layouts still get the
- * automatic count with column-filling cards (Recently Played below 9 albums).
- */
-@Composable
-private fun <T> CardGridView(
-    items: List<T>,
-    key: (T) -> Any,
-    state: LazyGridState,
-    trailingEdge: Boolean,
-    zoom: GridZoom?,
-    footer: (@Composable () -> Unit)? = null,
-    fixedColumns: Int? = null,
-    widensWithoutZoom: Boolean = false,
-    cell: @Composable (T, CardGrid) -> Unit,
-) {
-    val bottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues().calculateBottomPadding()
-    val wideLayout = isWideLayout()
-    val wide = fixedColumns == null && zoom != null && wideLayout
-    val density = LocalDensity.current.density
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        // The A–Z strip already leaves room on the right: no trailing padding then (so three fit on a phone).
-        val trailing = if (trailingEdge) LibraryModel.GRID_EDGE else 0f
-        val width = maxWidth.value - LibraryModel.GRID_EDGE - trailing
-        val grid = if (fixedColumns != null) {
-            LibraryModel.fixedCardGrid(width, fixedColumns, density)
-        } else {
-            LibraryModel.cardGrid(width, wide || (widensWithoutZoom && wideLayout), if (wide) zoom?.columns else null, density)
-        }
-        if (wide) SideEffect { zoom.shown = grid.columns }
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(grid.columns),
-            state = state,
-            contentPadding = PaddingValues(start = LibraryModel.GRID_EDGE.dp, end = trailing.dp, top = 16.dp, bottom = 16.dp + bottom),
-            horizontalArrangement = Arrangement.spacedBy(grid.spacing.dp),
-            verticalArrangement = Arrangement.spacedBy((16 * grid.textScale).dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            items(items, key = key) { item -> cell(item, grid) }
-            if (footer != null) item(key = "grid-footer", span = { GridItemSpan(maxLineSpan) }) { footer() }
-        }
-    }
-}
-
-/**
- * One album card; on wide layouts the cover fills the column and the text,
- * gaps, tick and corners scale with it. [titleLines]: 1 on the Random page.
- * [showsYear]: the release year under the title instead of the artist
- * (nothing when unknown), on an artist's page.
- */
-@Composable
-internal fun GridCell(
-    api: JellyfinApi, album: JellyfinAlbum, grid: CardGrid, downloaded: Boolean, localArt: String?,
-    titleLines: Int = 2, showsYear: Boolean = false, onClick: () -> Unit,
-) {
-    val t = grid.textScale
-    // Long press or right-click: Play Next, Add to Queue.
-    WithContextMenu(albumQueueActions(album)) { openMenu ->
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape((8 * t).dp)).menuClickable(onClick, openMenu),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy((4 * t).dp),
-    ) {
-        Box {
-            AlbumArt(api, album.id, size = grid.cardWidth.dp, cornerRadius = (8 * t).dp, maxWidth = grid.imageSize, localPath = localArt)
-            if (downloaded) DownloadedTick((16 * t).dp, Modifier.align(Alignment.BottomEnd).padding((4 * t).dp))
-        }
-        Text(
-            album.displayName, color = Color.White, fontSize = (12 * t).sp, fontWeight = FontWeight.Bold, maxLines = titleLines,
-            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-        )
-        if (showsYear) {
-            ArtistModel.yearText(album)?.let {
-                Text(
-                    it, color = TetsubiColors.albumYearText, fontSize = (11 * t).sp, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        } else {
-            Text(
-                album.artistName, color = TetsubiColors.albumArtistText, fontSize = (11 * t).sp, maxLines = 1,
-                overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-    }
-}
-
-/** Rows: small cover, title, artist, year, the tick at the right (as the iOS Library's list). */
+/** Album rows ([ListRow]: small cover, title, artist, year, the tick), in two columns on a wide pane. */
 @Composable
 fun LibraryAlbumList(
     api: JellyfinApi,
     albums: List<JellyfinAlbum>,
-    state: LazyListState,
+    state: LazyGridState,
     onOpen: (JellyfinAlbum) -> Unit,
     isDownloaded: (JellyfinAlbum) -> Boolean,
     localArt: (JellyfinAlbum) -> String? = { null },
+    endInset: Dp = 0.dp,
     onAppear: (JellyfinAlbum) -> Unit = {},
 ) {
-    val bottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues().calculateBottomPadding()
-    LazyColumn(state = state, contentPadding = PaddingValues(bottom = 16.dp + bottom), modifier = Modifier.fillMaxSize()) {
+    ListGrid(state = state, endInset = endInset) {
         items(albums, key = { it.id }) { album ->
             LaunchedEffect(album.id, albums.size) { onAppear(album) }
+            // Long press or right-click: Play Next, Add to Queue.
             WithContextMenu(albumQueueActions(album)) { openMenu ->
-            Row(
-                Modifier.fillMaxWidth().menuClickable({ onOpen(album) }, openMenu).padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                AlbumArt(api, album.id, size = 60.dp, cornerRadius = 4.dp, maxWidth = 100, localPath = localArt(album))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(album.displayName, color = Color.White, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(album.artistName, color = TetsubiColors.albumArtistText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    album.productionYear?.let { Text(it.toString(), color = TetsubiColors.albumYearText, fontSize = 11.sp) }
-                }
-                if (isDownloaded(album)) DownloadedTick(20.dp)
+                ListRow(
+                    title = album.displayName, subtitle = album.artistName,
+                    art = { AlbumArt(api, album.id, size = 40.dp, cornerRadius = Radii.thumb, maxWidth = 100, localPath = localArt(album)) },
+                    trailingMeta = album.productionYear?.toString(),
+                    trailing = if (isDownloaded(album)) ({ DownloadedTick(20.dp) }) else null,
+                    modifier = Modifier.menuClickable({ onOpen(album) }, openMenu),
+                )
             }
-            }
-            Box(Modifier.padding(start = 88.dp).fillMaxWidth().height(0.5.dp).background(Color.White.copy(alpha = 0.12f)))
+        }
+    }
+}
+
+/** Artist rows: a round picture and the name. */
+@Composable
+internal fun LibraryArtistList(
+    api: JellyfinApi,
+    artists: List<JellyfinArtist>,
+    state: LazyGridState,
+    onOpen: (JellyfinArtist) -> Unit,
+    endInset: Dp = 0.dp,
+) {
+    ListGrid(state = state, endInset = endInset) {
+        items(artists, key = { it.id }) { artist ->
+            ListRow(
+                title = artist.name, artCircle = true,
+                art = { AlbumArt(api, artist.id, size = 40.dp, cornerRadius = 20.dp, maxWidth = 100) },
+                onClick = { onOpen(artist) },
+            )
         }
     }
 }
 
 @Composable
-internal fun DownloadedTick(size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+internal fun DownloadedTick(size: Dp, modifier: Modifier = Modifier) {
     CheckCircleIcon(size, TetsubiColors.green, modifier.semantics { contentDescription = "Downloaded" })
-}
-
-/** The small spinner shown while something loads. */
-@Composable
-internal fun LibrarySpinner() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        CircularProgressIndicator(Modifier.padding(32.dp).size(24.dp), color = TetsubiColors.albumArtistText, strokeWidth = 2.dp)
-    }
-}
-
-/** A short grey note (empty lists). */
-@Composable
-internal fun LibraryNote(text: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Text(text, color = TetsubiColors.albumYearText, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(16.dp))
-    }
 }

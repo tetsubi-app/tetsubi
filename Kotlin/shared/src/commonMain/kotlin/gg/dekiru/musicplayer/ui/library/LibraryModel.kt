@@ -25,24 +25,11 @@ enum class LibraryTab(val title: String) { ALBUMS("Albums"), ARTISTS("Artists"),
 
 enum class LibrarySort(val title: String) {
     NAME("Name"), ARTIST("Artist"), YEAR("Year"), DATE_ADDED("Date Added"), RANDOM("Random");
-
-    /** The sort after this one, in the menu's order, round again after Random: tapping the selected Albums tab steps through them. */
-    val next: LibrarySort get() = entries[(ordinal + 1) % entries.size]
 }
 
 enum class LibraryFilter(val title: String) { ALL("All"), DOWNLOADED("Downloaded") }
 
 enum class LibraryDisplayMode(val title: String) { GRID("Grid"), LIST("List") }
-
-/** Grid columns and the gap between them. */
-data class GridLayout(val columns: Int, val spacing: Float)
-
-/**
- * An album or artist grid as drawn (as on iOS): [columns] and the
- * gap, each card [cardWidth] wide, its text, inner gaps, tick, corners and the row gap times
- * [textScale], covers fetched [imageSize] pixels wide.
- */
-data class CardGrid(val columns: Int, val spacing: Float, val cardWidth: Float, val textScale: Float, val imageSize: Int)
 
 /**
  * The Library (as `LibraryViewModel` on iOS, plus the Artists and
@@ -50,7 +37,7 @@ data class CardGrid(val columns: Int, val spacing: Float, val cardWidth: Float, 
  * and sorted here (re-sorting doesn't ask the server again). Random shows
  * 24 at a time in an order fixed until Random is picked again. Offline:
  * the downloaded albums only. The tab, sort, filter, view (albums', artists' and
- * favourites' apart; favourites' sort and filter too) and wide grids' cards per row are remembered.
+ * favourites' apart; favourites' sort and filter too) are remembered. The card size is the app's one density ([gg.dekiru.musicplayer.ui.layout.DensityState]).
  */
 class LibraryModel(
     private val api: JellyfinApi,
@@ -129,9 +116,6 @@ class LibraryModel(
             preferences.putString(ARTISTS_VIEW_KEY, value.title)
         }
 
-    /** Cards per row on wide layouts, shared by every album and artist grid. */
-    val gridZoom = GridZoom(preferences)
-
     /** Favourites' own View, Sort and Filter (Home ▸ Favourites follows them too). */
     val favouritesOptions = FavouritesOptions(preferences)
 
@@ -166,12 +150,6 @@ class LibraryModel(
         if (sortOption != LibrarySort.RANDOM || after.id != sortedAlbums.lastOrNull()?.id || sortedAlbums.size >= randomFull.size) return
         randomLimit += RANDOM_PAGE
         sortedAlbums = randomFull.take(randomLimit)
-    }
-
-    /** Steps to the next sort (the selected Albums tab tapped again): remembered as the menu's choice, and Random deals a new shuffle. */
-    fun cycleSort(): LibrarySort {
-        sortOption = sortOption.next
-        return sortOption
     }
 
     /** New shuffles dealt by hand (the screen goes back to the top on each). */
@@ -342,124 +320,12 @@ class LibraryModel(
         const val FILTER_KEY = "library.filter"
         const val VIEW_KEY = "library.viewMode"
         const val ARTISTS_VIEW_KEY = "library.artistsViewMode"
-        const val GRID_COLUMNS_KEY = "library.gridColumns"
-
-        /** Cover size in the grid: fixed, columns adapt around it. */
-        const val GRID_ART = 120f
-        const val GRID_EDGE = 4f
-
-        /**
-         * Columns and gap for the width (as iOS `gridLayout`): a comfortable
-         * 12 dp gap; when that only allows two, a third if three covers fit
-         * with at least 2 dp between (three across on a phone, A–Z strip and all).
-         */
-        fun gridLayout(width: Float): GridLayout {
-            val comfortable = maxOf(1, ((width + 12) / (GRID_ART + 12)).toInt())
-            if (comfortable >= 3) return GridLayout(comfortable, 12f)
-            if (3 * GRID_ART + 2 * 2 <= width) return GridLayout(3, minOf(12f, (width - 3 * GRID_ART) / 2))
-            return GridLayout(comfortable, 12f)
-        }
-
-        /** Cards per row on wide layouts: the zoom buttons stop at these. */
-        const val MIN_GRID_COLUMNS = 3
-        const val MAX_GRID_COLUMNS = 10
-
-        /** The gap between cards on wide layouts (today's comfortable gap). */
-        const val WIDE_SPACING = 12f
-
-        /** Wide from this window width (dp) up, as iPad's regular width, on Android and the desktop alike. */
-        const val WIDE_WIDTH = 600f
-
-        /** Text grows with the card up to this; never smaller than a phone's. */
-        const val MAX_TEXT_SCALE = 3f
 
         /** Cover sizes asked of the server, few so the image cache keeps hitting. */
         val IMAGE_SIZES = listOf(300, 600, 1000, 1500)
 
-        /** Wide (zoom buttons, cards fill their columns): from [WIDE_WIDTH] dp of window, whatever the platform. */
-        fun isWide(windowWidth: Float): Boolean = windowWidth >= WIDE_WIDTH
-
-        /**
-         * The grid for [width] (dp, inside the edges). Phones (not [wide]):
-         * [gridLayout] with fixed 120 dp covers, as before. Wide: [chosen]
-         * columns (null: today's automatic count, kept to 3…10), each card
-         * filling its column so a wider window means bigger cards; the text
-         * scales with the card (×1…×3) and the cover is fetched at the
-         * size it's drawn ([displayScale] pixels per dp). [scale] is the
-         * platform's UI scale (1 here; Mac's UIScale on iOS).
-         */
-        fun cardGrid(width: Float, wide: Boolean, chosen: Int? = null, displayScale: Float = 1f, scale: Float = 1f): CardGrid {
-            val auto = gridLayout(width)
-            if (!wide) return CardGrid(auto.columns, auto.spacing, GRID_ART, 1f, IMAGE_SIZES.first())
-            val columns = chosen?.coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS) ?: auto.columns.coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
-            return fixedCardGrid(width, columns, displayScale, scale)
-        }
-
-        /**
-         * Exactly [columns] across on any device (Recently Played: as many as
-         * the export's size), each card filling its column with the wide
-         * layout's gap, as iOS `gridMetrics(width:columns:)`. The text scales
-         * with the card as on wide layouts but never below a phone's (narrow
-         * cards keep the phone's text and cut it short), at most ×3.
-         */
-        fun fixedCardGrid(width: Float, columns: Int, displayScale: Float = 1f, scale: Float = 1f): CardGrid {
-            val n = maxOf(1, columns)
-            val spacing = WIDE_SPACING * scale
-            val card = maxOf(0f, (width - spacing * (n - 1)) / n)
-            val textScale = (card / (GRID_ART * scale)).coerceIn(1f, MAX_TEXT_SCALE)
-            return CardGrid(n, spacing, card, textScale, imageSize(card * displayScale))
-        }
-
-        /** Home's card (cover and text width) on phones, as iOS `AlbumCardView.width`. */
-        const val HOME_CARD = 140f
-
-        /** Home rows' padding before the first card on phones. */
-        const val HOME_EDGE = 10f
-
-        /** Each Home card's own margin on phones, on each side (its press highlight); wide: top and bottom only. */
-        const val HOME_CARD_PADDING = 6f
-
-        /** Home rows' space before the first card on wide layouts (as iOS `homeRowLeading`); [homeRow] counts on it. */
-        const val HOME_WIDE_LEADING = 16f
-
-        /** Of the next card, this much shows at the end of a wide Home row, so it plainly scrolls. */
-        const val HOME_PEEK = 1f / 3
-
-        /**
-         * Home's sideways rows for [width] (dp, the whole row,
-         * [HOME_WIDE_LEADING] included), as iOS `homeRowMetrics`. Phones
-         * (not [wide]): fixed 140 dp cards, as before. Wide: [chosen] cards
-         * (null: as many of today's 140 dp cards as fit whole, kept to
-         * 3…10) plus a third of the next, so each card is
-         * (width − 16 − n × gap) / (n + ⅓), cards [CardGrid.spacing] apart
-         * with no side margin. Text scales with the card (×1…×3 of 140 dp
-         * times [scale]) and the cover is fetched at the size it's drawn.
-         */
-        fun homeRow(width: Float, wide: Boolean, chosen: Int? = null, displayScale: Float = 1f, scale: Float = 1f): CardGrid {
-            val art = HOME_CARD * scale
-            val spacing = WIDE_SPACING * scale
-            val visible = width - HOME_WIDE_LEADING
-            val fits = maxOf(1, ((visible + spacing) / (art + spacing)).toInt())
-            if (!wide) return CardGrid(fits, spacing, art, 1f, IMAGE_SIZES.first())
-            val count = (chosen ?: fits).coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
-            val card = maxOf(1f, (visible - count * spacing) / (count + HOME_PEEK))
-            val textScale = (card / art).coerceIn(1f, MAX_TEXT_SCALE)
-            return CardGrid(count, spacing, card, textScale, imageSize(card * displayScale))
-        }
-
         /** The smallest of [IMAGE_SIZES] at least [pixels] wide (the largest beyond that). */
         fun imageSize(pixels: Float): Int = IMAGE_SIZES.firstOrNull { it >= pixels } ?: IMAGE_SIZES.last()
-
-        /**
-         * Columns after a zoom button, from what's shown now (so the first
-         * press never jumps): in (bigger cards) is one fewer, out one more,
-         * kept to 3…10.
-         */
-        fun zoomed(shown: Int, zoomIn: Boolean): Int =
-            (if (zoomIn) shown - 1 else shown + 1).coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
-
-        fun canZoomIn(shown: Int): Boolean = shown > MIN_GRID_COLUMNS
-        fun canZoomOut(shown: Int): Boolean = shown < MAX_GRID_COLUMNS
 
         /** Albums in the chosen order. Name and Artist follow the A–Z strip; Year is newest release first (full date, else Jan 1 of the year; none last); Date Added keeps the server's order. */
         fun sort(albums: List<JellyfinAlbum>, by: LibrarySort, random: Random = Random.Default): List<JellyfinAlbum> = when (by) {
@@ -473,7 +339,29 @@ class LibraryModel(
 }
 
 /** One artist's page (as `ArtistAlbumsView` on iOS): their albums, newest release first. */
-class ArtistModel(val artist: JellyfinArtist, private val api: JellyfinApi, private val scope: CoroutineScope) {
+class ArtistModel(
+    val artist: JellyfinArtist,
+    private val api: JellyfinApi,
+    private val scope: CoroutineScope,
+    /** Where the About text comes from (MusicBrainz and Wikipedia); null: no About. */
+    private val infoClient: gg.dekiru.musicplayer.data.artist.ArtistInfoClient? = null,
+) {
+    /** MusicBrainz facts, genres and the Wikipedia introduction, when found (online only). */
+    var info by mutableStateOf<gg.dekiru.musicplayer.data.artist.ArtistInfo?>(null)
+        private set
+    private var infoRequested = false
+
+    /** Once: the artist's About text, by the server's MusicBrainz ID when it has one, else by name. */
+    fun loadInfo() {
+        val client = infoClient ?: return
+        if (infoRequested) return
+        infoRequested = true
+        scope.launch {
+            val mbid = runCatching { api.musicBrainzArtistId(artist.id) }.getOrNull()
+            info = client.info(artist.name, mbid)
+        }
+    }
+
     var albums by mutableStateOf<List<JellyfinAlbum>>(emptyList())
         private set
     var loaded by mutableStateOf(false)

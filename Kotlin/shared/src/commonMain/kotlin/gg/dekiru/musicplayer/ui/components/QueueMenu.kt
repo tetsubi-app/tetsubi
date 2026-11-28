@@ -154,7 +154,7 @@ fun MoreMenuButton(label: String, items: List<MenuAction>, modifier: Modifier = 
                 .clickable(role = Role.Button) { open = true }
                 .semantics { contentDescription = label },
             contentAlignment = Alignment.Center,
-        ) { Text("⋯", color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+        ) { MoreIcon(22.dp, Color.White.copy(alpha = 0.8f)) }
         MenuDropdown(open, { open = false }, items)
     }
 }

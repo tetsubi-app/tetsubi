@@ -6,53 +6,42 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
+import gg.dekiru.musicplayer.data.models.JellyfinArtist
 import gg.dekiru.musicplayer.data.models.JellyfinPerson
 import gg.dekiru.musicplayer.data.models.JellyfinPlaylist
 import gg.dekiru.musicplayer.data.network.NetworkState
@@ -60,33 +49,48 @@ import gg.dekiru.musicplayer.downloads.DownloadManager
 import gg.dekiru.musicplayer.downloads.LocalAlbum
 import gg.dekiru.musicplayer.downloads.LocalFiles
 import gg.dekiru.musicplayer.playback.PlayerController
+import gg.dekiru.musicplayer.ui.Radii
 import gg.dekiru.musicplayer.ui.TetsubiColors
+import gg.dekiru.musicplayer.ui.components.ActionChip
 import gg.dekiru.musicplayer.ui.components.AlbumArt
+import gg.dekiru.musicplayer.ui.components.AlbumCard
+import gg.dekiru.musicplayer.ui.components.ArtistCard
+import gg.dekiru.musicplayer.ui.components.Banner
+import gg.dekiru.musicplayer.ui.components.BannerKind
+import gg.dekiru.musicplayer.ui.components.EmptyState
+import gg.dekiru.musicplayer.ui.components.FilterChips
+import gg.dekiru.musicplayer.ui.components.ListRow
+import gg.dekiru.musicplayer.ui.components.LoadingSpinner
 import gg.dekiru.musicplayer.ui.components.LocalPlayPrompt
+import gg.dekiru.musicplayer.ui.components.PageHeader
 import gg.dekiru.musicplayer.ui.components.PlayChoice
+import gg.dekiru.musicplayer.ui.components.PlayIcon
 import gg.dekiru.musicplayer.ui.components.PlayPrompt
+import gg.dekiru.musicplayer.ui.components.SectionHeader
 import gg.dekiru.musicplayer.ui.components.WithContextMenu
+import gg.dekiru.musicplayer.ui.components.XCircleIcon
 import gg.dekiru.musicplayer.ui.components.albumQueueActions
 import gg.dekiru.musicplayer.ui.components.menuClickable
-import gg.dekiru.musicplayer.ui.components.CheckCircleIcon
-import gg.dekiru.musicplayer.ui.components.PlayIcon
-import gg.dekiru.musicplayer.ui.components.XCircleIcon
 import gg.dekiru.musicplayer.ui.downloads.coverPath
 import gg.dekiru.musicplayer.ui.downloads.rememberIsDownloaded
+import gg.dekiru.musicplayer.ui.layout.CardGrid
+import gg.dekiru.musicplayer.ui.layout.CardMetrics
+import gg.dekiru.musicplayer.ui.layout.LocalWindowClass
+import gg.dekiru.musicplayer.ui.layout.fullWidthItem
+import gg.dekiru.musicplayer.ui.layout.headerItem
+import gg.dekiru.musicplayer.ui.layout.rowItems
+import gg.dekiru.musicplayer.ui.layout.screenInsets
 import gg.dekiru.musicplayer.ui.playlist.PlaylistListRow
 import gg.dekiru.musicplayer.ui.playlist.PlaylistsModel
+import gg.dekiru.musicplayer.ui.tetsubiType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-private val readableWidth = 720.dp
-private val secondary = Color.White.copy(alpha = 0.6f)
-private val tertiary = Color.White.copy(alpha = 0.4f)
-
 /**
- * The Search tab (as iOS `SearchView`): the field under the title, then
- * the results (a "Playlists" section, then album rows; tap to open),
- * the recent searches while the box is empty, or a hint. Offline:
- * matching downloads (playlists, tap to open; albums, tap to play).
+ * The Search tab (as iOS `SearchView`): a "Search" page header, the pill field, filter chips
+ * (All, Albums, Artists, Playlists), then the results in the app's grid (album and artist cards;
+ * playlists as rows, in two columns when wide), the recent searches while the box is empty, or a
+ * hint. Offline: matching downloads (playlists, tap to open; albums, tap to play).
  * The keyboard goes away on Search, on scrolling and on opening a result.
  */
 @Composable
@@ -100,181 +104,180 @@ fun SearchScreen(
     /** The app's playlists, for the rows' pictures; without it no playlists are shown. */
     playlists: PlaylistsModel? = null,
     onOpenPlaylist: (JellyfinPlaylist) -> Unit = {},
+    onOpenArtist: (JellyfinArtist) -> Unit = {},
 ) {
     LaunchedEffect(model, network) { network.collect { model.networkChanged(it.online) } }
     val focus = LocalFocusManager.current
-    val listState = rememberLazyListState()
-    LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() }
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(gridState.isScrollInProgress) { if (gridState.isScrollInProgress) focus.clearFocus() }
     val isDownloaded = rememberIsDownloaded(downloads)
-    val insets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues()
     val prompt = LocalPlayPrompt.current
+    var filter by rememberSaveable { mutableStateOf(SearchFilter.ALL) }
+    val margin = LocalWindowClass.current.pageMargin
 
-    Box(
-        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Column(Modifier.widthIn(max = readableWidth).fillMaxSize()) {
-            Text(
-                "Search",
-                color = Color.White,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp).semantics { heading() },
+    Column(Modifier.fillMaxSize().screenInsets()) {
+        PageHeader("Search")
+        SearchField(model.query, model::onQueryChange, onDone = { focus.clearFocus() }, Modifier.padding(horizontal = margin))
+        if (model.query.isNotBlank()) {
+            FilterChips(
+                SearchFilter.entries, filter, { it.title }, { filter = it },
+                Modifier.padding(horizontal = margin).padding(top = 12.dp),
             )
-            SearchField(model.query, model::onQueryChange, onDone = { focus.clearFocus() })
-            LazyColumn(state = listState, contentPadding = insets, modifier = Modifier.weight(1f).fillMaxWidth()) {
-                content(api, model, downloads, isDownloaded, playlists, onOpen = { album ->
-                    focus.clearFocus()
-                    onOpen(album)
-                }, onOpenPlaylist = { playlist ->
-                    focus.clearFocus()
-                    onOpenPlaylist(playlist)
-                }, onPlay = { local ->
-                    focus.clearFocus()
-                    play(local, player, prompt, onOpen)
-                })
-                item { Spacer(Modifier.height(24.dp)) }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            CardGrid(state = gridState) { metrics ->
+                content(
+                    api, model, filter, metrics, downloads, isDownloaded, playlists,
+                    onOpen = { album ->
+                        focus.clearFocus()
+                        onOpen(album)
+                    }, onOpenArtist = { artist ->
+                        focus.clearFocus()
+                        onOpenArtist(artist)
+                    }, onOpenPlaylist = { playlist ->
+                        focus.clearFocus()
+                        onOpenPlaylist(playlist)
+                    }, onPlay = { local ->
+                        focus.clearFocus()
+                        play(local, player, prompt, onOpen)
+                    },
+                )
             }
         }
     }
 }
 
-private fun LazyListScope.content(
+private fun LazyGridScope.content(
     api: JellyfinApi,
     model: SearchModel,
+    filter: SearchFilter,
+    metrics: CardMetrics,
     downloads: DownloadManager?,
     isDownloaded: (JellyfinAlbum) -> Boolean,
     playlists: PlaylistsModel?,
     onOpen: (JellyfinAlbum) -> Unit,
+    onOpenArtist: (JellyfinArtist) -> Unit,
     onOpenPlaylist: (JellyfinPlaylist) -> Unit,
     onPlay: (LocalAlbum) -> Unit,
 ) {
     when {
-        model.isLoading -> item {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                CircularProgressIndicator(Modifier.size(18.dp), color = secondary, strokeWidth = 2.dp)
-                Text("Searching…", color = secondary, fontSize = 15.sp)
-            }
-        }
+        model.isLoading -> fullWidthItem("loading") { LoadingSpinner() }
         model.isOfflineResults -> {
-            val found = model.localPlaylistResults.takeIf { playlists != null }.orEmpty()
-            offlineResults(api, model, downloads, playlists, found, onOpenPlaylist, onPlay)
-        }
-        (playlists == null || model.playlistResults.isEmpty()) && model.results.isEmpty() && model.hasSearched -> item {
-            Unavailable("No results", SearchModel.noResultsMessage(model.query))
+            val found = model.localPlaylistResults.takeIf { playlists != null && filter.showsPlaylists }.orEmpty()
+            offlineResults(api, model, filter, metrics, downloads, playlists, found, onOpenPlaylist, onPlay)
         }
         !model.hasSearched && model.recent.isNotEmpty() -> history(model)
-        !model.hasSearched -> item { Unavailable("Search your library", SearchModel.EMPTY_HINT) }
+        !model.hasSearched -> fullWidthItem("hint") {
+            EmptyState("Search your library", message = SearchModel.EMPTY_HINT, icon = { MagnifyingGlassIcon(44.dp, TetsubiColors.textTertiary) })
+        }
         else -> {
-            val found = model.playlistResults.takeIf { playlists != null }.orEmpty()
-            playlistSection(api, playlists, found, "playlist", onOpenPlaylist)
-            if (model.results.isNotEmpty()) {
-                item { Header(SearchModel.albumsHeader(model.results.size, found.size)) }
-                items(model.results, key = { "result-${it.id}" }) { album ->
-                    ResultRow(api, album, downloads.coverPath(album), isDownloaded(album), onClick = { onOpen(album) })
+            val albums = model.results.takeIf { filter.showsAlbums }.orEmpty()
+            val artists = model.artistResults.takeIf { filter.showsArtists }.orEmpty()
+            val found = model.playlistResults.takeIf { playlists != null && filter.showsPlaylists }.orEmpty()
+            if (albums.isEmpty() && artists.isEmpty() && found.isEmpty()) {
+                fullWidthItem("none") {
+                    EmptyState(
+                        "No results", message = SearchModel.noResultsMessage(model.query, filter),
+                        icon = { MagnifyingGlassIcon(44.dp, TetsubiColors.textTertiary) },
+                    )
+                }
+                return
+            }
+            val sections = listOf(albums.size, artists.size, found.size).count { it > 0 }
+            if (albums.isNotEmpty()) {
+                headerItem("albums-header") { SectionHeader(SearchModel.albumsHeader(albums.size, sections - 1), horizontalPadding = 0.dp) }
+                items(albums, key = { "result-${it.id}" }) { album ->
+                    AlbumCard(api, album, metrics.cardWidth, onClick = { onOpen(album) }, localArtPath = downloads.coverPath(album), isDownloaded = isDownloaded(album))
                 }
             }
+            if (artists.isNotEmpty()) {
+                headerItem("artists-header") { SectionHeader(SearchModel.artistsHeader(artists.size), horizontalPadding = 0.dp) }
+                items(artists, key = { "artist-${it.id}" }) { artist -> ArtistCard(api, artist, metrics.cardWidth) { onOpenArtist(artist) } }
+            }
+            playlistSection(api, playlists, found, metrics, "playlist", onOpenPlaylist)
         }
     }
 }
 
 /** "Playlists (2)": rows as the Library's playlist list, each opening its page. Nothing when there are none. */
-private fun LazyListScope.playlistSection(
+private fun LazyGridScope.playlistSection(
     api: JellyfinApi,
     model: PlaylistsModel?,
     found: List<JellyfinPlaylist>,
+    metrics: CardMetrics,
     keyPrefix: String,
     onOpen: (JellyfinPlaylist) -> Unit,
 ) {
     if (model == null || found.isEmpty()) return
-    item { Header(SearchModel.playlistsHeader(found.size)) }
-    items(found, key = { "$keyPrefix-${it.id}" }) { playlist ->
-        PlaylistListRow(api, model, playlist, compact = true, onOpen = { onOpen(playlist) })
+    headerItem("$keyPrefix-header") { SectionHeader(SearchModel.playlistsHeader(found.size), horizontalPadding = 0.dp) }
+    rowItems(found, metrics, key = { "$keyPrefix-${it.id}" }) { playlist ->
+        PlaylistListRow(api, model, playlist, horizontalPadding = 0.dp, onOpen = { onOpen(playlist) })
     }
 }
 
-private fun LazyListScope.history(model: SearchModel) {
-    item {
-        Header("Recent searches") {
-            TextButton(onClick = model::clearHistory) { Text("Clear", color = TetsubiColors.blue, fontSize = 13.sp) }
+private fun LazyGridScope.history(model: SearchModel) {
+    fullWidthItem("recent-header") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionHeader("Recent searches", Modifier.weight(1f), horizontalPadding = 0.dp)
+            ActionChip("Clear", model::clearHistory)
         }
     }
-    items(model.recent, key = { "recent-$it" }) { term ->
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable(role = Role.Button) { model.useHistory(term) }
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            ClockArrowIcon(20.dp, TetsubiColors.blue)
-            Text(term, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    for (term in model.recent) {
+        fullWidthItem("recent-$term") {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button) { model.useHistory(term) }
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ClockArrowIcon(20.dp, TetsubiColors.blue)
+                Text(term, style = tetsubiType.rowTitle, color = TetsubiColors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
 
 /** Offline / server unreachable: matching downloads. A playlist opens its page; an album plays. */
-private fun LazyListScope.offlineResults(
+private fun LazyGridScope.offlineResults(
     api: JellyfinApi,
     model: SearchModel,
+    filter: SearchFilter,
+    metrics: CardMetrics,
     downloads: DownloadManager?,
     playlistsModel: PlaylistsModel?,
     playlists: List<JellyfinPlaylist>,
     onOpenPlaylist: (JellyfinPlaylist) -> Unit,
     onPlay: (LocalAlbum) -> Unit,
 ) {
-    item {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            WifiSlashIcon(16.dp, secondary)
-            Text(
-                "Can't reach the server — searching downloads",
-                color = secondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.semantics { heading() },
-            )
-        }
+    val local = model.localResults.takeIf { filter.showsAlbums }.orEmpty()
+    fullWidthItem("offline") {
+        Banner("Can't reach the server. Searching downloads.", kind = BannerKind.Offline, horizontalPadding = 0.dp)
     }
-    if (model.localResults.isEmpty() && playlists.isEmpty()) {
-        item {
+    if (local.isEmpty() && playlists.isEmpty()) {
+        fullWidthItem("none") {
             Text(
-                SearchModel.noDownloadsMessage(model.query),
-                color = secondary, fontSize = 15.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                if (filter == SearchFilter.ALL) SearchModel.noDownloadsMessage(model.query) else SearchModel.noResultsMessage(model.query, filter),
+                style = tetsubiType.body, color = TetsubiColors.textSecondary, modifier = Modifier.padding(vertical = 10.dp),
             )
         }
     }
     if (playlists.isNotEmpty()) {
-        playlistSection(api, playlistsModel, playlists, "local-playlist", onOpenPlaylist)
-        if (model.localResults.isNotEmpty()) item { Header(SearchModel.albumsHeader(model.localResults.size, playlists.size)) }
+        playlistSection(api, playlistsModel, playlists, metrics, "local-playlist", onOpenPlaylist)
+        if (local.isNotEmpty()) headerItem("local-header") { SectionHeader(SearchModel.albumsHeader(local.size, 1), horizontalPadding = 0.dp) }
     }
-    items(model.localResults, key = { "local-${it.id}" }) { album ->
+    rowItems(local, metrics, key = { "local-${it.id}" }) { album ->
         val cover = downloads?.downloadedAlbum(album.id)?.coverPath?.takeIf(LocalFiles::exists)
         // Long press or right-click: Play Next, Add to Queue.
         WithContextMenu(albumQueueActions(album.toJellyfinAlbum())) { openMenu ->
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .menuClickable({ onPlay(album) }, openMenu, onClickLabel = "Play album")
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            AlbumArt(api, album.id, size = 56.dp, cornerRadius = 4.dp, maxWidth = 100, localPath = cover)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(album.title.ifEmpty { "Album" }, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(album.artist, color = secondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            PlayIcon(20.dp, TetsubiColors.blue)
-        }
+            ListRow(
+                title = album.title.ifEmpty { "Album" }, subtitle = album.artist,
+                art = { AlbumArt(api, album.id, size = 40.dp, cornerRadius = Radii.thumb, maxWidth = 100, localPath = cover) },
+                trailing = { PlayIcon(20.dp, TetsubiColors.blue) },
+                horizontalPadding = 0.dp,
+                modifier = Modifier.menuClickable({ onPlay(album) }, openMenu, onClickLabel = "Play album"),
+            )
         }
     }
 }
@@ -304,52 +307,23 @@ private fun play(album: LocalAlbum, player: PlayerController?, prompt: PlayPromp
     )
 }
 
+/** The search box: a pill with a magnifying glass, "Albums, artists or playlists", and an x to empty it. */
 @Composable
-private fun ResultRow(api: JellyfinApi, album: JellyfinAlbum, localArt: String?, isDownloaded: Boolean, onClick: () -> Unit) {
-    // Long press or right-click: Play Next, Add to Queue.
-    WithContextMenu(albumQueueActions(album)) { openMenu ->
+private fun SearchField(text: String, onChange: (String) -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(Radii.FULL_PERCENT)
     Row(
-        Modifier
-            .fillMaxWidth()
-            .menuClickable(onClick, openMenu)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        AlbumArt(api, album.id, size = 56.dp, cornerRadius = 4.dp, maxWidth = 100, localPath = localArt)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(album.displayName, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(album.artistName, color = secondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            album.productionYear?.let { Text(it.toString(), color = tertiary, fontSize = 11.sp) }
-        }
-        if (isDownloaded) {
-            CheckCircleIcon(16.dp, TetsubiColors.green, Modifier.semantics { contentDescription = "Downloaded" })
-        }
-    }
-    }
-}
-
-/** The search box: a magnifying glass, "Albums, artists or playlists", × to empty it. */
-@Composable
-private fun SearchField(text: String, onChange: (String) -> Unit, onDone: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.12f))
-            .padding(start = 10.dp, end = 4.dp),
+        modifier.fillMaxWidth().height(44.dp).clip(shape).background(TetsubiColors.surface, shape).padding(start = 16.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        MagnifyingGlassIcon(18.dp, secondary)
-        Box(Modifier.weight(1f).padding(vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
-            if (text.isEmpty()) Text(SearchModel.FIELD_HINT, color = tertiary, fontSize = 16.sp, maxLines = 1)
+        MagnifyingGlassIcon(18.dp, TetsubiColors.textSecondary)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (text.isEmpty()) Text(SearchModel.FIELD_HINT, style = tetsubiType.body.copy(fontSize = 16.sp), color = TetsubiColors.textTertiary, maxLines = 1)
             BasicTextField(
                 value = text,
                 onValueChange = onChange,
                 singleLine = true,
-                textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                textStyle = tetsubiType.body.copy(fontSize = 16.sp, color = TetsubiColors.textPrimary),
                 cursorBrush = SolidColor(TetsubiColors.blue),
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.None,
@@ -364,38 +338,13 @@ private fun SearchField(text: String, onChange: (String) -> Unit, onDone: () -> 
             Box(
                 Modifier
                     .size(36.dp)
-                    .clip(RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(Radii.FULL_PERCENT))
                     .clickable(role = Role.Button) { onChange("") }
                     .semantics { contentDescription = "Clear text" },
                 contentAlignment = Alignment.Center,
-            ) { XCircleIcon(18.dp, secondary) }
+            ) { XCircleIcon(18.dp, TetsubiColors.textSecondary) }
         } else {
-            Spacer(Modifier.height(36.dp))
+            Box(Modifier.size(36.dp))
         }
-    }
-}
-
-@Composable
-private fun Header(title: String, trailing: @Composable () -> Unit = {}) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp).height(40.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, color = secondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).semantics { heading() })
-        trailing()
-    }
-}
-
-/** An icon, a title and a line, centred (as iOS `ContentUnavailableView`). */
-@Composable
-private fun Unavailable(title: String, description: String) {
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 64.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        MagnifyingGlassIcon(44.dp, secondary)
-        Text(title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Text(description, color = secondary, fontSize = 15.sp, textAlign = TextAlign.Center)
     }
 }

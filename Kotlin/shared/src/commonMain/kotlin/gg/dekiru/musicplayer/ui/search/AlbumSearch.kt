@@ -4,6 +4,7 @@ import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.api.JellyfinError
 import gg.dekiru.musicplayer.data.models.DiscGrouping
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
+import gg.dekiru.musicplayer.data.models.JellyfinArtist
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -17,14 +18,20 @@ import kotlinx.coroutines.coroutineScope
  */
 object AlbumSearch {
 
-    suspend fun run(api: JellyfinApi, term: String): List<JellyfinAlbum> = coroutineScope {
+    /** The albums found, and the artists whose name matched (shown as their own results). */
+    class Hits(val albums: List<JellyfinAlbum>, val artists: List<JellyfinArtist>)
+
+    suspend fun run(api: JellyfinApi, term: String): List<JellyfinAlbum> = search(api, term).albums
+
+    suspend fun search(api: JellyfinApi, term: String): Hits = coroutineScope {
         val byTitle = async { api.searchAlbums(term, limit = 50) }
         val artists = async { orEmpty { api.searchArtists(term, limit = 3) } }
-        val byArtist = artists.await()
+        val matched = artists.await()
+        val byArtist = matched
             .map { artist -> async { orEmpty { api.albumsByArtist(artist.id) } } }
             .awaitAll()
             .flatten()
-        combine(byTitle.await(), byArtist)
+        Hits(combine(byTitle.await(), byArtist), matched)
     }
 
     /** Title matches first, then artist matches; each album once; discs merged. */

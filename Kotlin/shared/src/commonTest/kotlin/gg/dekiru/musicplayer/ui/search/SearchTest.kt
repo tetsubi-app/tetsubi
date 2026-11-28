@@ -133,6 +133,8 @@ class SearchTest {
         s.model.onQueryChange("push")
         settle()
         assertEquals(listOf("t1", "b1"), s.model.results.map { it.id })
+        // The artists whose name matched are results of their own.
+        assertEquals(listOf("ar1"), s.model.artistResults.map { it.id })
         assertTrue(s.model.hasSearched)
         assertFalse(s.model.isLoading)
         assertFalse(s.model.isOfflineResults)
@@ -206,8 +208,8 @@ class SearchTest {
         assertEquals("Albums, artists or playlists", SearchModel.FIELD_HINT)
         assertEquals("Type an album, artist or playlist name.", SearchModel.EMPTY_HINT)
         assertEquals("Playlists (2)", SearchModel.playlistsHeader(2))
-        assertEquals("Results (3)", SearchModel.albumsHeader(albums = 3, playlists = 0))
-        assertEquals("Albums (3)", SearchModel.albumsHeader(albums = 3, playlists = 2))
+        assertEquals("Results (3)", SearchModel.albumsHeader(albums = 3, otherSections = 0))
+        assertEquals("Albums (3)", SearchModel.albumsHeader(albums = 3, otherSections = 2))
         assertEquals("No albums or playlists found for “gish”.", SearchModel.noResultsMessage("gish"))
         assertEquals("No downloaded albums or playlists match “gish”.", SearchModel.noDownloadsMessage("gish"))
     }
@@ -295,5 +297,18 @@ class SearchTest {
         assertEquals(listOf("l2"), s.model.localResults.map { it.id })
         assertFalse(s.model.isLoading)
         assertEquals(emptyList(), s.history.terms)
+    }
+
+    @Test
+    fun theChipsChooseWhichKindsOfResultShow() {
+        assertEquals(listOf(true, true, true), listOf(SearchFilter.ALL.showsAlbums, SearchFilter.ALL.showsArtists, SearchFilter.ALL.showsPlaylists))
+        assertEquals(listOf(true, false, false), listOf(SearchFilter.ALBUMS.showsAlbums, SearchFilter.ALBUMS.showsArtists, SearchFilter.ALBUMS.showsPlaylists))
+        assertEquals(listOf(false, true, false), listOf(SearchFilter.ARTISTS.showsAlbums, SearchFilter.ARTISTS.showsArtists, SearchFilter.ARTISTS.showsPlaylists))
+        assertEquals(listOf(false, false, true), listOf(SearchFilter.PLAYLISTS.showsAlbums, SearchFilter.PLAYLISTS.showsArtists, SearchFilter.PLAYLISTS.showsPlaylists))
+        assertEquals(listOf("All", "Albums", "Artists", "Playlists"), SearchFilter.entries.map { it.title })
+        assertEquals("No artists found for “x”.", SearchModel.noResultsMessage("x", SearchFilter.ARTISTS))
+        assertEquals(SearchModel.noResultsMessage("x"), SearchModel.noResultsMessage("x", SearchFilter.ALL))
+        assertEquals("Artists (2)", SearchModel.artistsHeader(2))
+        assertEquals("Albums (3)", SearchModel.albumsHeader(3, otherSections = 1))
     }
 }

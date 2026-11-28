@@ -5,26 +5,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Button
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,31 +32,37 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.network.NetworkState
 import gg.dekiru.musicplayer.data.settings.Preferences
 import gg.dekiru.musicplayer.downloads.DownloadManager
+import gg.dekiru.musicplayer.ui.Radii
 import gg.dekiru.musicplayer.ui.TetsubiColors
+import gg.dekiru.musicplayer.ui.components.BannerKind
+import gg.dekiru.musicplayer.ui.components.EmptyState
+import gg.dekiru.musicplayer.ui.components.LoadingSpinner
+import gg.dekiru.musicplayer.ui.components.PageControls
+import gg.dekiru.musicplayer.ui.components.PageHeader
+import gg.dekiru.musicplayer.ui.components.PageTitle
+import gg.dekiru.musicplayer.ui.components.PrimaryButton
+import gg.dekiru.musicplayer.ui.components.SettingsRow
+import gg.dekiru.musicplayer.ui.components.SettingsToggleRow
 import gg.dekiru.musicplayer.ui.downloads.coverPath
 import gg.dekiru.musicplayer.ui.downloads.rememberIsDownloaded
 import gg.dekiru.musicplayer.ui.home.OFFLINE_MESSAGE
 import gg.dekiru.musicplayer.ui.home.StatusBanner
+import gg.dekiru.musicplayer.ui.layout.LocalWindowClass
+import gg.dekiru.musicplayer.ui.layout.WindowClass
+import gg.dekiru.musicplayer.ui.layout.screenInsets
 import gg.dekiru.musicplayer.ui.library.LibraryAlbumGrid
-import gg.dekiru.musicplayer.ui.library.LibraryNote
-import gg.dekiru.musicplayer.ui.library.LibrarySpinner
-import gg.dekiru.musicplayer.ui.settings.Divider
-import gg.dekiru.musicplayer.ui.settings.ToggleRow
+import gg.dekiru.musicplayer.ui.tetsubiType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,10 +74,9 @@ import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
 /**
- * Home ▸ Recently Played › (as iOS `RecentlyPlayedView`): the Library's
- * album cards, as many across as the export's size (3, 4 or 5) on every
- * device, so no zoom buttons here; pull down to reload, and
- * "Export grid" after the last row. Offline: the downloaded albums among
+ * Home > Recently played "See all" (as iOS `RecentlyPlayedView`): the app's album grid (card size
+ * from the header's S / M / L; the export's size no longer sets the columns), pull down to reload,
+ * and the export panel: a card after the last row, or on Expanded a column beside the grid. Offline: the downloaded albums among
  * the list last loaded this run (else Home's row, [homeRow]), under the
  * offline banner. Nothing is kept on disk.
  */
@@ -99,49 +97,54 @@ fun RecentlyPlayedScreen(
     val isDownloaded = rememberIsDownloaded(downloads)
     val albums = if (online) model.albums else (if (model.loaded) model.albums else homeRow).filter(isDownloaded)
     val localCover: (JellyfinAlbum) -> String? = { album -> if (isDownloaded(album)) downloads.coverPath(album) else null }
-    // One source of truth for the grid size: the grid shows the albums the
-    // export takes, and follows the Export section's choice at once.
+    // The export's size and labels, remembered; the grid shows every album, the export takes the first n x n.
     val settings = remember(preferences) { ExportSettings(preferences) }
-    val shown = ExportGrid.shownAlbums(albums, settings.size)
-    // As many across as the export's size; below nine (no export) the
-    // Library's usual columns, without its zoom.
-    val columns = ExportGrid.gridColumns(albums, settings.size)
     val grid = rememberLazyGridState()
+    val sideBySide = LocalWindowClass.current == WindowClass.Expanded
 
-    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
-        Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back" }) {
-                    Text("‹ Back", color = TetsubiColors.blue, fontSize = 16.sp)
+    Column(Modifier.fillMaxSize().screenInsets()) {
+        PageHeader(null, onBack = onBack) { PageControls(density = true) }
+        PageTitle(RECENTLY_PLAYED_TITLE)
+        if (!online) StatusBanner(OFFLINE_MESSAGE, kind = BannerKind.Offline)
+        PullToRefreshBox(
+            isRefreshing = online && model.isLoading && model.albums.isNotEmpty(),
+            onRefresh = { if (online) model.refresh() },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) {
+            when {
+                albums.isNotEmpty() -> {
+                    val shown = ExportGrid.distinct(albums)
+                    if (sideBySide) {
+                        Row(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f)) {
+                                LibraryAlbumGrid(api, shown, grid, onOpen, isDownloaded, localArt = localCover)
+                            }
+                            // Sticky: the grid scrolls, this stays.
+                            Column(
+                                Modifier.width(EXPORT_PANEL_WIDTH).fillMaxHeight().verticalScroll(rememberScrollState())
+                                    .padding(top = 32.dp, end = 32.dp, bottom = 32.dp),
+                            ) { ExportSection(api, albums, settings, localCover) }
+                        }
+                    } else {
+                        LibraryAlbumGrid(
+                            api, shown, grid, onOpen, isDownloaded, localArt = localCover,
+                            footer = { ExportSection(api, albums, settings, localCover, Modifier.padding(top = 8.dp)) },
+                        )
+                    }
                 }
-                Text(
-                    RECENTLY_PLAYED_TITLE, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() },
-                )
-            }
-            if (!online) StatusBanner(OFFLINE_MESSAGE, icon = "⊘")
-            PullToRefreshBox(
-                isRefreshing = online && model.isLoading && model.albums.isNotEmpty(),
-                onRefresh = { if (online) model.refresh() },
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                when {
-                    albums.isNotEmpty() -> LibraryAlbumGrid(
-                        api, shown, grid, onOpen, isDownloaded, localArt = localCover,
-                        footer = { ExportSection(api, albums, settings, localCover) },
-                        fixedColumns = columns, widensWithoutZoom = true,
-                    )
-                    !online -> LibraryNote(EMPTY)
-                    model.isLoading || !model.loaded && model.errorMessage == null -> LibrarySpinner()
-                    model.errorMessage != null -> StatusBanner("Can't reach your Jellyfin server. ${model.errorMessage}", "Retry", model::refresh)
-                    else -> LibraryNote(EMPTY)
-                }
+                !online -> EmptyState(EMPTY)
+                model.isLoading || !model.loaded && model.errorMessage == null -> LoadingSpinner()
+                model.errorMessage != null -> StatusBanner("Can't reach your Jellyfin server. ${model.errorMessage}", "Retry", model::refresh)
+                else -> EmptyState(EMPTY)
             }
         }
     }
 }
 
-private const val RECENTLY_PLAYED_TITLE = "Recently Played"
+private const val RECENTLY_PLAYED_TITLE = "Recently played"
+
+/** The export panel's width when it sits beside the grid (the right margin is added around it). */
+private val EXPORT_PANEL_WIDTH = 352.dp
 
 private enum class ExportAction { COPY, SAVE }
 
@@ -158,6 +161,7 @@ private fun ExportSection(
     albums: List<JellyfinAlbum>,
     settings: ExportSettings,
     localCover: (JellyfinAlbum) -> String?,
+    modifier: Modifier = Modifier,
 ) {
     var busy by remember { mutableStateOf<ExportAction?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -212,32 +216,30 @@ private fun ExportSection(
         }
     }
 
-    Column(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // One card: the title, the options, Copy and Save.
+    val shape = RoundedCornerShape(Radii.panel)
+    Column(
+        modifier.fillMaxWidth().clip(shape).background(TetsubiColors.surface, shape).padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Text(
-            "Export grid", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.semantics { heading() },
+            "Export grid", style = tetsubiType.sectionTitle, color = TetsubiColors.textPrimary,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() },
         )
         if (size == null) {
-            Text(TOO_FEW, color = TetsubiColors.albumYearText, fontSize = 13.sp)
+            Text(TOO_FEW, style = tetsubiType.body, color = TetsubiColors.textSecondary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         } else {
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(TetsubiColors.groupBackground)) {
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text("Grid size", color = Color.White, fontSize = 17.sp, modifier = Modifier.weight(1f))
-                    SizePicker(selected = size, count = count) { settings.size = it }
-                }
-                Divider()
-                ToggleRow("Show album and artist", labels, onChange = { settings.showLabels = it })
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                ExportButton("Copy", busy == ExportAction.COPY, enabled = busy == null) { export(ExportAction.COPY) }
-                ExportButton("Save", busy == ExportAction.SAVE, enabled = busy == null) { export(ExportAction.SAVE) }
+            SettingsRow("Grid size") { SizePicker(selected = size, count = count) { settings.size = it } }
+            SettingsToggleRow("Show album and artist", labels, onChange = { settings.showLabels = it }, divider = false)
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PrimaryButton("Copy", { export(ExportAction.COPY) }, working = busy == ExportAction.COPY, enabled = busy == null)
+                PrimaryButton("Save", { export(ExportAction.SAVE) }, working = busy == ExportAction.SAVE, enabled = busy == null)
                 notice?.let {
                     Text(
-                        it, color = TetsubiColors.albumArtistText, fontSize = 13.sp,
+                        it, style = tetsubiType.body, color = TetsubiColors.textSecondary,
                         modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
                     )
                 }
@@ -246,44 +248,25 @@ private fun ExportSection(
     }
 }
 
-/** 3×3 | 4×4 | 5×5 as one segmented control; a size with too few albums is greyed and can't be picked. */
+/** 3x3 | 4x4 | 5x5 as one segmented control; a size with too few albums is greyed and can't be picked. */
 @Composable
 private fun SizePicker(selected: Int, count: Int, onSelect: (Int) -> Unit) {
-    Row(
-        Modifier.clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.12f)).padding(2.dp).selectableGroup(),
-    ) {
+    val shape = RoundedCornerShape(Radii.FULL_PERCENT)
+    Row(Modifier.clip(shape).background(TetsubiColors.surface, shape).padding(2.dp).selectableGroup()) {
         for (n in ExportGrid.SIZES) {
             val available = ExportGrid.isAvailable(n, count)
             val isSelected = n == selected
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(if (isSelected) Color.White.copy(alpha = 0.28f) else Color.Transparent)
+                    .clip(RoundedCornerShape(Radii.FULL_PERCENT))
+                    .background(if (isSelected) TetsubiColors.blueTint else Color.Transparent)
                     .selectable(selected = isSelected, enabled = available, role = Role.RadioButton) { onSelect(n) }
                     .alpha(if (available) 1f else 0.35f)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 12.dp, vertical = 5.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("$n×$n", color = Color.White, fontSize = 14.sp, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal)
+                Text("$n×$n", style = tetsubiType.control, color = if (isSelected) TetsubiColors.blue else TetsubiColors.textSecondary)
             }
-        }
-    }
-}
-
-@Composable
-private fun ExportButton(title: String, working: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    // Filled, as the album page's Play button: outlined blue text was hard to read over light album art.
-    Button(
-        onClick = onClick, enabled = enabled,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = TetsubiColors.blue, contentColor = Color.White,
-            disabledContainerColor = TetsubiColors.blue.copy(alpha = 0.5f), disabledContentColor = Color.White.copy(alpha = 0.7f),
-        ),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            // The title keeps the button's width while the spinner shows.
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.alpha(if (working) 0f else 1f))
-            if (working) CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
         }
     }
 }

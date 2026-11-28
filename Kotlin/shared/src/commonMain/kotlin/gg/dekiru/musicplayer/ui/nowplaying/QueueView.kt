@@ -64,13 +64,17 @@ import gg.dekiru.musicplayer.playback.RepeatMode
 import gg.dekiru.musicplayer.playback.formatAlbumDuration
 import gg.dekiru.musicplayer.playback.formatTrackTime
 import gg.dekiru.musicplayer.ui.TetsubiColors
+import gg.dekiru.musicplayer.ui.Radii
+import gg.dekiru.musicplayer.ui.components.ActionChip
 import gg.dekiru.musicplayer.ui.components.AlbumArt
+import gg.dekiru.musicplayer.ui.components.CloseIcon
+import gg.dekiru.musicplayer.ui.components.GripIcon
+import gg.dekiru.musicplayer.ui.tetsubiType
 
 /** Android swipes rows away; the desktop has a remove button on each. */
 private val swipesToRemove: Boolean get() = platformName == "Android"
 
-private val dim = Color.White.copy(alpha = 0.5f)
-private val divider = Color.White.copy(alpha = 0.1f)
+private val dim = TetsubiColors.textSecondary
 
 /**
  * Now Playing's queue (as iOS's queue editor): "Queue", the time left in it
@@ -100,16 +104,16 @@ internal fun QueueSection(api: JellyfinApi, player: PlayerController) {
         if (slot != null) player.moveQueue(ids, QueueEditor.toIndex(currentIndex, slot))
     }
 
-    Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Queue", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Queue", style = tetsubiType.sectionTitle, color = TetsubiColors.textPrimary, modifier = Modifier.semantics { heading() })
             val left = formatAlbumDuration(player.queueRemaining)
             Text(
-                left, color = dim, fontSize = 12.sp, maxLines = 1,
-                modifier = Modifier.padding(start = 10.dp).weight(1f).semantics { contentDescription = "$left left" },
+                left, style = tetsubiType.caption, color = dim, maxLines = 1,
+                modifier = Modifier.padding(start = 12.dp).weight(1f).semantics { contentDescription = "$left left" },
             )
             if (!readOnly && queue.entries.size > 1) {
-                TextButton(onClick = { confirmingClear = true }) { Text("Clear queue", color = TetsubiColors.blue, fontSize = 14.sp) }
+                ActionChip("Clear queue", onClick = { confirmingClear = true })
             }
         }
         if (readOnly) Note(QueueEditor.MANIAC_NOTE)
@@ -150,8 +154,8 @@ internal fun QueueSection(api: JellyfinApi, player: PlayerController) {
                     .zIndex(if (isDragged) 1f else 0f)
                     .graphicsLayer { translationY = if (isDragged) drag.offset else 0f }
                     // The rows being dragged (a track, or an album's header and tracks) get a light
-                    // black wash, so they stand apart from the rows they pass over.
-                    .then(if (isDragged) Modifier.background(Color.Black.copy(alpha = 0.1f)) else Modifier)
+                    // wash, so they stand apart from the rows they pass over.
+                    .then(if (isDragged) Modifier.background(TetsubiColors.dragWash) else Modifier)
                     .then(if (lineAbove) Modifier.dropLine() else Modifier)
                 when (row) {
                     is QueueHeaderRow -> {
@@ -221,7 +225,7 @@ internal fun QueueSection(api: JellyfinApi, player: PlayerController) {
         // Dropped past the last row.
         if (dragged.isNotEmpty() && drag.target == END) Box(Modifier.fillMaxWidth().height(0.dp).dropLine())
         if (editor.upcoming.isEmpty()) {
-            Text(QueueEditor.EMPTY_NOTE, color = dim, fontSize = 15.sp, modifier = Modifier.padding(vertical = 8.dp))
+            Text(QueueEditor.EMPTY_NOTE, style = tetsubiType.body, color = dim, modifier = Modifier.padding(vertical = 8.dp))
         }
         when {
             player.repeatMode == RepeatMode.ONE -> Note(QueueEditor.REPEATING_TRACK, top = true)
@@ -325,14 +329,14 @@ private fun Removable(enabled: Boolean, modifier: Modifier, onRemove: () -> Unit
             if (state.dismissDirection == SwipeToDismissBoxValue.EndToStart) Box(
                 Modifier.fillMaxSize().background(TetsubiColors.red, RoundedCornerShape(6.dp)).padding(end = 16.dp),
                 contentAlignment = Alignment.CenterEnd,
-            ) { Text("Remove", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+            ) { Text("Remove", style = tetsubiType.control, color = Color.White) }
         },
     ) { content() }
 }
 
 @Composable
 private fun Note(text: String, top: Boolean = false) {
-    Text(text, color = dim, fontSize = 12.sp, modifier = Modifier.padding(top = if (top) 8.dp else 0.dp, bottom = 6.dp))
+    Text(text, style = tetsubiType.caption, color = dim, modifier = Modifier.padding(top = if (top) 8.dp else 0.dp, bottom = 6.dp))
 }
 
 /** A group's header: small cover, title, artist, the group's time left; the handle and × when it can be moved and removed. */
@@ -363,12 +367,12 @@ private fun GroupHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        AlbumArt(api, row.group.artItemId ?: first?.track?.artItemId ?: row.group.id, size = 36.dp, cornerRadius = 4.dp, maxWidth = 100, localPath = local)
+        AlbumArt(api, row.group.artItemId ?: first?.track?.artItemId ?: row.group.id, size = 36.dp, cornerRadius = Radii.thumb, maxWidth = 100, localPath = local)
         Column(Modifier.weight(1f)) {
-            Text(row.group.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            row.group.artist?.let { Text(it, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Text(row.group.title, style = tetsubiType.cardTitle, color = TetsubiColors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            row.group.artist?.let { Text(it, style = tetsubiType.caption, color = TetsubiColors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
-        Text(time, color = dim, fontSize = 12.sp, maxLines = 1)
+        Text(time, style = tetsubiType.caption, color = dim, maxLines = 1)
         EditButtons(drag, onRemove, "Remove ${row.group.title}", handlers)
     }
 }
@@ -385,13 +389,13 @@ private fun TrackRow(
 ) {
     val handlers = rememberUpdatedState(drag)
     val track = player.track(row.entry)
-    val shape = RoundedCornerShape(6.dp)
+    val shape = RoundedCornerShape(Radii.thumb)
     Column {
         Row(
             Modifier
                 .fillMaxWidth()
                 .clip(shape)
-                .background(if (row.isCurrent) TetsubiColors.pink.copy(alpha = 0.25f) else Color.Transparent, shape)
+                .background(if (row.isCurrent) TetsubiColors.pinkTint else Color.Transparent, shape)
                 .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClickLabel = "Plays this track", onClick = onClick) else Modifier)
                 .then(if (drag != null) Modifier.dragAfterLongPress(handlers) else Modifier)
                 .padding(start = if (row.isCurrent) 8.dp else 0.dp, end = if (row.isCurrent) 8.dp else 0.dp, top = 8.dp, bottom = 8.dp)
@@ -402,7 +406,7 @@ private fun TrackRow(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    track.title, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    track.title, style = tetsubiType.rowTitle, color = TetsubiColors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     fontWeight = if (row.isCurrent) FontWeight.SemiBold else FontWeight.Normal,
                 )
                 val detail = when {
@@ -412,13 +416,13 @@ private fun TrackRow(
                     else -> ""
                 }
                 if (detail.isNotEmpty()) {
-                    Text(detail, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(detail, style = tetsubiType.caption, color = TetsubiColors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (track.durationSeconds > 0) Text(formatTrackTime(track.durationSeconds), color = dim, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
+            if (track.durationSeconds > 0) Text(formatTrackTime(track.durationSeconds), style = tetsubiType.control.copy(fontWeight = FontWeight.Normal), color = dim, modifier = Modifier.padding(start = 8.dp))
             EditButtons(drag, onRemove, "Remove ${track.title}", handlers)
         }
-        Box(Modifier.fillMaxWidth().height(0.5.dp).background(divider))
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(TetsubiColors.hairline))
     }
 }
 
@@ -431,20 +435,12 @@ private fun RowScope.EditButtons(drag: DragHandlers?, onRemove: (() -> Unit)?, r
                 .clickable(role = Role.Button, onClick = onRemove)
                 .semantics { contentDescription = removeLabel },
             contentAlignment = Alignment.Center,
-        ) { Text("✕", color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp) }
+        ) { CloseIcon(18.dp, TetsubiColors.textSecondary) }
     }
     if (drag != null) {
         Box(
             Modifier.size(40.dp, 36.dp).dragNow(handlers),
             contentAlignment = Alignment.Center,
-        ) { HandleIcon(16.dp) }
-    }
-}
-
-/** Three bars: the drag handle. */
-@Composable
-private fun HandleIcon(width: Dp) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        repeat(3) { Box(Modifier.width(width).height(2.dp).background(Color.White.copy(alpha = 0.45f))) }
+        ) { GripIcon(24.dp, TetsubiColors.textTertiary) }
     }
 }

@@ -1,33 +1,12 @@
 package gg.dekiru.musicplayer.ui.home
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,21 +14,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.api.JellyfinError
 import gg.dekiru.musicplayer.data.models.DiscGrouping
@@ -58,27 +27,28 @@ import gg.dekiru.musicplayer.data.settings.FavoritesStore
 import gg.dekiru.musicplayer.data.settings.InMemoryPreferences
 import gg.dekiru.musicplayer.downloads.DownloadManager
 import gg.dekiru.musicplayer.ui.TetsubiColors
-import gg.dekiru.musicplayer.ui.downloads.rememberIsDownloaded
-import gg.dekiru.musicplayer.ui.components.AlbumCard
+import gg.dekiru.musicplayer.ui.components.EmptyState
+import gg.dekiru.musicplayer.ui.components.LoadingSpinner
+import gg.dekiru.musicplayer.ui.components.PageControls
+import gg.dekiru.musicplayer.ui.components.PageHeader
+import gg.dekiru.musicplayer.ui.components.PageTitle
 import gg.dekiru.musicplayer.ui.components.ShakeEffect
-import gg.dekiru.musicplayer.ui.library.CardGrid
+import gg.dekiru.musicplayer.ui.downloads.rememberIsDownloaded
+import gg.dekiru.musicplayer.ui.layout.screenInsets
 import gg.dekiru.musicplayer.ui.library.FavouriteAlbums
-import gg.dekiru.musicplayer.ui.library.GridCell
-import gg.dekiru.musicplayer.ui.library.LibraryModel
+import gg.dekiru.musicplayer.ui.library.FavouritesControls
 import gg.dekiru.musicplayer.ui.library.FavouritesOptions
-import gg.dekiru.musicplayer.ui.library.GridZoom
-import gg.dekiru.musicplayer.ui.library.GridZoomButtons
-import gg.dekiru.musicplayer.ui.library.LibraryDisplayMode
+import gg.dekiru.musicplayer.ui.library.LibraryAlbumGrid
 import gg.dekiru.musicplayer.ui.library.LibraryFilter
 import gg.dekiru.musicplayer.ui.library.NoDownloadedFavourites
-import gg.dekiru.musicplayer.ui.library.isWideLayout
+import gg.dekiru.musicplayer.ui.tetsubiType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /** The full lists Home's › buttons open. */
 enum class AlbumList(val title: String, val emptyMessage: String) {
-    FAVOURITES("Favourites", "No favourite albums yet. Tap the heart on an album to add one."),
+    FAVOURITES("Favourites", "No favourite albums yet. Tap the star on an album to add one."),
     RANDOM("Random Albums", "No albums available."),
 }
 
@@ -123,49 +93,17 @@ class AlbumListModel(
     }
 
     companion object {
-        /** Random albums fetched each time; 9 or 12 of them are shown. */
+        /** Random albums fetched each time, all shown. */
         const val RANDOM_FETCH = 12
-
-        /**
-         * The Random grid is the Library's (as iOS `RandomAlbumsView`, which
-         * uses `AlbumGridView`): 120 dp covers, three across on a phone, at
-         * most three, centred on wider screens.
-         */
-        const val ROW_GAP = 12f
-        const val TOP_PADDING = 8f
-
-        /** "Shake it" and the space around it. */
-        const val FOOTER = 40f
-
-        /** The Library grid's layout for the page's width, at most three across. */
-        fun grid(width: Float): CardGrid {
-            val layout = LibraryModel.gridLayout(width - 2 * LibraryModel.GRID_EDGE)
-            val columns = layout.columns.coerceIn(1, 3)
-            return CardGrid(columns, layout.spacing, LibraryModel.GRID_ART, 1f, LibraryModel.IMAGE_SIZES.first())
-        }
-
-        fun columns(width: Float): Int = grid(width).columns
-        const val RANDOM_MAX_WIDTH = 3 * LibraryModel.GRID_ART + 2 * 12f + 2 * LibraryModel.GRID_EDGE
-
-        /**
-         * The Random page (as on iOS): 12 albums when all their rows, and
-         * "Shake it", fit in [height] (dp, above the system bars), else 9.
-         */
-        fun randomCount(width: Float, height: Float, cardHeight: Float, footer: Float = FOOTER): Int {
-            val rows = (12 + columns(width) - 1) / columns(width)
-            val needed = TOP_PADDING + rows * cardHeight + (rows - 1) * ROW_GAP + footer
-            return if (needed <= height) 12 else 9
-        }
     }
 }
 
 /**
- * A full page of albums (Home ▸ Favourites › or Random Albums ›): a grid
- * of cards, pull down to load again. Random shows 9 or 12 (as many rows as
- * fit), one-line titles, and "Shake it" where the device can be shaken.
- * Favourites: Library ▸ Favourites' view (as iOS, where it's the same
- * view), following its remembered View, Sort and Filter ([favourites]);
- * on wide layouts in Grid, the zoom buttons ([zoom]) in the top bar.
+ * A full page of albums (Home > Favourites or Random albums "See all"): Back and the page's
+ * controls in the header, the title in the content, then the app's grid of cards; pull down to load
+ * again. Random shows what it fetched, a "Shuffle again" action, and "Shake it" where the device can
+ * be shaken. Favourites: Library > Favourites' view (as iOS, where it's the same view), following
+ * its remembered View, Sort and Filter ([favourites]) with the same header controls.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -175,7 +113,6 @@ fun AlbumListScreen(
     onOpen: (JellyfinAlbum) -> Unit,
     onBack: () -> Unit,
     downloads: DownloadManager? = null,
-    zoom: GridZoom? = null,
     favourites: FavouritesOptions? = null,
 ) {
     LaunchedEffect(model) { model.loadIfNeeded() }
@@ -191,88 +128,40 @@ fun AlbumListScreen(
             model.refresh()
         }
     } && isRandom
-    // One card: padding, cover, then one-line title, artist and year.
-    val measurer = rememberTextMeasurer()
-    val style = LocalTextStyle.current
-    val density = LocalDensity.current
-    val cardHeight = with(density) {
-        val title = measurer.measure("Ag", style.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold))).size.height
-        val line = measurer.measure("Ag", style.merge(TextStyle(fontSize = 11.sp))).size.height
-        // The Library card: cover, then a one-line title and the artist, 4 dp apart.
-        (title + line).toDp().value + LibraryModel.GRID_ART + 2 * 4
-    }
-    val bottom = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues()
-    // Random keeps its fixed cards (its 9 or 12 depends on their size); Favourites' list has no zoom.
-    val zoomed = if (isFavourites && options.displayMode == LibraryDisplayMode.GRID && isWideLayout()) zoom else null
-    val favouriteGrid = rememberLazyGridState()
-    val favouriteList = rememberLazyListState()
+    val favouriteState = rememberLazyGridState()
+    val randomState = rememberLazyGridState()
 
-    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
-        androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back" }) {
-                    Text("‹ Back", color = TetsubiColors.blue, fontSize = 16.sp)
+    Column(Modifier.fillMaxSize().screenInsets()) {
+        PageHeader(null, onBack = onBack) {
+            if (isFavourites) FavouritesControls(options) else PageControls(density = true, shuffle = model::refresh)
+        }
+        PageTitle(model.list.title)
+        PullToRefreshBox(
+            isRefreshing = model.isLoading && model.albums.isNotEmpty(),
+            onRefresh = model::refresh,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) {
+            when {
+                isFavourites && model.albums.isNotEmpty() -> {
+                    val shown = options.arrange(model.albums, offline = false, isDownloaded = isDownloaded)
+                    if (shown.isEmpty()) {
+                        NoDownloadedFavourites { options.filter = LibraryFilter.ALL }
+                    } else {
+                        FavouriteAlbums(api, shown, options, onOpen, isDownloaded, { null }, favouriteState)
+                    }
                 }
-                Text(
-                    model.list.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                model.albums.isNotEmpty() -> LibraryAlbumGrid(
+                    api, model.albums, randomState, onOpen, isDownloaded,
+                    footer = if (canShake) ({
+                        Text(
+                            "Shake it", style = tetsubiType.body, color = TetsubiColors.textSecondary, textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        )
+                    }) else null,
                 )
-                if (zoomed != null) GridZoomButtons(zoomed, Modifier.padding(end = 8.dp))
-            }
-            PullToRefreshBox(
-                isRefreshing = model.isLoading && model.albums.isNotEmpty(),
-                onRefresh = model::refresh,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                when {
-                    isFavourites && model.albums.isNotEmpty() -> {
-                        val shown = options.arrange(model.albums, offline = false, isDownloaded = isDownloaded)
-                        if (shown.isEmpty()) {
-                            NoDownloadedFavourites { options.filter = LibraryFilter.ALL }
-                        } else {
-                            FavouriteAlbums(api, shown, options, onOpen, isDownloaded, { null }, favouriteGrid, favouriteList, zoom)
-                        }
-                    }
-                    model.albums.isNotEmpty() -> BoxWithConstraints(Modifier.fillMaxSize()) {
-                    val shown = if (isRandom) {
-                        val height = maxHeight.value - bottom.calculateBottomPadding().value
-                        model.albums.take(AlbumListModel.randomCount(maxWidth.value, height, cardHeight, if (canShake) AlbumListModel.FOOTER else 0f))
-                    } else model.albums
-                    val grid = AlbumListModel.grid(maxWidth.value)
-                    LazyVerticalGrid(
-                        columns = if (isRandom) GridCells.Fixed(grid.columns) else GridCells.Adaptive(152.dp),
-                        state = rememberLazyGridState(),
-                        contentPadding = PaddingValues(
-                            start = LibraryModel.GRID_EDGE.dp, end = LibraryModel.GRID_EDGE.dp,
-                            top = AlbumListModel.TOP_PADDING.dp, bottom = 24.dp + bottom.calculateBottomPadding(),
-                        ),
-                        horizontalArrangement = Arrangement.spacedBy(grid.spacing.dp, Alignment.CenterHorizontally),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = if (isRandom) {
-                            Modifier.fillMaxHeight().widthIn(max = AlbumListModel.RANDOM_MAX_WIDTH.dp).align(Alignment.TopCenter)
-                        } else Modifier.fillMaxSize(),
-                    ) {
-                        items(shown, key = { it.id }) { album ->
-                            if (isRandom) {
-                                GridCell(api, album, grid, isDownloaded(album), localArt = null, titleLines = 1) { onOpen(album) }
-                            } else Box(contentAlignment = Alignment.TopCenter) {
-                                AlbumCard(api, album, onClick = { onOpen(album) }, isDownloaded = isDownloaded(album))
-                            }
-                        }
-                        if (canShake) item(span = { GridItemSpan(maxLineSpan) }) {
-                            Text(
-                                "Shake it", color = TetsubiColors.albumYearText, fontSize = 13.sp, textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                            )
-                        }
-                    }
-                    }
-                    model.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                        CircularProgressIndicator(Modifier.padding(32.dp).size(24.dp), color = TetsubiColors.albumArtistText, strokeWidth = 2.dp)
-                    }
-                    model.errorMessage != null -> StatusBanner("Can't reach your Jellyfin server. ${model.errorMessage}", "Retry", model::refresh)
-                    else -> Text(model.list.emptyMessage, color = TetsubiColors.albumYearText, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
-                }
+                model.isLoading -> LoadingSpinner()
+                model.errorMessage != null -> StatusBanner("Can't reach your Jellyfin server. ${model.errorMessage}", "Retry", model::refresh)
+                else -> EmptyState(model.list.emptyMessage)
             }
         }
     }

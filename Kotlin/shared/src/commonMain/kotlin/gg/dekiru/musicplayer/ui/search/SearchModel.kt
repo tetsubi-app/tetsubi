@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.api.JellyfinError
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
+import gg.dekiru.musicplayer.data.models.JellyfinArtist
 import gg.dekiru.musicplayer.data.models.JellyfinPlaylist
 import gg.dekiru.musicplayer.downloads.LocalAlbum
 import gg.dekiru.musicplayer.downloads.LocalSearch
@@ -15,6 +16,15 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+/** The chips under the search field: which kinds of result are shown. */
+enum class SearchFilter(val title: String) {
+    ALL("All"), ALBUMS("Albums"), ARTISTS("Artists"), PLAYLISTS("Playlists");
+
+    val showsAlbums: Boolean get() = this == ALL || this == ALBUMS
+    val showsArtists: Boolean get() = this == ALL || this == ARTISTS
+    val showsPlaylists: Boolean get() = this == ALL || this == PLAYLISTS
+}
 
 /**
  * Search (as iOS `SearchViewModel`): once typing stops for [DEBOUNCE_MS],
@@ -40,7 +50,11 @@ class SearchModel(
     var results by mutableStateOf<List<JellyfinAlbum>>(emptyList())
         private set
 
-    /** Playlists whose name matches, shown above the albums. */
+    /** Album artists whose name matches (the ones the album search also took albums from). */
+    var artistResults by mutableStateOf<List<JellyfinArtist>>(emptyList())
+        private set
+
+    /** Playlists whose name matches. */
     var playlistResults by mutableStateOf<List<JellyfinPlaylist>>(emptyList())
         private set
 
@@ -81,6 +95,7 @@ class SearchModel(
         val term = term
         if (term.isEmpty()) {
             results = emptyList()
+            artistResults = emptyList()
             playlistResults = emptyList()
             localResults = emptyList()
             localPlaylistResults = emptyList()
@@ -115,7 +130,7 @@ class SearchModel(
     private suspend fun perform(term: String) {
         if (!isOnline()) return searchDownloads(term)
         isLoading = true
-        val (albums, playlists) = try {
+        val (hits, playlists) = try {
             coroutineScope {
                 // Only the album search failing is an error: playlists are then left out.
                 val playlists = async {
@@ -125,13 +140,14 @@ class SearchModel(
                         emptyList()
                     }
                 }
-                AlbumSearch.run(api, term) to playlists.await()
+                AlbumSearch.search(api, term) to playlists.await()
             }
         } catch (e: JellyfinError) {
             // Can't reach the server: the downloads instead.
             return searchDownloads(term)
         }
-        results = albums
+        results = hits.albums
+        artistResults = hits.artists
         playlistResults = playlists
         localResults = emptyList()
         localPlaylistResults = emptyList()
@@ -143,6 +159,7 @@ class SearchModel(
 
     private fun searchDownloads(term: String) {
         results = emptyList()
+        artistResults = emptyList()
         playlistResults = emptyList()
         localResults = LocalSearch.matches(term, downloadedAlbums())
         localPlaylistResults = LocalSearch.matchingPlaylists(term, downloadedPlaylists())
@@ -160,10 +177,16 @@ class SearchModel(
 
         fun playlistsHeader(playlists: Int): String = "Playlists ($playlists)"
 
-        /** The albums' section title: "Results (3)" on their own, "Albums (3)" under a Playlists section. */
-        fun albumsHeader(albums: Int, playlists: Int): String = if (playlists == 0) "Results ($albums)" else "Albums ($albums)"
+        fun artistsHeader(artists: Int): String = "Artists ($artists)"
+
+        /** The albums' section title: "Results (3)" on their own, "Albums (3)" beside other sections. */
+        fun albumsHeader(albums: Int, otherSections: Int): String = if (otherSections <= 0) "Results ($albums)" else "Albums ($albums)"
 
         fun noResultsMessage(term: String): String = "No albums or playlists found for “$term”."
+
+        /** As [noResultsMessage], for the kind of result a chip narrowed the search to. */
+        fun noResultsMessage(term: String, filter: SearchFilter): String =
+            if (filter == SearchFilter.ALL) noResultsMessage(term) else "No ${filter.title.lowercase()} found for “$term”."
 
         /** What the offline results say when nothing matches. */
         fun noDownloadsMessage(term: String): String = "No downloaded albums or playlists match “$term”."

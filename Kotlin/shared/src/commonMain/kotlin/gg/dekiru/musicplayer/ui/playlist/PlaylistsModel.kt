@@ -187,9 +187,6 @@ class PlaylistsModel(
     companion object {
         const val SORT_KEY = "playlists.sort"
 
-        /** In the offline Playlists tab and Home row when no playlist is downloaded. */
-        const val NONE_DOWNLOADED = "No downloaded playlists yet."
-
         /** The server's listing no longer matches the saved list: another name, song count or length. */
         fun differs(listed: JellyfinPlaylist, saved: DownloadedPlaylist): Boolean =
             listed.displayName != saved.name || listed.songCount != saved.songCount ||

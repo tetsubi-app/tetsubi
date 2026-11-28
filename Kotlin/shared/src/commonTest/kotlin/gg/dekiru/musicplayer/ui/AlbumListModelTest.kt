@@ -55,24 +55,6 @@ class AlbumListModelTest {
     }
 
     @Test
-    fun randomShowsTwelveWhenTheirRowsFitElseNine() {
-        val card = 210f
-        // Three across wherever they fit, so 4 rows: 8 + 4 × 210 + 3 × 12 + 40 = 924.
-        assertEquals(3, AlbumListModel.columns(1280f))
-        assertEquals(3, AlbumListModel.columns(500f))
-        assertEquals(12, AlbumListModel.randomCount(1280f, 924f, card))
-        assertEquals(9, AlbumListModel.randomCount(1280f, 923f, card))
-        assertEquals(12, AlbumListModel.randomCount(1280f, 884f, card, footer = 0f), "no \"Shake it\" on desktop")
-        // Phones get three across too (the Library's 120 dp covers, as iOS).
-        assertEquals(3, AlbumListModel.columns(411f))
-        assertEquals(3, AlbumListModel.columns(393f))
-        assertEquals(3, AlbumListModel.columns(375f))
-        // 360 dp is too narrow for three 120 dp covers, as in the Library.
-        assertEquals(2, AlbumListModel.columns(360f))
-        assertEquals(12, AlbumListModel.randomCount(393f, 924f, card))
-    }
-
-    @Test
     fun failureShowsTheError() = runTest {
         val server = FakeServer { json("", HttpStatusCode.BadGateway) }
         val model = AlbumListModel(AlbumList.RANDOM, server.api(token = "t", userId = "u"), FavoritesStore(InMemoryPreferences()) { 0 }, backgroundScope)

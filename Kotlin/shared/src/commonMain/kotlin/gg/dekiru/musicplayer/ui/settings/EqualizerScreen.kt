@@ -51,6 +51,13 @@ import gg.dekiru.musicplayer.playback.effects.EffectsSettings
 import gg.dekiru.musicplayer.playback.effects.Equalizer
 import gg.dekiru.musicplayer.playback.effects.EqualizerPreset
 import gg.dekiru.musicplayer.ui.TetsubiColors
+import gg.dekiru.musicplayer.ui.components.PageHeader
+import gg.dekiru.musicplayer.ui.components.SettingsGroup
+import gg.dekiru.musicplayer.ui.components.SettingsToggleRow
+import gg.dekiru.musicplayer.ui.layout.rememberBottomInset
+import gg.dekiru.musicplayer.ui.layout.screenInsets
+import gg.dekiru.musicplayer.ui.tetsubiType
+import androidx.compose.foundation.layout.Row
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -126,68 +133,63 @@ class EqualizerModel(private val settings: EffectsSettings, private val effects:
     }
 }
 
-private val dimText = Color.White.copy(alpha = 0.6f)
-
 /**
- * Settings ▸ Equaliser (as iOS `EqualizerView`): the on/off switch, the
- * preset menu, and ten vertical sliders under "Bands (dB)". The sliders
- * and preset are dimmed and locked while the equaliser is off.
+ * Settings ▸ Equaliser (as iOS `EqualizerView`), pushed as its own page on Compact: [EqualizerContent]
+ * under a header with Back.
  */
 @Composable
 fun EqualizerScreen(model: EqualizerModel, onBack: () -> Unit, casting: Boolean = false) {
-    Box(
-        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Column(Modifier.widthIn(max = 720.dp).fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back" }) {
-                    Text("‹ Back", color = TetsubiColors.blue, fontSize = 16.sp)
-                }
-                Text(EqualizerText.TITLE, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                Spacer(Modifier.height(8.dp))
-                Group {
-                    ToggleRow(EqualizerText.TITLE, model.enabled, model::changeEnabled)
-                    Divider()
-                    PickerRow(
-                        EqualizerText.PRESET,
-                        value = model.preset.displayName,
-                        options = EqualizerPreset.entries.map { it.displayName },
-                        onSelect = { model.choosePreset(EqualizerPreset.entries[it]) },
-                        enabled = model.enabled,
-                    )
-                }
-                Footer(EqualizerText.FOOTER)
-                if (casting) Footer(EqualizerText.CASTING)
+    Column(Modifier.fillMaxSize().screenInsets()) {
+        PageHeader(EqualizerText.TITLE, onBack = onBack)
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = rememberBottomInset() + 32.dp)) {
+            EqualizerContent(model, casting)
+        }
+    }
+}
 
-                Header(EqualizerText.BANDS)
-                Group {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp).alpha(if (model.enabled) 1f else 0.4f),
-                        verticalAlignment = Alignment.Bottom,
+/**
+ * The on/off switch, the preset menu, and ten vertical sliders under "Bands (dB)". The sliders
+ * and preset are dimmed and locked while the equaliser is off. A page on Compact, a section of
+ * Playback on Expanded.
+ */
+@Composable
+fun EqualizerContent(model: EqualizerModel, casting: Boolean) {
+    Column {
+        SettingsGroup(
+            title = EqualizerText.TITLE,
+            footer = EqualizerText.FOOTER + if (casting) "\n\n" + EqualizerText.CASTING else "",
+        ) {
+            SettingsToggleRow(EqualizerText.TITLE, model.enabled, model::changeEnabled)
+            SettingsPickerRow(
+                EqualizerText.PRESET,
+                value = model.preset.displayName,
+                options = EqualizerPreset.entries.map { it.displayName },
+                onSelect = { model.choosePreset(EqualizerPreset.entries[it]) },
+                enabled = model.enabled,
+                divider = false,
+            )
+        }
+        SettingsGroup(title = EqualizerText.BANDS) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp).alpha(if (model.enabled) 1f else 0.4f),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Equalizer.frequencies.forEachIndexed { i, hz ->
+                    Column(
+                        Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Equalizer.frequencies.forEachIndexed { i, hz ->
-                            Column(
-                                Modifier.weight(1f),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                val gain = model.gains[i]
-                                Text(EqualizerText.gainLabel(gain), color = dimText, fontSize = 11.sp)
-                                VerticalSlider(
-                                    gain, onChange = { model.changeGain(i, it) }, enabled = model.enabled,
-                                    description = "${Equalizer.label(hz)} hertz",
-                                    modifier = Modifier.fillMaxWidth().height(180.dp),
-                                )
-                                Text(Equalizer.label(hz), color = dimText, fontSize = 11.sp)
-                            }
-                        }
+                        val gain = model.gains[i]
+                        Text(EqualizerText.gainLabel(gain), style = tetsubiType.navLabel, color = TetsubiColors.textSecondary)
+                        VerticalSlider(
+                            gain, onChange = { model.changeGain(i, it) }, enabled = model.enabled,
+                            description = "${Equalizer.label(hz)} hertz",
+                            modifier = Modifier.fillMaxWidth().height(180.dp),
+                        )
+                        Text(Equalizer.label(hz), style = tetsubiType.navLabel, color = TetsubiColors.textSecondary)
                     }
                 }
-                Spacer(Modifier.height(32.dp))
-                Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.safeDrawing))
             }
         }
     }
@@ -243,10 +245,10 @@ private fun VerticalSlider(value: Float, onChange: (Float) -> Unit, enabled: Boo
         val track = 4.dp.toPx()
         val x = size.width / 2
         val radius = CornerRadius(track / 2)
-        drawRoundRect(Color.White.copy(alpha = 0.15f), Offset(x - track / 2, 0f), Size(track, height), radius)
+        drawRoundRect(TetsubiColors.art, Offset(x - track / 2, 0f), Size(track, height), radius)
         // Fill from the 0 dB line to the value.
         val top = minOf(y(value), y(0f))
-        drawRoundRect(TetsubiColors.pink, Offset(x - track / 2, top), Size(track, abs(y(value) - y(0f))), radius)
+        drawRoundRect(TetsubiColors.blue, Offset(x - track / 2, top), Size(track, abs(y(value) - y(0f))), radius)
         drawCircle(Color.White, radius = 9.dp.toPx(), center = Offset(x, y(value)))
     }
 }

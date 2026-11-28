@@ -5,37 +5,30 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsBottomHeight
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,22 +36,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.SingletonImageLoader
@@ -69,28 +59,50 @@ import gg.dekiru.musicplayer.data.update.UpdateChecker
 import gg.dekiru.musicplayer.platformName
 import gg.dekiru.musicplayer.resources.Res
 import gg.dekiru.musicplayer.resources.disc
+import gg.dekiru.musicplayer.ui.Radii
 import gg.dekiru.musicplayer.ui.TetsubiColors
 import gg.dekiru.musicplayer.ui.components.ChevronRightIcon
+import gg.dekiru.musicplayer.ui.components.PageHeader
+import gg.dekiru.musicplayer.ui.components.SettingsGroup
+import gg.dekiru.musicplayer.ui.components.SettingsRow
+import gg.dekiru.musicplayer.ui.components.SettingsToggleRow
+import gg.dekiru.musicplayer.ui.components.SettingsValue
 import gg.dekiru.musicplayer.ui.downloads.DownloadsText
+import gg.dekiru.musicplayer.ui.layout.LocalWindowClass
+import gg.dekiru.musicplayer.ui.layout.WindowClass
+import gg.dekiru.musicplayer.ui.layout.rememberBottomInset
+import gg.dekiru.musicplayer.ui.layout.screenInsets
+import gg.dekiru.musicplayer.ui.tetsubiType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.painterResource
 
-private val readableWidth = 720.dp
-private val secondary = Color.White.copy(alpha = 0.6f)
-private val tertiary = Color.White.copy(alpha = 0.4f)
-private val divider = Color.White.copy(alpha = 0.12f)
+/** The Settings categories, in the order of the page (docs/redesign.md section 5). The Equaliser lives inside [PLAYBACK]. */
+private enum class Category(val title: String) {
+    MANIAC(SettingsText.MANIAC_TITLE),
+    SERVER(SettingsText.SERVER),
+    DOWNLOADS(SettingsText.DOWNLOADS),
+    PLAYBACK(SettingsText.PLAYBACK),
+    STORAGE(SettingsText.STORAGE),
+    UPDATES(SettingsText.UPDATES),
+    ABOUT(SettingsText.ABOUT),
+}
 
 /**
- * The Settings tab (as iOS `SettingsView`), in the same order: Maniac
- * Mode, Server, Downloads, Playback, Storage, About. Grouped boxes over
- * the background picture, at a readable width on the Pad. Playback ▸
- * Equaliser opens [EqualizerScreen] in place (back returns here).
+ * The Settings tab (as iOS `SettingsView`), in the same order: Maniac Mode, Server, Downloads,
+ * Playback, Storage, Updates, About. Compact (and a narrow Medium window): one grouped list under
+ * "Settings", with Playback ▸ Equaliser a pushed page ([onOpenEqualizer]). Expanded (and Medium from 900):
+ * a split view, the categories (240) on the left and the selected one on the right, with the Equaliser
+ * as a section of Playback; the selection is remembered.
  */
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun SettingsScreen(session: AppSession, api: JellyfinApi) {
+fun SettingsScreen(
+    session: AppSession,
+    api: JellyfinApi,
+    equalizer: EqualizerModel,
+    onOpenEqualizer: () -> Unit,
+) {
     val player by session.player.collectAsState()
     val downloads by session.downloads.collectAsState()
     val model = remember(session) {
@@ -100,96 +112,134 @@ fun SettingsScreen(session: AppSession, api: JellyfinApi) {
     val maniacMode = player?.maniacMode ?: model.maniacMode
     // The equaliser, where the player has one (not the desktop yet).
     val effects = session.environment.playerEngine.audioEffects
-    val equalizer = remember(session) { EqualizerModel(session.effectsSettings, effects) }
-    var showEqualizer by rememberSaveable { mutableStateOf(false) }
-    if (showEqualizer && effects != null) {
-        BackHandler { showEqualizer = false }
-        val castName = session.environment.playerEngine.cast?.deviceName?.collectAsState()?.value
-        EqualizerScreen(equalizer, onBack = { showEqualizer = false }, casting = castName != null)
-        return
+    val castName = session.environment.playerEngine.cast?.deviceName?.collectAsState()?.value
+    val windowClass = LocalWindowClass.current
+    val margin = windowClass.pageMargin
+    val bottom = rememberBottomInset() + 32.dp
+
+    val available = Category.entries.filter {
+        when (it) {
+            Category.DOWNLOADS -> downloads != null
+            Category.UPDATES -> session.updates.enabled
+            else -> true
+        }
+    }
+    var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
+    val selected = Category.entries.getOrNull(selectedIndex)?.takeIf { it in available } ?: available.first()
+
+    // One category's groups.
+    val content: @Composable ColumnScope.(Category, Boolean) -> Unit = { category, split ->
+        when (category) {
+            Category.MANIAC -> SettingsGroup {
+                SettingsToggleRow(SettingsText.MANIAC_TITLE, maniacMode, model::changeManiacMode, caption = SettingsText.MANIAC_CAPTION, divider = false)
+            }
+            Category.SERVER -> ServerSection(api, userName = session.authenticator.savedUserName, onSignOut = session::signOut)
+            Category.DOWNLOADS -> downloads?.let { DownloadsSection(model, it) }
+            Category.PLAYBACK -> {
+                PlaybackSection(model, equalizer, showsEqualizerRow = effects != null && !split, onOpenEqualizer = onOpenEqualizer)
+                if (effects != null && split) EqualizerContent(equalizer, casting = castName != null)
+            }
+            Category.STORAGE -> StorageSection()
+            Category.UPDATES -> UpdatesSection(session.updates)
+            Category.ABOUT -> AboutSection()
+        }
     }
 
-    Box(
-        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Column(Modifier.widthIn(max = readableWidth).fillMaxSize().verticalScroll(rememberScrollState())) {
-            Spacer(Modifier.height(16.dp))
-            // Maniac Mode first: it changes how everything plays.
-            Group {
-                ToggleRow(SettingsText.MANIAC_TITLE, maniacMode, model::changeManiacMode, caption = SettingsText.MANIAC_CAPTION)
-            }
-
-            ServerSection(api, userName = session.authenticator.savedUserName, onSignOut = session::signOut)
-
-            downloads?.let { manager ->
-                val downloaded by manager.downloaded.collectAsState()
-                Header(SettingsText.DOWNLOADS)
-                Group {
-                    PickerRow(
-                        SettingsText.DEFAULT_FORMAT,
-                        value = SettingsText.formatLabel(model.defaultFormat),
-                        options = SettingsText.formatOptions.map { it.second },
-                        onSelect = { model.changeDefaultFormat(SettingsText.formatOptions[it].first) },
-                    )
-                    // Android only: the desktop has no metered networks, so downloads always run there.
-                    if (SettingsText.showsMobileData(platformName)) {
-                        Divider()
-                        ToggleRow(SettingsText.DOWNLOAD_OVER_MOBILE, model.downloadOverCellular, model::changeDownloadOverCellular)
+    Column(Modifier.fillMaxSize().screenInsets()) {
+        PageHeader("Settings")
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val split = windowClass == WindowClass.Expanded || (windowClass == WindowClass.Medium && maxWidth >= 900.dp)
+            if (split) {
+                Row(Modifier.fillMaxSize()) {
+                    Column(
+                        Modifier.width(240.dp + margin).fillMaxHeight().verticalScroll(rememberScrollState())
+                            .padding(start = margin, end = 0.dp, top = 8.dp, bottom = bottom),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        for (category in available) {
+                            CategoryRow(category.title, category == selected) { selectedIndex = category.ordinal }
+                        }
                     }
-                    Divider()
-                    ValueRow(SettingsText.DISK_USAGE, DownloadsText.formatBytes(downloaded.sumOf { it.sizeBytes }))
+                    Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(top = 8.dp, bottom = bottom)) {
+                        content(selected, true)
+                    }
                 }
-                if (SettingsText.showsMobileData(platformName)) Footer(SettingsText.DOWNLOADS_FOOTER)
-            }
-
-            Header(SettingsText.PLAYBACK)
-            Group {
-                PickerRow(
-                    SettingsText.STREAMING_OVER_MOBILE,
-                    value = model.cellularQuality.displayName,
-                    options = SettingsText.qualityOptions.map { it.displayName },
-                    onSelect = { model.changeCellularQuality(SettingsText.qualityOptions[it]) },
-                )
-                if (effects != null) {
-                    Divider()
-                    NavigationRow(SettingsText.EQUALISER, equalizer.summary, onClick = { showEqualizer = true })
+            } else {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = bottom)) {
+                    // Maniac Mode first: it changes how everything plays.
+                    for (category in available) content(category, false)
                 }
-                Divider()
-                ToggleRow(SettingsText.NORMALISE, model.normalizeVolume, model::changeNormalizeVolume)
             }
-            Footer(SettingsText.PLAYBACK_FOOTER)
-
-            StorageSection()
-
-            if (session.updates.enabled) UpdatesSection(session.updates)
-
-            AboutSection()
-
-            Spacer(Modifier.height(32.dp))
-            Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.safeDrawing))
         }
+    }
+}
+
+/** A category in the split view's list: blue tint and blue text when selected. */
+@Composable
+private fun CategoryRow(title: String, selected: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(Radii.card)
+    Box(
+        Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(shape)
+            .background(if (selected) TetsubiColors.blueTint else Color.Transparent, shape)
+            .clickable(role = Role.Tab, onClick = onClick)
+            .semantics { this.selected = selected }
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(title, style = tetsubiType.rowTitle, color = if (selected) TetsubiColors.blue else TetsubiColors.textPrimary, maxLines = 1)
     }
 }
 
 @Composable
 private fun ServerSection(api: JellyfinApi, userName: String?, onSignOut: () -> Unit) {
-    Header(SettingsText.SERVER)
-    Group {
+    SettingsGroup(title = SettingsText.SERVER) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            SelectionContainer { Text(api.baseUrl, color = secondary, fontSize = 17.sp) }
-            userName?.let { Text("Signed in as $it", color = secondary, fontSize = 15.sp) }
-            Text(SettingsText.savedIn(platformName), color = tertiary, fontSize = 12.sp)
+            SelectionContainer { Text(api.baseUrl, style = tetsubiType.rowTitle.copy(fontWeight = FontWeight.Normal), color = TetsubiColors.textSecondary) }
+            userName?.let { Text("Signed in as $it", style = tetsubiType.body, color = TetsubiColors.textSecondary) }
+            Text(SettingsText.savedIn(platformName), style = tetsubiType.caption, color = TetsubiColors.textTertiary)
         }
-        Divider()
-        Row(
-            Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onSignOut).heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        GroupDivider()
+        SettingsRow(SettingsText.SIGN_OUT, titleColor = TetsubiColors.red, divider = false, onClick = onSignOut) {
             SignOutIcon(20.dp, TetsubiColors.red)
-            Text(SettingsText.SIGN_OUT, color = TetsubiColors.red, fontSize = 17.sp)
         }
+    }
+}
+
+@Composable
+private fun DownloadsSection(model: SettingsModel, manager: gg.dekiru.musicplayer.downloads.DownloadManager) {
+    val downloaded by manager.downloaded.collectAsState()
+    // Android only: the desktop has no metered networks, so downloads always run there.
+    val mobile = SettingsText.showsMobileData(platformName)
+    SettingsGroup(title = SettingsText.DOWNLOADS, footer = SettingsText.DOWNLOADS_FOOTER.takeIf { mobile }) {
+        SettingsPickerRow(
+            SettingsText.DEFAULT_FORMAT,
+            value = SettingsText.formatLabel(model.defaultFormat),
+            options = SettingsText.formatOptions.map { it.second },
+            onSelect = { model.changeDefaultFormat(SettingsText.formatOptions[it].first) },
+        )
+        if (mobile) SettingsToggleRow(SettingsText.DOWNLOAD_OVER_MOBILE, model.downloadOverCellular, model::changeDownloadOverCellular)
+        SettingsRow(SettingsText.DISK_USAGE, divider = false) { SettingsValue(DownloadsText.formatBytes(downloaded.sumOf { it.sizeBytes })) }
+    }
+}
+
+@Composable
+private fun PlaybackSection(model: SettingsModel, equalizer: EqualizerModel, showsEqualizerRow: Boolean, onOpenEqualizer: () -> Unit) {
+    SettingsGroup(title = SettingsText.PLAYBACK, footer = SettingsText.PLAYBACK_FOOTER) {
+        SettingsPickerRow(
+            SettingsText.STREAMING_OVER_MOBILE,
+            value = model.cellularQuality.displayName,
+            options = SettingsText.qualityOptions.map { it.displayName },
+            onSelect = { model.changeCellularQuality(SettingsText.qualityOptions[it]) },
+        )
+        if (showsEqualizerRow) {
+            SettingsRow(SettingsText.EQUALISER, onClick = onOpenEqualizer) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SettingsValue(equalizer.summary)
+                    ChevronRightIcon(14.dp, TetsubiColors.textTertiary)
+                }
+            }
+        }
+        SettingsToggleRow(SettingsText.NORMALISE, model.normalizeVolume, model::changeNormalizeVolume, divider = false)
     }
 }
 
@@ -202,12 +252,11 @@ private fun StorageSection() {
     var bytes by remember { mutableLongStateOf(0L) }
     LaunchedEffect(loader) { bytes = withContext(Dispatchers.Default) { loader.diskCache?.size ?: 0L } }
 
-    Header(SettingsText.STORAGE)
-    Group {
-        ValueRow(SettingsText.ART_CACHE, DownloadsText.formatBytes(bytes))
-        Divider()
-        Row(
-            Modifier.fillMaxWidth().clickable(role = Role.Button) {
+    SettingsGroup(title = SettingsText.STORAGE) {
+        SettingsRow(SettingsText.ART_CACHE) { SettingsValue(DownloadsText.formatBytes(bytes)) }
+        SettingsRow(
+            SettingsText.CLEAR_IMAGE_CACHE, titleColor = TetsubiColors.red, divider = false,
+            onClick = {
                 // Art already on screen stays until it's loaded again.
                 loader.memoryCache?.clear()
                 scope.launch {
@@ -216,38 +265,33 @@ private fun StorageSection() {
                         loader.diskCache?.size ?: 0L
                     }
                 }
-            }.heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) { Text(SettingsText.CLEAR_IMAGE_CACHE, color = TetsubiColors.red, fontSize = 17.sp) }
+            },
+        )
     }
 }
 
 /** The GitHub update check (Android and Linux): the switch, Check now with what it found, and what is sent. */
 @Composable
 private fun UpdatesSection(updates: UpdateChecker) {
-    Header(SettingsText.UPDATES)
-    Group {
-        ToggleRow(SettingsText.CHECK_FOR_UPDATES, updates.checkForUpdates, updates::changeCheckForUpdates)
-        Divider()
-        Row(
-            Modifier.fillMaxWidth().clickable(enabled = !updates.checking, role = Role.Button) { updates.checkNow() }
-                .heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(SettingsText.CHECK_NOW, color = if (updates.checking) tertiary else TetsubiColors.blue, fontSize = 17.sp)
-                updates.status?.let { Text(it, color = secondary, fontSize = 12.sp) }
-            }
-            Text(SettingsText.version, color = secondary, fontSize = 17.sp)
-        }
+    SettingsGroup(title = SettingsText.UPDATES, footer = SettingsText.UPDATES_FOOTER) {
+        SettingsToggleRow(SettingsText.CHECK_FOR_UPDATES, updates.checkForUpdates, updates::changeCheckForUpdates)
+        SettingsRow(
+            SettingsText.CHECK_NOW, caption = updates.status, divider = false, titleColor = if (updates.checking) TetsubiColors.textTertiary else TetsubiColors.blue,
+            onClick = if (updates.checking) null else ({ updates.checkNow() }),
+        ) { SettingsValue(SettingsText.version) }
     }
-    Footer(SettingsText.UPDATES_FOOTER)
 }
 
 @Composable
 private fun AboutSection() {
-    Header(SettingsText.ABOUT)
-    Group {
+    SettingsGroup(
+        title = SettingsText.ABOUT,
+        footerText = buildAnnotatedString {
+            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(SettingsText.QA_TEAM) }
+            append("\n" + SettingsText.QA_TEAM_LINE + "\n\n")
+            append(SettingsText.ABOUT_FOOTER)
+        },
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)
                 .clearAndSetSemantics { contentDescription = "${SettingsText.APP_NAME}, ${SettingsText.TAGLINE}" },
@@ -256,104 +300,34 @@ private fun AboutSection() {
         ) {
             Image(painterResource(Res.drawable.disc), contentDescription = null, modifier = Modifier.size(52.dp))
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(SettingsText.APP_NAME, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text(SettingsText.TAGLINE, color = TetsubiColors.albumArtistText, fontSize = 15.sp)
+                Text(SettingsText.APP_NAME, style = tetsubiType.sectionTitle, color = TetsubiColors.textPrimary)
+                Text(SettingsText.TAGLINE, style = tetsubiType.body, color = TetsubiColors.textSecondary)
             }
         }
-        Divider()
-        ValueRow(SettingsText.VERSION, SettingsText.version)
-        Divider()
-        ValueRow(SettingsText.ARTIST_INFORMATION, SettingsText.ARTIST_SOURCES)
-    }
-    Footer(buildAnnotatedString {
-        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(SettingsText.QA_TEAM) }
-        append("\n" + SettingsText.QA_TEAM_LINE + "\n\n")
-        append(SettingsText.ABOUT_FOOTER)
-    })
-}
-
-@Composable
-internal fun Header(title: String) {
-    Text(
-        title.uppercase(), color = secondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.fillMaxWidth().padding(start = 32.dp, end = 20.dp, top = 24.dp, bottom = 6.dp).semantics { heading() },
-    )
-}
-
-@Composable
-internal fun Footer(text: String) = Footer(AnnotatedString(text))
-
-@Composable
-internal fun Footer(text: AnnotatedString) {
-    Text(text, color = secondary, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.fillMaxWidth().padding(start = 32.dp, end = 32.dp, top = 6.dp))
-}
-
-/** Rows in one rounded box over the background picture, as an iOS grouped form. */
-@Composable
-internal fun Group(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(12.dp)).background(TetsubiColors.groupBackground), content = content)
-}
-
-@Composable
-internal fun Divider() {
-    Box(Modifier.fillMaxWidth().padding(start = 16.dp).height(0.5.dp).background(divider))
-}
-
-@Composable
-internal fun ToggleRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit, caption: String? = null) {
-    Row(
-        Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
-            .heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, color = Color.White, fontSize = 17.sp)
-            caption?.let { Text(it, color = secondary, fontSize = 12.sp) }
-        }
-        Switch(
-            checked = checked, onCheckedChange = null,
-            colors = SwitchDefaults.colors(checkedTrackColor = TetsubiColors.green, checkedThumbColor = Color.White, checkedBorderColor = TetsubiColors.green),
-        )
+        GroupDivider()
+        SettingsRow(SettingsText.VERSION) { SettingsValue(SettingsText.version) }
+        SettingsRow(SettingsText.ARTIST_INFORMATION, divider = false) { SettingsValue(SettingsText.ARTIST_SOURCES) }
     }
 }
 
+/** The hairline between a group's free-form block and its rows. */
 @Composable
-internal fun ValueRow(title: String, value: String) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = Color.White, fontSize = 17.sp, modifier = Modifier.weight(1f))
-        Text(value, color = secondary, fontSize = 17.sp)
-    }
-}
-
-/** A row that opens another page: its value, then "›" (as an iOS navigation link). */
-@Composable
-internal fun NavigationRow(title: String, value: String, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(title, color = Color.White, fontSize = 17.sp, modifier = Modifier.weight(1f))
-        Text(value, color = secondary, fontSize = 17.sp)
-        ChevronRightIcon(14.dp, tertiary)
-    }
+private fun GroupDivider() {
+    Box(Modifier.fillMaxWidth().padding(start = 16.dp).height(0.5.dp).background(TetsubiColors.hairline))
 }
 
 /** A row that opens a menu of choices (as an iOS menu picker). */
 @Composable
-internal fun PickerRow(title: String, value: String, options: List<String>, onSelect: (Int) -> Unit, enabled: Boolean = true) {
+internal fun SettingsPickerRow(title: String, value: String, options: List<String>, onSelect: (Int) -> Unit, enabled: Boolean = true, divider: Boolean = true) {
     var open by remember { mutableStateOf(false) }
-    Row(
-        Modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.DropdownList, onClickLabel = title) { open = true }
-            .alpha(if (enabled) 1f else 0.4f)
-            .heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    SettingsRow(
+        title, divider = divider, onClick = if (enabled) ({ open = true }) else null,
+        modifier = Modifier.alpha(if (enabled) 1f else 0.4f),
     ) {
-        Text(title, color = Color.White, fontSize = 17.sp, modifier = Modifier.weight(1f))
         Box {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(value, color = secondary, fontSize = 17.sp)
-                ChevronUpDownIcon(14.dp, secondary)
+                SettingsValue(value)
+                ChevronUpDownIcon(14.dp, TetsubiColors.textSecondary)
             }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 options.forEachIndexed { i, option ->

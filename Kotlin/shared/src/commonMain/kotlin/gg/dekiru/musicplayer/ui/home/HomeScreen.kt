@@ -1,23 +1,21 @@
 package gg.dekiru.musicplayer.ui.home
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -25,15 +23,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import gg.dekiru.musicplayer.data.api.JellyfinApi
 import gg.dekiru.musicplayer.data.models.JellyfinAlbum
 import gg.dekiru.musicplayer.data.models.JellyfinPlaylist
@@ -41,55 +37,38 @@ import gg.dekiru.musicplayer.data.network.NetworkState
 import gg.dekiru.musicplayer.data.update.UpdateChecker
 import gg.dekiru.musicplayer.data.update.UpdateInfo
 import gg.dekiru.musicplayer.data.update.UpdateText
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalUriHandler
 import gg.dekiru.musicplayer.downloads.DownloadManager
 import gg.dekiru.musicplayer.downloads.DownloadedAlbum
-import gg.dekiru.musicplayer.ui.downloads.coverPath
-import gg.dekiru.musicplayer.ui.playlist.PlaylistRow
-import gg.dekiru.musicplayer.ui.playlist.PlaylistsModel
-import gg.dekiru.musicplayer.ui.downloads.rememberIsDownloaded
 import gg.dekiru.musicplayer.ui.TetsubiColors
-import gg.dekiru.musicplayer.ui.components.AlbumRow
-import gg.dekiru.musicplayer.ui.components.AlbumRowPlaceholder
-import gg.dekiru.musicplayer.ui.components.ChevronRightIcon
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.platform.LocalDensity
-import gg.dekiru.musicplayer.ui.library.CardGrid
-import gg.dekiru.musicplayer.ui.library.GridZoom
-import gg.dekiru.musicplayer.ui.library.GridZoomButtons
-import gg.dekiru.musicplayer.ui.library.LibraryModel
-import gg.dekiru.musicplayer.ui.library.isWideLayout
+import gg.dekiru.musicplayer.ui.components.ActionChip
+import gg.dekiru.musicplayer.ui.components.AlbumShelf
+import gg.dekiru.musicplayer.ui.components.AlbumShelfPlaceholder
+import gg.dekiru.musicplayer.ui.components.Banner
+import gg.dekiru.musicplayer.ui.components.BannerKind
+import gg.dekiru.musicplayer.ui.components.HeaderIconButton
+import gg.dekiru.musicplayer.ui.components.PageHeader
+import gg.dekiru.musicplayer.ui.components.RetryIcon
+import gg.dekiru.musicplayer.ui.components.SectionHeader
+import gg.dekiru.musicplayer.ui.downloads.coverPath
+import gg.dekiru.musicplayer.ui.downloads.rememberIsDownloaded
+import gg.dekiru.musicplayer.ui.layout.LocalWindowClass
+import gg.dekiru.musicplayer.ui.layout.rememberBottomInset
+import gg.dekiru.musicplayer.ui.layout.screenInsets
+import gg.dekiru.musicplayer.ui.playlist.PlaylistShelf
+import gg.dekiru.musicplayer.ui.playlist.PlaylistsModel
+import gg.dekiru.musicplayer.ui.tetsubiType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 /**
- * Home (as `HomeView` on iOS): titled, horizontally scrolling rows over the
- * background picture. Pull down to reload. Signing out is in Settings, as
- * iOS. Offline: a banner and the downloaded albums only.
- * A Playlists row follows Favourites when there's at least one playlist;
- * its › goes to the Library's Playlists tab ([onMorePlaylists]).
- * Wide layouts (with [zoom]): every row's cards follow the grids' shared
- * cards-per-row setting, a third of the next card showing at the end
- * ([LibraryModel.homeRow]), and the − / + buttons sit at the right of a
- * top row that stays put (iOS: Home's toolbar). Phones: no top row.
+ * Home (as `HomeView` on iOS): a page header (Refresh) over shelves of the app's cards, each with a
+ * section header and "See all". The cards are the grid's own, so the card size setting changes them
+ * too; on a narrow window the next card peeks in at the edge. Pull down to reload. Signing out is in
+ * Settings, as iOS. Offline: a banner and the downloaded albums only.
+ * A Playlists shelf follows Random albums when there's at least one playlist;
+ * its "See all" goes to the Library's Playlists tab ([onMorePlaylists]).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,9 +82,8 @@ fun HomeScreen(
     playlists: PlaylistsModel? = null,
     onOpenPlaylist: (JellyfinPlaylist) -> Unit = {},
     onMorePlaylists: () -> Unit = {},
-    /** Recently Played's ›: the Recently Played page. */
+    /** Recently Played's "See all": the Recently Played page. */
     onMoreRecentlyPlayed: () -> Unit = {},
-    zoom: GridZoom? = null,
     updates: UpdateChecker? = null,
     /** Why nothing can play here (Linux without libmpv), shown as a banner; null: nothing to say. */
     playerUnavailable: String? = null,
@@ -119,100 +97,79 @@ fun HomeScreen(
     val downloadedAlbums by (downloads?.downloaded ?: emptyDownloads).collectAsState()
     val downloadedRow = remember(downloadedAlbums) { HomeModel.downloadedRow(downloadedAlbums) }
     val isDownloaded = rememberIsDownloaded(downloads)
-    // Scrolling content stops below the status bar; the bottom inset is padding inside the list.
-    val insets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom).asPaddingValues()
-    val wide = zoom != null && isWideLayout()
-    val density = LocalDensity.current.density
+    val bottom = rememberBottomInset()
+    fun reload() {
+        model.refresh()
+        playlists?.load()
+    }
 
-    PullToRefreshBox(
-        isRefreshing = model.isLoading && hasAnyAlbums(model) && !model.isOffline,
-        onRefresh = {
-            model.refresh()
-            playlists?.load()
-        },
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
-            // Wide: a top row that stays put, with the zoom buttons.
-            if (wide) TopRow(zoom)
-            BoxWithConstraints(Modifier.weight(1f)) {
-                val row = LibraryModel.homeRow(maxWidth.value, wide, zoom?.columns, density)
-                if (wide) SideEffect { zoom.shown = row.columns }
-                val size = row.takeIf { wide }
-                LazyColumn(
-                    state = rememberLazyListState(),
-                    contentPadding = insets,
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    // A newer release (Android and Linux), above everything else, offline too.
-                    updates?.banner?.let { update -> item(key = "update-${update.version}") { UpdateBanner(update, onSkip = updates::skip) } }
-                    // No player on this system (Linux without libmpv), offline too.
-                    playerUnavailable?.let { message -> item(key = "player-unavailable") { StatusBanner(message) } }
-                    if (model.isOffline) {
-                        item { StatusBanner(OFFLINE_MESSAGE, icon = "\u2298") }
-                        section("Downloaded")
-                        item(key = "row-Downloaded") {
-                            if (downloadedRow.isNotEmpty()) {
-                                AlbumRow(api, downloadedRow, onOpen, localArt = { album -> downloads.coverPath(album) }, isDownloaded = isDownloaded, size = size)
-                            } else {
-                                EmptyLine("No downloaded albums yet.")
-                            }
-                        }
-                        // Downloaded playlists, when there are any (as online: no row without playlists).
-                        val offlinePlaylists = playlists?.playlists.orEmpty()
-                        if (playlists != null && offlinePlaylists.isNotEmpty()) {
-                            section("Playlists", onMorePlaylists)
-                            item(key = "row-Playlists") { PlaylistRow(api, playlists, offlinePlaylists, onOpenPlaylist, size) }
-                        }
-                        item { androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp)) }
-                        return@LazyColumn
-                    }
-                    model.errorMessage?.takeIf { !model.isLoading }?.let { error ->
-                        item {
-                            StatusBanner("Can't reach your Jellyfin server. $error", "Retry", action = {
-                                model.refresh()
-                                playlists?.load()
-                            })
+    Column(Modifier.fillMaxSize().screenInsets()) {
+        PageHeader("Home") {
+            if (!model.isOffline) HeaderIconButton("Refresh", ::reload) { RetryIcon(22.dp, TetsubiColors.textPrimary) }
+        }
+        PullToRefreshBox(
+            isRefreshing = model.isLoading && hasAnyAlbums(model) && !model.isOffline,
+            onRefresh = ::reload,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) {
+            LazyColumn(
+                state = rememberLazyListState(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp + bottom),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                // A newer release (Android and Linux), above everything else, offline too.
+                updates?.banner?.let { update -> item(key = "update-${update.version}") { UpdateBanner(update, onSkip = updates::skip) } }
+                // No player on this system (Linux without libmpv), offline too.
+                playerUnavailable?.let { message -> item(key = "player-unavailable") { StatusBanner(message) } }
+                if (model.isOffline) {
+                    item { StatusBanner(OFFLINE_MESSAGE, kind = BannerKind.Offline) }
+                    section("Downloaded")
+                    item(key = "row-Downloaded") {
+                        if (downloadedRow.isNotEmpty()) {
+                            AlbumShelf(api, downloadedRow, onOpen, localArt = { album -> downloads.coverPath(album) }, isDownloaded = isDownloaded)
+                        } else {
+                            EmptyLine("No downloaded albums yet.")
                         }
                     }
-
-                    // On This Day first: the most distinctive row. Shown while Home
-                    // loads and when something matched; hidden otherwise.
-                    if (model.onThisDay.isNotEmpty() || model.isLoading) {
-                        section("On This Day")
-                        item(key = "row-On This Day") {
-                            if (model.onThisDay.isNotEmpty()) {
-                                AlbumRow(
-                                    api, model.onThisDay.map { it.album }, onOpen,
-                                    badge = { album -> model.onThisDay.firstOrNull { it.album.id == album.id }?.label },
-                                    isDownloaded = isDownloaded, size = size,
-                                )
-                            } else {
-                                AlbumRowPlaceholder(size)
-                            }
-                        }
-                    }
-                    albumSection("Favourites", model.favoriteAlbums, model.isLoading, "No favourite albums yet.", api, onOpen, isDownloaded, size) { onMore(AlbumList.FAVOURITES) }
-                    albumSection("Random Albums", model.randomAlbums, model.isLoading, "No random albums available.", api, onOpen, isDownloaded, size) { onMore(AlbumList.RANDOM) }
-                    val playlistRow = playlists?.playlists.orEmpty()
-                    if (playlists != null && playlistRow.isNotEmpty()) {
+                    // Downloaded playlists, when there are any (as online: no shelf without playlists).
+                    val offlinePlaylists = playlists?.playlists.orEmpty()
+                    if (playlists != null && offlinePlaylists.isNotEmpty()) {
                         section("Playlists", onMorePlaylists)
-                        item(key = "row-Playlists") { PlaylistRow(api, playlists, playlistRow, onOpenPlaylist, size) }
+                        item(key = "row-Playlists") { PlaylistShelf(api, playlists, offlinePlaylists, onOpenPlaylist) }
                     }
-                    albumSection("Recently Played", model.recentlyPlayed, model.isLoading, "No recently played music yet.", api, onOpen, isDownloaded, size, onMoreRecentlyPlayed)
-                    albumSection("Recently Added", model.recentlyAdded, model.isLoading, "No recently added music.", api, onOpen, isDownloaded, size)
-                    item { androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp)) }
+                    return@LazyColumn
                 }
+                model.errorMessage?.takeIf { !model.isLoading }?.let { error ->
+                    item { StatusBanner("Can't reach your Jellyfin server. $error", "Retry", action = ::reload) }
+                }
+
+                // On this day first: the most distinctive shelf. Shown while Home
+                // loads and when something matched; hidden otherwise.
+                if (model.onThisDay.isNotEmpty() || model.isLoading) {
+                    section("On this day")
+                    item(key = "row-On this day") {
+                        if (model.onThisDay.isNotEmpty()) {
+                            AlbumShelf(
+                                api, model.onThisDay.map { it.album }, onOpen,
+                                badge = { album -> model.onThisDay.firstOrNull { it.album.id == album.id }?.label },
+                                isDownloaded = isDownloaded,
+                            )
+                        } else {
+                            AlbumShelfPlaceholder()
+                        }
+                    }
+                }
+                albumSection("Favourites", model.favoriteAlbums, model.isLoading, "No favourite albums yet.", api, onOpen, isDownloaded) { onMore(AlbumList.FAVOURITES) }
+                albumSection("Random albums", model.randomAlbums, model.isLoading, "No random albums available.", api, onOpen, isDownloaded) { onMore(AlbumList.RANDOM) }
+                val playlistRow = playlists?.playlists.orEmpty()
+                if (playlists != null && playlistRow.isNotEmpty()) {
+                    section("Playlists", onMorePlaylists)
+                    item(key = "row-Playlists") { PlaylistShelf(api, playlists, playlistRow, onOpenPlaylist) }
+                }
+                albumSection("Recently played", model.recentlyPlayed, model.isLoading, "No recently played music yet.", api, onOpen, isDownloaded, onMoreRecentlyPlayed)
+                albumSection("Recently added", model.recentlyAdded, model.isLoading, "No recently added music.", api, onOpen, isDownloaded)
             }
         }
-    }
-}
-
-/** Wide layouts: the zoom buttons at the top right (as iOS's trailing toolbar items). */
-@Composable
-private fun TopRow(zoom: GridZoom) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-        GridZoomButtons(zoom)
     }
 }
 
@@ -220,32 +177,9 @@ private fun hasAnyAlbums(model: HomeModel) =
     model.onThisDay.isNotEmpty() || model.favoriteAlbums.isNotEmpty() || model.recentlyPlayed.isNotEmpty() ||
         model.recentlyAdded.isNotEmpty() || model.randomAlbums.isNotEmpty()
 
-/** A row title; with `onMore`, a › on the right opens the full list. */
+/** A shelf title (20 semibold); with `onMore`, a blue "See all" on the right opens the full list. */
 private fun LazyListScope.section(title: String, onMore: (() -> Unit)? = null) {
-    item(key = "title-$title") {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 20.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                title,
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f).semantics { heading() },
-            )
-            if (onMore != null) {
-                Box(
-                    Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(50))
-                        .clickable(role = Role.Button, onClick = onMore)
-                        .semantics { contentDescription = "View all $title" },
-                    contentAlignment = Alignment.Center,
-                ) { ChevronRightIcon(26.dp, TetsubiColors.blue) }
-            }
-        }
-    }
+    item(key = "title-$title") { SectionHeader(title, Modifier.padding(top = 8.dp), onSeeAll = onMore) }
 }
 
 private fun LazyListScope.albumSection(
@@ -256,14 +190,13 @@ private fun LazyListScope.albumSection(
     api: JellyfinApi,
     onOpen: (JellyfinAlbum) -> Unit,
     isDownloaded: (JellyfinAlbum) -> Boolean,
-    size: CardGrid?,
     onMore: (() -> Unit)? = null,
 ) {
     section(title, onMore)
     item(key = "row-$title") {
         when {
-            albums.isNotEmpty() -> AlbumRow(api, albums, onOpen, isDownloaded = isDownloaded, size = size)
-            isLoading -> AlbumRowPlaceholder(size)
+            albums.isNotEmpty() -> AlbumShelf(api, albums, onOpen, isDownloaded = isDownloaded)
+            isLoading -> AlbumShelfPlaceholder()
             else -> EmptyLine(emptyMessage)
         }
     }
@@ -271,30 +204,19 @@ private fun LazyListScope.albumSection(
 
 @Composable
 private fun EmptyLine(message: String) {
-    Text(message, color = TetsubiColors.albumYearText, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+    Text(
+        message, style = tetsubiType.body, color = TetsubiColors.textSecondary,
+        modifier = Modifier.padding(horizontal = LocalWindowClass.current.pageMargin, vertical = 4.dp),
+    )
 }
 
 /** Shown on Home while offline (as `StatusBanner.offline` on iOS). */
 const val OFFLINE_MESSAGE = "You're offline. Downloaded albums still play from the Downloads tab."
 
-/** An offline / server-error notice at the top of a screen (as `StatusBanner` on iOS). */
+/** An offline / server-error notice at the top of a screen (as `StatusBanner` on iOS): the one [Banner] style. */
 @Composable
-fun StatusBanner(message: String, actionTitle: String? = null, action: (() -> Unit)? = null, icon: String = "\u26A0") {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .background(TetsubiColors.groupBackground, RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(icon, color = TetsubiColors.pink, fontSize = 15.sp)
-        Text(message, color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        if (actionTitle != null && action != null) {
-            OutlinedButton(onClick = action) { Text(actionTitle, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
-        }
-    }
+fun StatusBanner(message: String, actionTitle: String? = null, action: (() -> Unit)? = null, kind: BannerKind = BannerKind.Warning) {
+    Banner(message, kind = kind, actionTitle = actionTitle, onAction = action)
 }
 
 /**
@@ -307,23 +229,11 @@ fun StatusBanner(message: String, actionTitle: String? = null, action: (() -> Un
 fun UpdateBanner(update: UpdateInfo, onSkip: () -> Unit) {
     val uri = LocalUriHandler.current
     var showNotes by rememberSaveable(update.version) { mutableStateOf(false) }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .background(TetsubiColors.groupBackground, RoundedCornerShape(12.dp))
-            .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("\u2193", color = TetsubiColors.blue, fontSize = 15.sp)
-            Text(UpdateText.available(update.version), color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        }
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { runCatching { uri.openUri(update.pageUrl) } }) {
-                Text(UpdateText.DOWNLOAD, color = TetsubiColors.blue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-            TextButton(onClick = { showNotes = true }) { Text(UpdateText.WHATS_NEW, color = TetsubiColors.blue, fontSize = 13.sp) }
-            TextButton(onClick = onSkip) { Text(UpdateText.SKIP, color = TetsubiColors.albumArtistText, fontSize = 13.sp) }
+    Banner(UpdateText.available(update.version), kind = BannerKind.Update) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionChip(UpdateText.DOWNLOAD, { runCatching { uri.openUri(update.pageUrl) } }, color = TetsubiColors.blue)
+            ActionChip(UpdateText.WHATS_NEW, { showNotes = true })
+            ActionChip(UpdateText.SKIP, onSkip, color = TetsubiColors.textSecondary)
         }
     }
     if (showNotes) {
