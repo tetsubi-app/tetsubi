@@ -342,7 +342,7 @@ public struct DownloadsView: View {
         let paused = state.status == .paused
         let failed = state.status == .failed
         DownloadingCard(
-            art: mgr.artRequest(for: state.albumID), title: state.title, subtitle: state.artistName,
+            art: mgr.artRequest(for: state.albumID, size: 100), title: state.title, subtitle: state.artistName,
             detail: state.format.displayName + " · "
                 + String(format: "%d/%d tracks", state.completedTracks, state.expectedTrackCount),
             status: state.status, progress: state.progress, errorMessage: state.errorMessage,

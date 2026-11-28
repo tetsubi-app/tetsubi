@@ -102,6 +102,8 @@ Items marked "unverified" were built and unit-tested but had not been checked on
 
 ### Downloads
 
+**Downloads cards must ask for card-sized art, not a thumbnail.** `DownloadManager.artRequest(for:size:)` returns the 600 px cover saved with the download (it works offline) and falls back to a 600 px server request; only requests of `thumbnailSize` (200) or less, such as the 40 pt "downloading" rows, come from the server at that size. After the redesign the cards are about 170 pt wide (roughly 500 px on a phone), and the old fixed 100 px request looked blurry. Kotlin sizes the request from the card width (`artPixels`) and prefers `coverPath`.
+
 **URLSession deletes the temporary file when `didFinishDownloadingTo` returns.** Move the file synchronously inside the delegate callback before hopping to the main actor; otherwise the album is marked complete with no files on disk.
 
 **Use one background `URLSession` per process.** `DownloadSessionDelegate.shared` owns it with the identifier `<bundle id>.downloads` and falls back to a default session when there is no bundle ID, as under `swift test`. The iOS `AppDelegate` must forward `handleEventsForBackgroundURLSession` to `DownloadManager.handleBackgroundEvents`.

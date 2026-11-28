@@ -305,10 +305,27 @@ public final class DownloadManager {
 
     private let api: JellyfinAPI
 
-    /// Cover-art request for an album, for the Downloads list.
-    public func artRequest(for albumID: String) -> URLRequest? {
-        api.imageURLRequest(for: albumID, size: 100)
+    /// Cover-art request for an album in the Downloads page. Card-sized
+    /// requests (the default) use the cover saved with the download, which is
+    /// `coverSize` pixels and works offline, and otherwise ask the server for
+    /// the same size; small thumbnails ask for `size` directly.
+    public func artRequest(for albumID: String, size: Int? = nil) -> URLRequest? {
+        let size = size ?? Self.coverSize
+        return Self.artRequest(albumID: albumID, size: size, saved: DownloadPaths.savedCover(albumID:)) {
+            api.imageURLRequest(for: albumID, size: size)
+        }
     }
+
+    /// The choice made by `artRequest(for:size:)`, apart from the API, so it can be tested:
+    /// a saved cover wins whenever the picture is bigger than a thumbnail.
+    nonisolated static func artRequest(albumID: String, size: Int, saved: (String) -> URL?,
+                           remote: () -> URLRequest?) -> URLRequest? {
+        if size > thumbnailSize, let url = saved(albumID) { return URLRequest(url: url) }
+        return remote()
+    }
+
+    /// Requests up to this many pixels are thumbnails, fetched from the server.
+    nonisolated static let thumbnailSize = 200
     private let stream: StreamURLBuilder
     private let delegate = DownloadSessionDelegate.shared
     private var session: URLSession { delegate.session }
