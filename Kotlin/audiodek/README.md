@@ -20,7 +20,7 @@ val frames = decoder.decode(sample, 0, sample.size, pcm) // one MP4 sample -> in
   mixed stereo, adaptive Golomb residuals, both predictor passes, shifted low bytes, uncompressed
   (escape) frames, partial last frames, DSE and FIL elements.
 - Output: interleaved Ints, right-justified, sign-extended to the file's bit depth (20-bit audio gives 20-bit
-  values), channels in ALAC's order. `AudioDekChannels.toWave` reorders to WAVE order (what Android expects).
+  values), channels in ALAC's order. `AudioDekChannels.toWave` reorders to WAVE order (what Android expects; it equals FFmpeg's decoder output for every count 1..8). `AudioDekChannels.layout(n)` names the ALAC order and the Android speaker mask for each count (4 channels = `CHANNEL_OUT_SURROUND`, not quad), which the Media3 renderer sets as `Format.channelMask`.
 - Corrupt, truncated or unsupported input throws `AudioDekAlacException`, nothing else. The decoder can
   be used again after an error. Not thread safe; no allocation per sample.
 - Not supported: channel coupling elements (CCE) and program config elements (PCE), which ALAC files do not use.
@@ -42,6 +42,16 @@ Frames built by hand cover paths the encoders rarely take (`AudioDekFrameTest`: 
 mode, wraparound, mix fields, DSE/FIL, escape frames), and `AudioDekRobustnessTest` truncates every fixture frame
 at many lengths, flips bytes at random and feeds garbage: only a decoded frame or `AudioDekAlacException` may come
 out. `AudioDekSpeedTest` decodes 60 s of 44.1 kHz/16-bit stereo at hundreds of times real time on a laptop JVM.
+
+## Channel order, verified against FFmpeg
+
+`src/test/resources/alac/channels` holds, for every channel count 1 to 8, 50 ms at 48 kHz/16-bit with a different constant and tone in
+each channel, encoded by `ffmpeg -c:a alac` (`.ff`) and `afconvert` (`.afc`; 6.1 and 7.1 need its `-m` to ALAC order), plus
+`channels-manifest.txt` with the SHA-256 of FFmpeg's own decode of each file (interleaved s16le: the reference order).
+`AudioDekChannelOrderTest` requires audioDEK's decode + `toWave` to equal it sample for sample, and each output channel to be the
+channel that was encoded at that position. FFmpeg and Apple's encoder gave identical decodes for all eight counts. Regenerate with
+`tools/make-channel-fixtures.sh`. What is only reasoned: which physical speaker each position reaches on Android (`layout()`'s mask
+table) and that 7.1's Lc/Rc go to the side speakers (Android has no wide-front slot in its 8-channel layout).
 
 ## What is not claimed
 

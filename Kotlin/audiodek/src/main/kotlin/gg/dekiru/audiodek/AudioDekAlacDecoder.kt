@@ -449,6 +449,49 @@ object AudioDekChannels {
         intArrayOf(2, 6, 7, 0, 1, 4, 5, 3),
     )
 
+    /** Android `AudioFormat.CHANNEL_OUT_*` speaker bits (constants copied so this module stays free of Android). */
+    private const val FL = 0x4
+    private const val FR = 0x8
+    private const val FC = 0x10
+    private const val LFE = 0x20
+    private const val BL = 0x40
+    private const val BR = 0x80
+    private const val BC = 0x400
+    private const val SL = 0x800
+    private const val SR = 0x1000
+
+    /**
+     * Where an ALAC layout goes on Android: its channels' names in ALAC order, the Android speaker each is played
+     * on ([speakers], by ALAC channel index, in the output order of [AudioDekChannels.toWave]), and the
+     * `CHANNEL_OUT_*` mask that has exactly those speakers ([androidMask]; the audio track takes the data in
+     * ascending bit order, which is WAVE order). [explicitMask] is false for mono and stereo, which ExoPlayer's own
+     * count-to-layout map already gets right: no mask is set there.
+     */
+    class Layout(
+        val channels: Int,
+        /** ALAC's channel order, e.g. "C L R Cs". */
+        val alacOrder: String,
+        /** The Android speaker of each ALAC channel, e.g. FC FL FR BC. */
+        val speakers: List<String>,
+        val androidMask: Int,
+        val maskName: String,
+        val explicitMask: Boolean,
+    )
+
+    private val layouts = listOf(
+        Layout(1, "C", listOf("FL"), FL, "MONO", false),
+        Layout(2, "L R", listOf("FL", "FR"), FL or FR, "STEREO", false),
+        Layout(3, "C L R", listOf("FC", "FL", "FR"), FL or FR or FC, "FL|FR|FC", true),
+        Layout(4, "C L R Cs", listOf("FC", "FL", "FR", "BC"), FL or FR or FC or BC, "SURROUND", true),
+        Layout(5, "C L R Ls Rs", listOf("FC", "FL", "FR", "BL", "BR"), FL or FR or FC or BL or BR, "FL|FR|FC|BL|BR", true),
+        Layout(6, "C L R Ls Rs LFE", listOf("FC", "FL", "FR", "BL", "BR", "LFE"), FL or FR or FC or LFE or BL or BR, "5POINT1", true),
+        Layout(7, "C L R Ls Rs Cs LFE", listOf("FC", "FL", "FR", "BL", "BR", "BC", "LFE"), FL or FR or FC or LFE or BL or BR or BC, "5POINT1|BC", true),
+        // Lc/Rc (wide fronts) have no speaker in Android's 8-channel layout: they go to the side speakers.
+        Layout(8, "C Lc Rc L R Ls Rs LFE", listOf("FC", "SL", "SR", "FL", "FR", "BL", "BR", "LFE"), FL or FR or FC or LFE or BL or BR or SL or SR, "7POINT1_SURROUND", true),
+    )
+
+    fun layout(channels: Int): Layout = layouts[channels - 1]
+
     /** `result[alacIndex]` is the WAVE-order position of that channel. */
     fun waveOrder(channels: Int): IntArray = offsets[channels - 1]
 
